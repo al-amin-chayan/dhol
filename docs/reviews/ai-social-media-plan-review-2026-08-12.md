@@ -4,7 +4,7 @@
 **Plan reviewed:** the founding plan in `README.md`  
 **Perspective:** a solo founder operating PoriPati and w3exam from the first week, with a target of 1–2 hours per brand per week and roughly $10–25/month of marginal platform spend
 
-**Price basis:** public USD list prices, before tax, card fees, and currency conversion. Prices and platform rules should be rechecked when buying or submitting an app for review.
+**Price basis:** public USD list prices, before tax, card fees, and currency conversion. Prices and platform rules should be rechecked when buying or submitting an app for review. Server observations are from a read-only SSH inspection on 2026-08-12; no service, file, package, plan, or account was changed.
 
 ## Executive verdict
 
@@ -12,7 +12,7 @@ The overall design is sound: keep brand knowledge in profiles, use AI for eviden
 
 It should **not be deployed exactly as written**, however. Four assumptions need to change first:
 
-1. **Postiz does not fit the current $7 VPS headroom, but VPSDime has a cost-effective remedy.** The plan expects only 8–10 GB free after cleanup. Postiz documents a 20 GB supported disk floor and a 50 GB recommendation; its canonical stack includes Postiz, PostgreSQL, Redis, and Temporal. The existing 6 GB RAM is below the 8 GB recommendation as well. VPSDime's next tier is $14/month for 4 vCPU, 12 GB RAM, 60 GB SSD, and 4 TB transfer—enough to make a measured, R2-backed self-hosted deployment credible for this single-user/two-brand workload. [Postiz system requirements](https://docs.postiz.com/installation/system-requirements), [VPSDime Linux plans](https://vpsdime.com/linux-vps)
+1. **The $14 VPSDime tier remains the cost-optimized self-hosting choice, but the live reason is different from the README's estimate.** The current host has 6 GiB RAM and a nominal 30 GB root disk. At inspection it used only about 1.1 GB RAM and had about 5.0 GiB available, but disk was 82% full. Paperclip accounted for roughly 614 MiB RAM; all three w3exam containers together accounted for only about 190 MiB RAM and approximately 1.36 GB of removable disk. Moving w3exam therefore will not release the assumed 8–10 GB. The real disk consumer is Paperclip's broken, duplicative backup path. Repair that first, preserve Paperclip itself, then upgrade to $14 for 12 GB RAM/60 GB SSD before adding the complete Paperclip + Hermes + n8n + Postiz stack. The $21 tier is unnecessary until measured peaks prove otherwise. [Postiz system requirements](https://docs.postiz.com/installation/system-requirements), [VPSDime Linux plans](https://vpsdime.com/linux-vps)
 2. **Competitor and trend research cannot be fully automated through official social APIs.** TikTok explicitly excludes creators, advertisers, and commercial users from its Research Tools, and Meta's research access is intended for qualified academic/nonprofit research. A commercial founder needs a hybrid process: automate public web/YouTube/owned analytics and manually supply selected competitor links or screenshots. [TikTok Research Tools eligibility](https://developers.tiktok.com/products/research-api/), [TikTok Research API FAQ](https://developers.tiktok.com/doc/research-api-faq), [Meta Content Library overview](https://about.fb.com/news/2023/11/new-tools-to-support-independent-research/)
 3. **The $0 video line is incorrect if ElevenLabs is used commercially.** ElevenLabs' free plan has no commercial license; Starter is currently $6/month and includes one. CapCut is usable as an editor, but its ordinary Sounds are non-commercial and its Commercial Sounds are licensed only for CapCut, TikTok, and TikTok for Business unless separate rights are obtained. [ElevenLabs pricing](https://elevenlabs.io/pricing), [ElevenLabs commercial-use guidance](https://help.elevenlabs.io/hc/en-us/articles/13313564601361-Can-I-publish-the-content-I-generate-on-the-platform), [CapCut Materials License Agreement](https://www.capcut.com/clause/material-license-agreement?lang=en)
 4. **A flat-rate Codex subscription should not be the production cost baseline.** `codex exec` can run scheduled jobs, but OpenAI recommends API keys as the default for automation; ChatGPT-managed authentication is an advanced option. Subscription use has shared five-hour windows and may also have weekly limits. Hermes/Codex can be an opportunistic worker, but the pipeline should still work through a metered API with a hard budget. [Codex non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode), [Codex usage and pricing](https://learn.chatgpt.com/docs/pricing)
@@ -20,12 +20,13 @@ It should **not be deployed exactly as written**, however. Four assumptions need
 My recommended direction is:
 
 - Run **PoriPati and w3exam from day one**, with two separate brand profiles, evidence queues, approval states, and metric views.
-- Keep n8n, Claude API, Telegram approval, Nano Banana 2, a scripted Bangla text renderer, CapCut as an editor, and Cloudflare R2.
-- Prefer the **$14 VPSDime upgrade + self-hosted Postiz + R2** as the lowest recurring-cost automated publisher, subject to the disk audit and canary below. Upload-Post, Metricool, hosted Postiz, and the native hybrid remain fully specified alternatives rather than blockers.
+- Keep Paperclip on this server. Install n8n and Hermes there as required, but isolate their data, credentials, networks, and resource peaks from Paperclip.
+- Prefer the **$14 VPSDime upgrade + self-hosted Postiz + R2** as the lowest recurring-cost automated publisher, after repairing and restore-testing the Paperclip backup. The resize can happen before or after w3exam moves; w3exam timing is not a capacity blocker. Upload-Post, Metricool, hosted Postiz, and the native hybrid remain fully specified alternatives.
+- Keep Claude API, Telegram approval, Nano Banana 2, a scripted Bangla text renderer, and CapCut as an editor. Hermes may absorb noncritical batch work, but a metered API fallback keeps schedules predictable.
 - If attention is tight, stagger **channels**, not brands: either launch four core channels for each brand (eight scheduler connections) or the complete seven-channel footprint for each brand (fourteen connections). Telegram remains direct through the bot.
 - Start with two core ideas **for each brand** per week, then adapt each idea to channel-native outputs. Do not promise 3 reels plus 1–2 statics per brand until measured founder time supports it.
 
-The generation, storage, and monitoring baseline remains roughly **$7–17/month** for both brands without paid voice or X. With the VPSDime upgrade, self-hosted Postiz makes the cash paid for the complete base system **$21–31/month**, including the whole $14 server bill. Because $7 of that server is already committed, the additional cash from today's state is **$14–24/month**. Exact comparisons appear below.
+The generation, storage, and monitoring baseline remains roughly **$7–17/month** for both brands without paid voice or X; n8n and Hermes add no software-license line. With the VPSDime upgrade, self-hosted Postiz makes the cash paid for the complete base system **$21–31/month**, including the whole $14 server bill. Because $7 of that server is already committed, the additional cash from today's state is **$14–24/month**. Exact comparisons appear below.
 
 ## What Postiz facilitates
 
@@ -74,20 +75,67 @@ Two other credible tools were compared but are weaker at this account count:
 
 ## VPSDime sizing and cost optimization
 
+### What the live server actually looks like
+
+The live inspection materially improves the sizing decision. These are point-in-time measurements, not seven-day high-water marks:
+
+| Measured item | 2026-08-12 observation | Planning meaning |
+| --- | ---: | --- |
+| Host allocation | about 4 vCPU, 6 GiB RAM, nominal 30 GB disk, no swap | Memory failure will be abrupt if the combined stack exceeds the cgroup limit; retain at least 2 GiB peak headroom. |
+| Root filesystem | 25.65 GB used, 5.79 GB available, **82% used** | Disk is already in the alert zone; do not pull another multi-GB stack before backup repair or resize. |
+| Host memory | about 1.10 GB used, 5.34 GB available | The current host is not memory-constrained. A snapshot also showed no memory or I/O pressure. |
+| Paperclip | about **614 MiB RAM**, 3.48 GB image, 18.25 GB under `/srv/paperclip` | Keep the application. Its RAM is modest; its backup layout, not its live process, causes most disk pressure. |
+| w3exam, all three containers | about **190 MiB RAM** | Its migration releases little RAM and need not gate the VPS resize. |
+| w3exam reclaimable disk | approximately **1.36 GB** across unique images, PostgreSQL volume, writable layers, and source tree | Removing it will increase free disk to only about 7.1 GB on the current plan—not the assumed 8–10 GB improvement by itself. |
+| Container health | Paperclip running since 2026-05-15 with zero restarts/OOM kills; w3exam containers healthy | Paperclip does not need to move. Preserve it through an in-place plan change and add an external health probe rather than changing the app. |
+
+CPU samples were mostly idle even while the host load average read 4–6; on this LXC the run-queue/load signal was inconsistent with process CPU and pressure data. Do not buy extra vCPU from load average alone. Capture per-cgroup CPU, RAM, and I/O peaks for seven days after each addition.
+
+### Paperclip backup repair is the highest-return optimization
+
+Paperclip itself should remain unchanged, but its host-side backup wrapper needs urgent repair before any resize or new installation:
+
+- `/srv/paperclip/backups` holds seven daily archives totaling **13.56 GB**.
+- Paperclip's live data tree holds **41 hourly compressed PostgreSQL dumps totaling 3.55 GB** at the inspection point. The host job prunes that set to 24 only once per day, then puts all 24 already-compressed dumps inside another daily gzip archive.
+- Each retained daily archive is therefore roughly 1.67–2.21 GB. From August 6 through August 12 its size rose about 90 MB/day; because seven versions are kept, the retained set is growing by roughly **0.6 GB/day**. A 60 or 90 GB disk would only postpone exhaustion if this continues.
+- Every host backup since July 28 exits nonzero because `data/.bash_history` is unreadable. The failed run leaves the tarball behind but stops before checksum creation and final validation. The separate cleanup job retains those archives without requiring a checksum, so the current set is **unverified**, not a dependable restore set.
+- The backup's 3 GB free-space precheck does not reserve space for the new 2+ GB archive. Disk alerts are already firing at 80% and above.
+- The archive includes `.env` and the mounted Paperclip home, which contains credentials. Any remote copy must be client-side encrypted and private.
+
+Repair this without altering the Paperclip application:
+
+1. Make one fresh database dump and archive only that dump—not the preceding 23 dumps—alongside required configuration and non-database application data.
+2. Exclude the exact unreadable history file, live database directory, logs, telemetry, and the internal backup directory. Write to a `.partial` name, fail explicitly on `tar` error, validate with `tar -tzf`, create a checksum, then rename atomically.
+3. Encrypt and upload the verified artifact to a private R2 bucket using restic or an equivalently authenticated/encrypted workflow. Test a database/config restore in a disposable environment.
+4. Only after the restore passes, retire the seven unverified local archives. Keep one or two verified local recovery points and use an R2 lifecycle such as 7 daily + 4 weekly snapshots. Make one job—not two conflicting scripts—the retention authority.
+5. Prune the built-in hourly dump set hourly or configure its own bounded retention, rather than allowing 24–47 copies between daily cleanups.
+
+At today's sizes, one daily archive containing one dump should be hundreds of megabytes rather than about 2 GB. After w3exam removal, replacement of the seven unverified archives with a small verified local set, and continuous hourly-dump retention, the old 30 GB host should fall from roughly 25.65 GB used to around **10–12 GB used**. This is an estimate to verify after repair, but it demonstrates why backup design dominates storage-plan choice. R2 storage for even the current 13.56 GB set would cost only a few cents beyond its 10 GB-month free allowance; budget $0–1/month for encrypted backups plus Dholbeat media rather than paying for storage that duplicate backups will eventually fill.
+
 ### The $14 tier is the sweet spot
 
-Public VPSDime pricing checked on 2026-08-12 shows this unusually favorable step-up. The customer portal remains authoritative for any legacy-plan difference and the exact prorated amount due today.
+Public VPSDime pricing checked on 2026-08-12 shows this unusually favorable step-up. The customer portal remains authoritative for any legacy-plan difference and the exact prorated amount due today. The upgrade is now mainly a **RAM and deployment-headroom purchase** for Postiz + n8n + Hermes, while backup repair solves disk growth.
 
 | VPSDime choice | Host bill | Change from current | Resources | Assessment for this workload |
 | --- | ---: | ---: | --- | --- |
-| **Keep current Linux6GB** | $7/month | $0 | 4 vCPU, 6 GB RAM, 30 GB SSD, 2 TB transfer | CPU meets Postiz's recommendation, but RAM is below it and the repository projects only 8–10 GB free. Use this with a managed/native publisher, not the full Postiz stack. |
+| **Keep current Linux6GB** | $7/month | $0 | 4 vCPU, 6 GB RAM, 30 GB SSD, 2 TB transfer | After backup repair and w3exam removal, this can plausibly run Paperclip + bounded n8n + an isolated Hermes gateway while both brands publish through native tools or a managed publisher. It remains below Postiz's recommended RAM/disk and has no swap, so do not place the full Postiz stack here. |
 | **Add 20 GB storage to current plan** | $12/month | +$5 | 4 vCPU, 6 GB RAM, 50 GB SSD | Technically reaches the disk headline but keeps RAM below recommendation. Saving $2 versus the full plan upgrade is not worth losing 6 GB RAM and 2 TB of additional transfer. |
 | **Add 30 GB storage to current plan** | $14.50/month | +$7.50 | 4 vCPU, 6 GB RAM, 60 GB SSD | Dominated by the $14 plan: it costs $0.50 more and provides half the RAM. VPSDime currently charges $2.50 per extra 10 GB. [Current-plan add-ons](https://vpsdime.com/buy/linux6gb) |
-| **Upgrade to Linux12GB** | **$14/month** | **+$7** | **4 vCPU, 12 GB RAM, 60 GB SSD, 4 TB transfer** | **Recommended.** It clears Postiz's 4 vCPU/8 GB/50 GB recommended headline while R2 supplies the separate persistent upload store. [Linux12GB plan](https://vpsdime.com/buy/linux12gb) |
+| **Upgrade to Linux12GB** | **$14/month** | **+$7** | **4 vCPU, 12 GB RAM, 60 GB SSD, 4 TB transfer** | **Recommended for Paperclip + Hermes + n8n + Postiz.** It clears Postiz's 4 vCPU/8 GB/50 GB recommended headline, doubles host RAM/disk, and R2 supplies the separate upload/backup store. The single-user/two-brand load still needs a seven-day canary because Postiz's recommendation is for its own stack, not this combined host. [Linux12GB plan](https://vpsdime.com/buy/linux12gb) |
 | **Keep current + add a second Linux6GB** | $14/month total | +$7 | Two isolated 4 vCPU/6 GB/30 GB boxes | Same cash and better isolation, but the Postiz box itself remains below recommended RAM/disk and introduces a second host, tunnel, backup, and network boundary. Useful as a disposable bake-off box, not the best steady state. |
-| **Upgrade to Linux18GB** | $21/month | +$14 | 4 vCPU, 18 GB RAM, 90 GB SSD, 6 TB transfer | Do not start here. It adds RAM/disk but no CPU. Move to it only if the measured $14 deployment crosses the explicit thresholds below. [Linux18GB plan](https://vpsdime.com/buy/vd18gb7) |
+| **Upgrade to Linux18GB** | $21/month | +$14 | 4 vCPU, 18 GB RAM, 90 GB SSD, 6 TB transfer | Headroom option, not the default. Choose it immediately only if Hermes must run a local browser/FFmpeg workload concurrently with Postiz, or if the founder prefers $7/month of insurance over staged measurement. Otherwise move to it only when the $14 canary crosses the explicit thresholds below; it adds no CPU. [Linux18GB plan](https://vpsdime.com/buy/vd18gb7) |
 
-VPSDime says a Linux-plan resize is live and instant, keeps the IP, preserves data, and bills only the prorated upgrade for the rest of the current term. A downgrade is also possible if the smaller disk has room, although it produces no refund for the current term. Take an independent backup anyway; “live” is not a substitute for recoverability. [VPSDime upgrade/downgrade procedure](https://vpsdime.com/knowledgebase/client-area/services/upgrade-downgrade)
+VPSDime says a Linux-plan resize is live and instant, keeps the IP, preserves data, and bills only the prorated upgrade for the rest of the current term. A downgrade is also possible if the smaller disk has room, although it produces no refund for the current term. Take and restore-test an independent backup anyway; the current Paperclip archive set does not satisfy that gate. “Live” is not a substitute for recoverability. [VPSDime upgrade/downgrade procedure](https://vpsdime.com/knowledgebase/client-area/services/upgrade-downgrade)
+
+There is no need to block on one exact w3exam migration date. Use whichever sequence matches operational convenience:
+
+| Sequence | What happens | When it is useful |
+| --- | --- | --- |
+| **Repair → resize now → install Hermes/n8n → move w3exam → stage Postiz** | Restore-test Paperclip, resize in place to $14 while current services remain, add isolated Hermes/n8n, then reclaim w3exam and deploy Postiz. | Fastest safe path. The measured w3exam footprint is small enough to coexist temporarily on 12 GB/60 GB. |
+| **Repair → move w3exam → resize → install all three** | Restore-test Paperclip, complete the planned migration, remove only verified w3exam containers/images/volumes, then resize and add Hermes/n8n/Postiz. | Cleanest change window and easiest before/after disk accounting. |
+| **Repair → stay at $7 with Hermes/n8n → use native or managed publishing** | Keep Paperclip plus bounded Hermes/n8n on the current plan after w3exam moves; operate both brands through native schedulers, Upload-Post, Metricool, or hosted Postiz. | Zero infrastructure increase when self-hosted Postiz is not worth the maintenance. Both brands still start; only publisher hosting changes. |
+
+In all three sequences, PoriPati and w3exam operate as brand profiles from the beginning. Migration of the w3exam web application is a server-maintenance concern, not a reason to postpone the w3exam social brand.
 
 Do **not** buy these at launch:
 
@@ -104,72 +152,82 @@ The following includes the complete current/upgraded VPS bill and the $7–17 tw
 | --- | ---: | ---: | ---: |
 | **Native hybrid** | $7 | **$14–24/month** | **$7–17/month** |
 | **Upgrade VPSDime + self-host Postiz** | $14 | **$21–31/month** | **$14–24/month** |
+| **18 GB headroom tier + self-host Postiz** | $21 | **$28–38/month** | **$21–31/month** |
 | **Keep VPS + Upload-Post Basic** | $7 + $16 annual-equivalent | **$30–40/month** | **$23–33/month** |
 | **Keep VPS + Metricool Starter** | $7 + $20 annual-equivalent / $25 monthly | **$34–44 / $39–49** | **$27–37 / $32–42** |
 | **Keep VPS + hosted Postiz Team** | $7 + $39 | **$53–63/month** | **$46–56/month** |
 | **Keep VPS + hosted Postiz Pro** | $7 + $49 | **$63–73/month** | **$56–66/month** |
 
-The self-hosted upgrade saves **$9/month or $108/year** versus Upload-Post Basic, **$32/month** versus hosted Postiz Team, and **$42/month** versus hosted Postiz Pro. That cash comparison needs a founder-time check: at a $20/hour value for founder time, the $108 annual Upload-Post saving pays for only **5.4 hours/year** of extra Postiz setup and maintenance. Self-hosting remains economically attractive only if operations stay deliberately boring, or if the larger VPS also benefits its existing workloads.
+The recommended $14 self-hosted route saves **$9/month or $108/year** versus Upload-Post Basic, **$32/month** versus hosted Postiz Team, and **$42/month** versus hosted Postiz Pro. That cash comparison needs a founder-time check: at a $20/hour value for founder time, the $108 annual Upload-Post saving pays for only **5.4 hours/year** of extra Postiz setup and maintenance. Self-hosting remains economically attractive only if operations stay deliberately boring. The backup defect already demonstrates that unattended infrastructure has a real attention cost; alerts must represent verified recoverability, not merely the presence of archive files.
 
 ### Lean one-box architecture
 
-Use the VPS for orchestration and publishing, not heavy media or AI computation:
+Use the VPS for the existing Paperclip control plane, orchestration, and publishing—not local model inference or routine media computation:
 
 ```text
-Claude/Gemini APIs -> n8n -> Telegram approval -> Postiz -> social providers
+Paperclip (existing, unchanged)          Hermes gateway + bounded cron
+             |                                      |
+             +--------- isolated projects ----------+
+                                                    v
+Claude/Gemini APIs -> n8n -> Telegram approval -> Postiz -> providers
                          |                         |
-                    durable state            Cloudflare R2 media
-                         |
-                 encrypted R2 backups
+                    durable state              R2 media
+
+Paperclip DB/config + Dholbeat DB/config -> encrypted private R2 backups
 ```
 
+- Keep Paperclip in its existing Compose project and bind mount. Do not let n8n, Postiz, or Hermes mount `/srv/paperclip`, join its host network, or access its embedded PostgreSQL port.
+- Run Hermes from its official container with only its own persistent data and a narrow Dholbeat workspace mounted. Keep its shell/file work inside that container; do not mount the Docker socket, host root, Paperclip data, or global credential directories, and do not select the host/SSH terminal backend. Keep dangerous-command approval enabled, use a Telegram allowlist/pairing rule, enable unattended tool-loop hard stops, and bind its API/dashboard to loopback or omit them. Hermes' own security policy says in-process approval and scanners are not containment; the container boundary is load-bearing. A Docker terminal backend would require extra daemon access from this deployment, so the smaller safe posture is the outer official container with narrow mounts. [Hermes Docker deployment](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/docker.md), [Hermes security policy](https://github.com/NousResearch/hermes-agent/blob/main/SECURITY.md)
+- Give n8n its own database/user and persistent directory. Start production concurrency at one and use it—not Hermes—as the deterministic owner of approval and publish state.
 - Run the official prebuilt Postiz Docker Compose stack: Postiz, PostgreSQL, Redis, and Temporal. Do not build Postiz from source on production.
-- Set Postiz `STORAGE_PROVIDER=cloudflare`; never retain the authoritative media library on the 60 GB disk. R2's Standard free tier currently covers 10 GB-month, one million Class A operations, ten million Class B operations, and free egress. [Postiz R2 configuration](https://docs.postiz.com/configuration/r2), [R2 pricing](https://developers.cloudflare.com/r2/pricing/)
+- Set Postiz `STORAGE_PROVIDER=cloudflare`; never retain the authoritative media library on the 60 GB disk. Use two buckets: a custom-domain media bucket that providers can fetch and a completely private, client-side-encrypted backup bucket. A prefix is not an adequate public/private boundary. R2's Standard free tier currently covers 10 GB-month, one million Class A operations, ten million Class B operations, and free egress. [Postiz R2 configuration](https://docs.postiz.com/configuration/r2), [R2 pricing](https://developers.cloudflare.com/r2/pricing/)
 - Use prefixes/lifecycle rules such as `candidates/` 7 days, `working/` 14 days, and `published/` 90 days. Keep brand originals only when explicitly marked. [R2 lifecycle rules](https://developers.cloudflare.com/r2/buckets/object-lifecycles/)
 - Keep image/video generation in external APIs and editing on the founder's normal tools. Send platform-ready media to Postiz; do not add a local LLM, generative-video service, or routine transcoding workload.
 - Stagger resource peaks: run n8n research/generation batches outside the publishing window, set n8n production concurrency to one initially, and do not overlap Hermes batch work with Postiz upgrades or large video publishes.
+- As initial guardrails rather than capacity claims, cap the Hermes gateway/batch container near 2 GB RAM and one concurrent agent job, and cap n8n near 1.5 GB RAM with one production execution. Alert on throttling/OOM and relax or resize from measurements. Do not add a new limit to Paperclip during this project.
+- Keep Hermes' browser/Playwright and FFmpeg-heavy jobs off by default. The official Docker guide calls for 1 GiB shared memory when browser tools are enabled; repeated local browser or transcoding concurrency is the clearest reason to choose the $21 headroom tier. Hermes supports cron through the gateway and no-agent jobs that consume no model tokens, so use script-only checks for disk/health alerts. [Hermes cron](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/cron.md)
 - Put Docker JSON-log rotation on every service, prune n8n executions, and send final media directly to R2. A bigger disk is headroom, not permission for unbounded retention.
 - Keep Temporal UI disabled or behind an on-demand Compose profile in steady state. It is diagnostic UI, not part of the publish path.
 - Start with Postiz's own PostgreSQL/Redis topology. After one stable month, sharing a PostgreSQL cluster with n8n through separate databases/users is an optional small optimization—not a launch dependency.
-- Expose the administration UI only through Cloudflare Access. Publish only the OAuth, webhook, and required media endpoints; keep PostgreSQL, Redis, and Temporal private.
+- Expose administration UIs only through Cloudflare Access. Publish only the OAuth, webhook, and required media endpoints; keep PostgreSQL, Redis, Temporal, Hermes, and Paperclip's internal services private.
+
+The live host has two `cloudflared` processes and passes tunnel credentials through the `--token` process argument. That makes the secret visible in process inspection, an especially poor fit before installing an agent capable of running commands. The installed cloudflared 2026.3.0 supports `--token-file`: rotate the existing tunnel token after the change window, store the replacement in a file readable only by the service account, and use `--token-file`/`TUNNEL_TOKEN_FILE`. Also confirm whether two daemons are intentional; Cloudflare recommends one service instance with additional routes on a host. [Cloudflare Tunnel token-file parameter](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/run-parameters/), [Cloudflare Tunnel troubleshooting](https://developers.cloudflare.com/cloudflare-one/troubleshooting/tunnel/)
 
 Postiz v2.23.0, the latest release during this review, adds streamed provider uploads to reduce worker memory and a pending-post workflow intended to prevent duplicate posts. That strengthens the case for the 12 GB box. The older duplicate-loop report remains open, however, so reproduce that exact failure class before connecting automatic publishing to production accounts. [Postiz v2.23.0 release](https://github.com/gitroomhq/postiz-app/releases/tag/v2.23.0), [open duplicate-loop report](https://github.com/gitroomhq/postiz-app/issues/1321)
 
 ### Upgrade and canary gates
 
-Before changing the plan, capture a backup and record this post-migration baseline:
+The point-in-time disk, memory, container, directory, and backup measurements above are now captured. Before a plan change, add the missing time-series and recovery evidence:
 
 ```text
-filesystem usage and inode usage
-Docker image, volume, container, and build-cache usage
-largest directories on the root filesystem
 24-hour and 7-day RAM/CPU high-water marks
-PostgreSQL/database sizes and backup size
 current monthly transfer
+one newly verified Paperclip backup and a successful disposable restore
 ```
 
 Then use **Manage VPS → Upgrade/Downgrade → Linux12GB**, confirm the customer-specific recurring and prorated totals, and pay only after the independent backup is restorable. No subscription purchase or account change was performed as part of this review.
 
 Run both brands from the first week, but use private/canary destinations for the publisher failure tests. Promote automatic publishing only when:
 
-- the cleaned pre-Postiz host uses no more than roughly 22 GB, matching the repository's existing 8–10 GB-free expectation on the old disk;
+- after w3exam removal and backup repair, the pre-Postiz host uses roughly 10–12 GB; investigate rather than normalizing anything above 15 GB;
 - steady-state disk use after Postiz is below 36 GB (60%), the warning fires at 42 GB (70%), and nonessential generation pauses at 48 GB (80%);
 - at least 12 GB remains free during an update with both current and replacement images present;
 - seven-day peak RAM stays below 10 GB with no OOM kill, uncontrolled swap/thrashing, or overlapping batch spike;
+- Paperclip remains reachable through its existing path, its backup produces a validated checksum on schedule, and no new service can reach its bind mount or embedded database;
 - both brand workspaces pass immediate/scheduled publish, token refresh, timeout, cancel, and delete tests on every enabled provider;
 - the duplicate-loop reproduction does not repeat a post, the publisher kill switch works, and Telegram approval cannot be bypassed;
 - database/config restore succeeds on a disposable environment and R2 media URLs remain valid for provider pulls.
 
-Move to the $21/18 GB/90 GB plan only if lifecycle/pruning cannot keep disk below 42 GB or seven-day peak RAM repeatedly exceeds 10 GB. Because the $21 plan still has four vCPUs, a sustained CPU bottleneck should trigger workload rescheduling or the separately priced vCPU add-on—not a blind RAM/disk upgrade.
+Move to the $21/18 GB/90 GB plan if lifecycle/pruning cannot keep disk below 42 GB, seven-day peak RAM repeatedly exceeds 10 GB, or required Hermes browser/transcoding jobs cannot be staggered without memory failures. Because the $21 plan still has four vCPUs, a sustained CPU bottleneck should first trigger workload rescheduling; buy the separately priced vCPU only if cgroup CPU—not LXC load average—is demonstrably saturated.
 
 ## Tool-choice review
 
 | Tool or choice | Decision | Cost view | Detailed feedback |
 | --- | --- | --- | --- |
-| **n8n Community Edition** | **Keep** | $0 license fee; not $0 operationally | A good visual orchestrator for schedules, API calls, approvals, retries, and metrics. Export every workflow JSON to git. Community Edition's external binary-data storage is not the same as Postiz media storage: n8n's S3 execution-data feature is Enterprise-only, so Community Edition still needs aggressive local execution pruning. [n8n execution-data guidance](https://docs.n8n.io/deploy/host-n8n/configure-n8n/scaling/manage-execution-data), [n8n external binary storage](https://docs.n8n.io/hosting/scaling/external-storage/) |
+| **n8n Community Edition** | **Install on this VPS** | $0 license fee; not $0 operationally | It is the right deterministic orchestrator for schedules, API calls, approvals, retries, and metrics. Give it a separate Compose project/database/user, one production execution at a time initially, bounded binary/execution retention, and no Paperclip mounts. Export every workflow JSON to git. Community Edition's external binary-data storage is not the same as Postiz media storage: n8n's S3 execution-data feature is Enterprise-only, so Community Edition still needs aggressive local execution pruning. [n8n execution-data guidance](https://docs.n8n.io/deploy/host-n8n/configure-n8n/scaling/manage-execution-data), [n8n external binary storage](https://docs.n8n.io/hosting/scaling/external-storage/) |
 | **Claude API** | **Keep, with model routing** | Budget $4–8/month for two brands | Use Haiku 4.5 for extraction, classification, caption variants, and simple rewrites. Use Sonnet 5 for weekly synthesis and final risk/quality review only. Batch processing gets a 50% token discount. Current standard prices are $1/$5 per million input/output tokens for Haiku 4.5 and $2/$10 for Sonnet 5; web search is $10 per 1,000 searches plus tokens. [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing) |
-| **Hermes using flat-rate Codex auth** | **Optional experiment; remove from critical path** | Marginal cash may be $0, but capacity is shared and limited | Do not route publishing, approval state, or time-sensitive weekly jobs through it. If retained, use it for noncritical offline synthesis with a Claude API fallback. The third-party Hermes integration and its authentication behavior still need a controlled test. Never copy `auth.json` into a container or repository; OpenAI describes it as password-equivalent. [Codex automation authentication](https://learn.chatgpt.com/docs/non-interactive-mode) |
-| **Telegram Bot API + custom n8n flow** | **Keep; prefer over Hermes gateway** | $0 | This is the smallest deterministic approval surface. Use buttons for Approve, Edit, and Reject; expire old approvals; and store the decision outside Telegram. Telegram is the interface, not the source of truth. |
+| **Hermes Agent** | **Install on this VPS; isolate and keep off the critical path** | $0 software; model/provider usage still applies | Use the official container as a bounded cron/batch worker for research and drafting. Its gateway daemon schedules cron every 60 seconds and supports script-only jobs with zero model use; it may send research notices through a separate Telegram bot/chat, but it must not own approvals. Give it its own volume and narrow workspace, with terminal/file actions confined to that container; no Docker socket, Paperclip mount, host network, or public dashboard/API. Keep approval/publish state in n8n/PostgreSQL and retain a metered API fallback for every deadline. Do not copy Paperclip's or the founder's existing `auth.json`; perform Hermes' own provider login into its isolated encrypted/permissioned volume. The project says it can run on a $5 VPS, but does not publish a precise RAM requirement, so the 2 GB guardrail is a canary value, not a vendor claim. [Hermes Agent](https://github.com/NousResearch/hermes-agent), [Hermes Docker deployment](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/docker.md), [Hermes cron](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/cron.md), [Codex automation authentication](https://learn.chatgpt.com/docs/non-interactive-mode) |
+| **Telegram Bot API + custom n8n flow** | **Keep as the approval interface** | $0 | This is the smallest deterministic approval surface. Use buttons for Approve, Edit, and Reject; expire old approvals; and store the decision outside Telegram. If Hermes also uses Telegram, give it a separate bot or at least a separate chat with no publish callback credentials. Telegram is the interface, not the source of truth. |
 | **Postiz self-hosted** | **Preferred recurring-cash automation path** | $0 software; VPS rises from $7 to $14/month | The Linux12GB upgrade provides 4 vCPU, 12 GB RAM, 60 GB SSD, and 4 TB transfer for a $7 marginal increase. With R2 uploads and bounded local data, both brands can share the installation. TikTok needs a public HTTPS/verified media domain, and unaudited clients can publish only privately. New unverified YouTube API projects also have private-only uploads until audit. [VPSDime Linux12GB](https://vpsdime.com/buy/linux12gb), [Postiz TikTok setup](https://docs.postiz.com/providers/tiktok), [TikTok Direct Post restrictions](https://developers.tiktok.com/doc/content-posting-api-reference-direct-post), [YouTube upload audit rule](https://developers.google.com/youtube/v3/docs/videos/insert) |
 | **Postiz production readiness** | **Canary before enabling automatic publish** | Mostly founder time | Postiz v2.23.0 adds streamed media and a pending-post duplicate-protection workflow. An older user-reported Temporal duplicate-loop issue remains open, so test that exact reproduction and provide a publisher kill switch instead of assuming the newer mechanism covers every failure path. Postiz supports only its latest release for security, making staged prompt patching essential. Both brands can continue via native or managed publishing during validation. [Postiz v2.23.0](https://github.com/gitroomhq/postiz-app/releases/tag/v2.23.0), [open duplicate-post issue](https://github.com/gitroomhq/postiz-app/issues/1321), [Postiz security policy/advisories](https://github.com/gitroomhq/postiz-app/security) |
 | **Upload-Post** | **Best managed API-first candidate** | Free test; Basic $192/year ($16/month equivalent) | Its profile model is unusually favorable here: PoriPati and w3exam need two profiles even if each connects all supported networks. The Basic tier includes five profiles, unlimited uploads, scheduling, analytics, REST API, and n8n/Make support. It costs $9/month more than the VPS upgrade but removes most Postiz maintenance/provider-app hosting. Validate both real brands, all required post formats, token refresh, metrics, cancellation, and failure behavior on the free allowance before paying annually. [Upload-Post pricing](https://www.upload-post.com/), [Upload-Post API overview](https://docs.upload-post.com/api/overview/) |
@@ -364,24 +422,24 @@ Do not label the $7–17 base as the complete all-in cost when a publisher, VPS 
 
 ### Postiz deployment choices and readiness
 
-Postiz is an option, not a prerequisite for launching the two brands. Choose one of these routes:
+Hermes and n8n are required residents on this server; Postiz remains a publisher choice rather than a prerequisite for launching the two brands. Choose one of these routes:
 
-1. **Recommended: upgrade the current VPS to Linux12GB for $14/month.** Its 4 vCPU, 12 GB RAM, and 60 GB SSD match or exceed Postiz's recommended headline; R2 supplies the separate upload volume. The marginal infrastructure cost is $7/month.
-2. **Isolation alternative: add another $7 Linux6GB host.** It keeps Postiz away from existing workloads for the same combined $14 bill, but the Postiz node itself remains below the recommended 8 GB/50 GB and doubles operational surfaces.
-3. **Use hosted Postiz** at $39/month for the eight-account core footprint or $49/month for the fourteen-account full footprint.
-4. **Use Upload-Post, Metricool, or the native hybrid** while retaining exactly the same research, asset, Telegram-approval, and measurement pipeline.
+1. **Recommended single box: upgrade the current VPS to Linux12GB for $14/month.** Keep Paperclip, install isolated Hermes/n8n, and stage Postiz after backup repair. Its 4 vCPU, 12 GB RAM, and 60 GB SSD match or exceed Postiz's recommended headline; R2 supplies the separate media/backup store. The marginal infrastructure cost is $7/month.
+2. **Lowest infrastructure cash: stay at $7 after w3exam moves.** Repair the backup and run Paperclip + isolated Hermes/n8n, while both brands use native scheduling, Upload-Post, Metricool, or hosted Postiz. This is a working architecture, not a blocked or one-brand trial.
+3. **Single-box headroom: upgrade to Linux18GB for $21/month.** Use this when concurrent Hermes browser/media work is required or the 12 GB canary exceeds 10 GB peak RAM. It costs another $7/month but adds no CPU.
+4. **Isolation alternative: add another $7 Linux6GB host.** It keeps Postiz away from existing workloads for the same combined $14 bill, but the Postiz node itself remains below the recommended 8 GB/50 GB and doubles operational surfaces. It is a short bake-off option, not the preferred production topology.
 
-The current 8–10 GB projected free space is not enough before the resize. After upgrading, enable automatic publishing only after these readiness checks:
+The live host has only 5.79 GB disk available; w3exam removal alone raises that to only about 7.1 GB. Backup repair is what should bring the pre-Postiz host near 10–12 GB used. After repair and, for self-hosted Postiz, the resize, enable automatic publishing only after these readiness checks:
 
 1. The 60 GB filesystem stays below the 60% steady-state and 70% warning thresholds defined in the VPSDime section, including existing workloads, logs, databases, current images, and one replacement-image set.
 2. A seven-day staging run records RAM, swap, CPU, database, Temporal, image-pull, and disk high-water marks under scheduled workloads.
 3. R2 is configured for public provider pulls through a verified media domain, with bounded lifecycle rules.
 4. The selected release is the latest security-supported version, pinned by image digest in deployment; updates are staged promptly when advisories/releases appear.
 5. The open duplicate-post failure class is fixed upstream or cannot be reproduced in the selected release. A kill switch can stop all publisher workers without stopping approval/research.
-6. Backups of configuration and databases have been restored in a disposable environment.
+6. Paperclip and Dholbeat backups of configuration and databases have been restored in a disposable environment; no current failed/unchecksummed archive is counted as recovery.
 7. One private/canary account per provider has completed immediate publish, scheduled publish, media, token refresh, retry, network timeout, and delete/cancel tests.
 
-Cloudflare Access should protect the administration UI. Expose only the exact OAuth/webhook/media endpoints providers require. Disable public registration, use long unique secrets, and never place provider tokens in git or Telegram.
+Cloudflare Access should protect the administration UI. Expose only the exact OAuth/webhook/media endpoints providers require. Disable public registration, use long unique secrets, move tunnel credentials out of process arguments, and never place provider tokens in git or Telegram.
 
 ### n8n operating defaults
 
@@ -418,14 +476,17 @@ Keep source templates, prompts, profile data, and workflow exports in git; do no
 
 ### Week 0: baseline and decisions
 
-- Measure current free disk, per-container memory, database sizes, Docker storage, backup size, and current monthly committed spend.
+- Treat the live resource audit in this review as the point-in-time baseline: 82% disk, about 5.0 GiB available RAM, Paperclip about 614 MiB RAM, w3exam about 190 MiB RAM, and only about 1.36 GB reclaimable from w3exam.
+- Repair the Paperclip backup wrapper, produce a verified encrypted backup, and complete a disposable restore before resizing or pulling new application images. Keep Paperclip itself in place.
+- Rotate the Cloudflare tunnel token, use token-file mode, and confirm whether both running tunnel daemons are intentional before giving Hermes a command surface on the host.
 - Create separate profiles for **PoriPati and w3exam**. Give each two core weekly ideas, three content pillars, and one primary business metric.
 - Choose the eight-account core footprint or fourteen-account full footprint; both choices include both brands.
-- Use the $14 VPSDime/self-hosted Postiz path as the default evaluation; keep Upload-Post free validation, Metricool Starter, hosted Postiz, and native scheduling as the measured alternatives.
+- Choose immediate-resize or migration-first sequencing; neither choice postpones a brand. Use the $14 VPSDime/self-hosted Postiz path as the default evaluation; keep the $7/native-or-managed route, Upload-Post free validation, Metricool Starter, and hosted Postiz as measured alternatives.
 - Record the founder's current manual time and outcomes for both brands as the comparison baseline.
 
 ### Weeks 1–2: research and approval, no auto-publish
 
+- If self-hosting Postiz remains the selected path, resize to $14 after the restore test. Install n8n and Hermes as separate, restricted projects whether w3exam has moved already or is about to move; stage them one at a time and record 24-hour peaks after each.
 - Build both brand profiles, separate evidence inboxes, Claude model routing, prompt versions, cost counters, and Telegram idea/final approval.
 - Render Bangla text programmatically.
 - Export n8n JSON and commit it.
@@ -441,7 +502,7 @@ Keep source templates, prompts, profile data, and workflow exports in git; do no
 
 - **Upload-Post path:** connect a profile for each brand and test every required format, scheduling, analytics, token refresh, timeout, cancellation, and duplicate protection before buying Basic annually.
 - **Metricool path:** connect a Metricool brand for each business, validate competitor tracking and reports, and measure the manual time from Telegram approval to final scheduling.
-- **Postiz path:** take and test the independent backup, upgrade the existing Linux VPS to the $14/12 GB/60 GB tier, configure R2, and stage the latest supported Postiz release. Connect both brand groups and use canary posts before automatic publishing. Hosted Postiz remains the no-server variant.
+- **Postiz path:** confirm the earlier Paperclip restore evidence is still valid, configure R2, and stage the latest supported Postiz release on the resized host. Connect both brand groups and use canary posts before automatic publishing. Hosted Postiz remains the no-server variant.
 - **Mixpost path:** evaluate Pro only if its one-time-license and self-host model are preferable; Lite is not a substitute for the requested channels.
 - **Native path:** keep both brands on native scheduling and optimize the Telegram publish packet so the manual step is fast and auditable.
 - Retain a native/manual fallback for both brands until every automated provider passes visibility, permission, retry, and failure testing.
@@ -455,26 +516,28 @@ Keep source templates, prompts, profile data, and workflow exports in git; do no
 - average variable AI cost at or below $2 per brand/week;
 - at least one meaningful business-signal hypothesis supported or rejected for each brand;
 - restore test passed and disk remains below the alert threshold during update/retry conditions.
+- Paperclip remains stable and isolated, its scheduled backup finishes with a checksum, and a restore drill—not archive count—drives the backup health signal.
 
 ## Specific changes I would make to the founding plan
 
-1. Change “Postiz + postgres/redis ~1 GB” to **unverified until measured; official stack includes Temporal; current $7 host lacks headroom; the $14 VPSDime tier is the cost-optimized candidate**.
-2. Change “Hermes as the ~$0 batch alternative” to **optional noncritical worker; API remains the supported fallback and budget baseline**.
+1. Change “Postiz + postgres/redis ~1 GB” to **unverified until measured; official stack includes Temporal; current $7 host lacks headroom for the combined stack; the $14 VPSDime tier is the cost-optimized candidate**.
+2. Change “Hermes as the ~$0 batch alternative” to **required isolated installation for gateway/batch work, but noncritical worker at runtime; API remains the supported fallback and budget baseline**.
 3. Change “competitor pages” to **founder-supplied competitor evidence plus officially accessible sources**.
 4. Change image cost from `$5–10 per active brand` to an initial **$3–6 total for two brands**, with explicit output assumptions and a hard cap.
 5. Split video into **$0 founder voice** or **$6 commercial AI voice**. Remove unstable AI-video list prices from the base budget.
 6. Replace fixed X `$2–3/brand` with **console-verified pricing and a $1–5/brand experimental spend cap**; default off.
-7. Make **the $14 VPSDime upgrade + R2 + self-hosted Postiz** the recurring-cash recommendation, with Upload-Post, Metricool, hosted Postiz, and a native hybrid retained as explicit two-brand alternatives.
-8. Start **both brands at two core ideas/week each**. If workload is high, reduce destinations or cadence symmetrically instead of postponing a brand.
-9. Add a formal approval hash/state machine, edit invalidation, idempotency, publish kill switch, and D+1/D+7 metric windows.
-10. Add a cost ledger that distinguishes license fee, marginal usage, committed subscription/hosting, setup labor, and contingency.
+7. Replace “w3exam migration + prune frees 8–10 GB” with the measured result: **w3exam releases about 1.36 GB; Paperclip's failed nested backups are the disk problem**.
+8. Make **Paperclip backup repair + the $14 VPSDime upgrade + R2 + self-hosted Postiz** the recurring-cash recommendation, with the $7/native-or-managed route, Upload-Post, Metricool, and hosted Postiz retained as explicit two-brand alternatives.
+9. Start **both brands at two core ideas/week each**. If workload is high, reduce destinations or cadence symmetrically instead of postponing a brand.
+10. Add a formal approval hash/state machine, edit invalidation, idempotency, publish kill switch, and D+1/D+7 metric windows.
+11. Add a cost ledger that distinguishes license fee, marginal usage, committed subscription/hosting, setup labor, and contingency.
 
 ## Final recommendation
 
 Run **PoriPati and w3exam together from the first week** through the same evidence, creation, Telegram approval, and measurement architecture, while keeping their data and decisions separate.
 
-My first choice for low-cost automation is **the existing VPSDime server upgraded to its $14 Linux12GB tier + n8n + Claude API + Telegram + scripted HTML/CSS image templates + Nano Banana 2 + R2 + self-hosted Postiz**. It gives both brands API publishing for a $7/month infrastructure increase and keeps complete base-system cash near **$21–31/month**, or **$14–24 additional** beyond today's committed $7 server.
+My first choice for low-cost automation is **Paperclip unchanged on the existing VPSDime server, its host backup repaired, the server upgraded to the $14 Linux12GB tier, and isolated Hermes + n8n + Claude API + Telegram + scripted HTML/CSS image templates + Nano Banana 2 + R2 + self-hosted Postiz added alongside it**. w3exam can move before or after the resize. This gives both brands API publishing for a $7/month infrastructure increase and keeps complete base-system cash near **$21–31/month**, or **$14–24 additional** beyond today's committed $7 server.
 
-This recommendation is conditional on the preflight, seven-day resource canary, restore test, and duplicate-post test. If Postiz consumes more than roughly 5.4 extra founder hours per year at a $20/hour time value, **Upload-Post Basic** becomes economically competitive despite costing $9/month more. If competitor analysis and a polished dashboard matter more than automatic handoff, use **Metricool Starter** at $20 annual-equivalent/$25 monthly. Hosted Postiz is the operationally simpler $39–49 option; the native hybrid keeps both brands active with no publisher fee. Mixpost Pro remains a credible $299 one-time alternative.
+This recommendation is conditional on a verified Paperclip restore, seven-day resource canary, and duplicate-post test. If Postiz consumes more than roughly 5.4 extra founder hours per year at a $20/hour time value, **Upload-Post Basic** becomes economically competitive despite costing $9/month more. If competitor analysis and a polished dashboard matter more than automatic handoff, use **Metricool Starter** at $20 annual-equivalent/$25 monthly. Hosted Postiz is the operationally simpler $39–49 option; the $7/native hybrid keeps Paperclip, Hermes, n8n, and both brands active with no publisher fee. Mixpost Pro remains a credible $299 one-time alternative.
 
 This ordering protects the scarce resource in the plan: not tokens or image credits, but the solo founder's attention.
