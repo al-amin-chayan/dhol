@@ -2,7 +2,8 @@
 
 **Reviewed:** 2026-08-12  
 **Plan reviewed:** the founding plan in `README.md`  
-**Perspective:** a solo founder operating one brand first, then two, with a target of 1–2 hours per brand per week and roughly $10–25/month of marginal platform spend  
+**Perspective:** a solo founder operating PoriPati and w3exam from the first week, with a target of 1–2 hours per brand per week and roughly $10–25/month of marginal platform spend
+
 **Price basis:** public USD list prices, before tax, card fees, and currency conversion. Prices and platform rules should be rechecked when buying or submitting an app for review.
 
 ## Executive verdict
@@ -18,14 +19,57 @@ It should **not be deployed exactly as written**, however. Four assumptions need
 
 My recommended direction is:
 
-- Pilot **PoriPati only for six weeks**.
+- Run **PoriPati and w3exam from day one**, with two separate brand profiles, evidence queues, approval states, and metric views.
 - Keep n8n, Claude API, Telegram approval, Nano Banana 2, a scripted Bangla text renderer, CapCut as an editor, and Cloudflare R2.
-- Use native/manual scheduling during the pilot.
-- Defer Postiz until the host passes a capacity gate and the selected release passes duplicate-post, provider, and security tests.
-- Defer X, Threads, and Bluesky until a primary channel proves traction.
-- Start with two core ideas per brand per week, then adapt each idea to channel-native outputs. Do not promise 3 reels plus 1–2 statics per brand until measured founder time supports it.
+- Choose a publisher path rather than making publishing infrastructure a launch blocker: **Upload-Post Basic**, **Metricool Starter**, **self-hosted or hosted Postiz**, or a **native-scheduler hybrid** are all workable two-brand options.
+- If attention is tight, stagger **channels**, not brands: either launch four core channels for each brand (eight scheduler connections) or the complete seven-channel footprint for each brand (fourteen connections). Telegram remains direct through the bot.
+- Start with two core ideas **for each brand** per week, then adapt each idea to channel-native outputs. Do not promise 3 reels plus 1–2 statics per brand until measured founder time supports it.
 
-Under those conditions, a two-brand steady-state cash budget of roughly **$7–17/month** is realistic without paid voice or X. With ElevenLabs and X enabled for both brands, a safer allowance is **$15–33/month**, before any VPS upgrade.
+The generation, storage, and monitoring baseline remains roughly **$7–17/month** for both brands without paid voice or X. The publisher is a separate choice: $0 for native scheduling, $16/month equivalent for Upload-Post Basic billed annually, $20/month equivalent for Metricool Starter billed annually, $39–49/month for hosted Postiz, or $0 software plus infrastructure for self-hosted Postiz. Exact combined scenarios appear below.
+
+## What Postiz facilitates
+
+Postiz is principally the **publishing operations layer**. It is useful after research and content creation have produced an approved package; it is not the complete AI social-media system.
+
+| Area | What Postiz contributes | Boundary to keep elsewhere |
+| --- | --- | --- |
+| **Account and brand organization** | Connects social accounts, groups channels for repeated use, and provides customer-group/workspace-style organization for multiple brands. | Brand facts, tone, prohibited claims, and evidence still belong in the repository's brand profiles. |
+| **Editorial operations** | Drafts, a day/week/month calendar, immediate or scheduled posts, reusable posting sets and signatures, repeated evergreen posts, and RSS-driven posting. | It does not decide the business objective, content pillars, or whether a competitor observation is reliable. |
+| **Cross-channel publishing** | Publishes to major networks, hosts/selects media, supports per-platform copy, and can schedule comments or threads where providers allow it. | Every network still imposes format, permission, audit, and rate-limit rules. Self-hosting does not bypass those rules. |
+| **Automation boundary** | REST API, webhooks, custom integrations, CLI/SDK and MCP/n8n-oriented integration options allow n8n to create and update posts. Postiz exposes a draft-to-schedule status change, which fits a Telegram approval gate. | Telegram approval should remain the authoritative human decision. n8n should create a draft, then change it to `schedule` only after the exact asset/caption hash is approved. |
+| **Measurement** | Post- and channel-level analytics such as impressions and engagement, subject to each provider's available metrics. | Native analytics remain the reconciliation source; Postiz is not a full attribution or competitor-research product. |
+| **Optional AI assistance** | Hosted plans advertise caption/image/video assistance and a conversational agent. | This duplicates parts of the proposed Claude/Gemini pipeline and should not be the reason to select Postiz. Research quality, Bangla typography, licensing, and approval governance remain external. |
+
+Relevant Postiz documentation: [features and hosted pricing](https://postiz.com/pricing), [public API introduction](https://docs.postiz.com/public-api/introduction), [create a post](https://docs.postiz.com/public-api/posts/create), and [change a draft to scheduled status](https://docs.postiz.com/public-api/posts/change-status).
+
+## Two-brand publisher options
+
+The account count changes by channel strategy, not by whether both brands operate:
+
+- **Core footprint:** Facebook, Instagram, TikTok, and YouTube for each brand = **8 connected social accounts**.
+- **Full footprint:** those four plus X, Threads, and Bluesky for each brand = **14 connected social accounts**.
+- **Telegram:** publish directly with the existing bot rather than buying another scheduler connection.
+
+| Option | Two-brand fit and automation | Publisher cash | Combined with $7–17 baseline | Best use and main trade-off |
+| --- | --- | ---: | ---: | --- |
+| **Native-scheduler hybrid** | Both brands run through n8n/Telegram; approved publish packets are scheduled in Meta Business Suite, TikTok Studio, YouTube Studio, and other native tools. | **$0** | **$7–17/month** | Lowest cash and no provider-app hosting. It adds manual publishing time and fragmented analytics, but it is a complete option rather than a blocked state. |
+| **Upload-Post Basic** | Two brands consume two of five profiles; each profile can connect one account on every supported platform. Full REST API, scheduling, analytics, and official n8n/Make integrations fit the existing workflow. | **$16/month equivalent, $192 billed annually** | **$23–33/month** | Best budget/API match. The free plan can connect both brands but allows only 10 uploads/month, so use it to validate both brands and exact formats before the annual commitment. X posts containing links cost another $19/month add-on; normal platform limits still apply. [Upload-Post pricing](https://www.upload-post.com/), [API/platform list](https://docs.upload-post.com/api/overview/) |
+| **Metricool Starter 5** | Two brands consume two of five brand slots, with one profile per network in each brand. Unlimited publishing, reporting, long analytics history, and analysis of up to 100 competitor profiles are included. Starter has no public API, Make, Zapier, or built-in approval workflow, so Telegram remains approval and the founder transfers/schedules the approved package in Metricool. | **$20/month annual or $25 monthly** | **$27–37 annual-equivalent or $32–42 monthly** | Best dashboard/research option and the strongest consolidation candidate. X is a $10/month add-on per connected X account; API and native approval require Advanced ($53 annual-equivalent/$67 monthly). [Metricool pricing](https://metricool.com/pricing/), [plan/API limits](https://help.metricool.com/plans-add-ons-and-api-access-explained-xux1u) |
+| **Postiz self-hosted** | Both brands can use the same installation, with n8n calling the Postiz API after Telegram approval. | **$0 software + infrastructure quote** | **$7–17 + infrastructure** | Best open-source/control option. Choose either a disk/RAM upgrade to the current host or a separate host; do not squeeze it into 8–10 GB of free disk. Provider app review and maintenance remain founder work. |
+| **Postiz hosted** | Same Postiz workflow without server operations. Eight core accounts fit Team; fourteen full-footprint accounts fit Pro. | **$39/month Team (10 channels)** or **$49/month Pro (30)** | **$46–56** or **$56–66/month** | Fastest way to use Postiz for both brands. It remains below the repository's $75 growth ceiling in the base scenario, although it exceeds the $10–25 marginal target. [Postiz pricing](https://postiz.com/pricing) |
+| **Mixpost Pro self-hosted** | Unlimited social accounts and isolated workspaces for both brands; API, webhooks, automation, analytics, and approval flow are included. | **$299 one-time** (about **$24.92/month** over year one) + hosting | **$31.92–41.92 + hosting** in year one | Good one-time-license alternative when data ownership matters. It still needs a host, MySQL, Redis, queue workers, FFmpeg, updates, and provider configuration. [Mixpost pricing](https://mixpost.app/pricing), [server requirements](https://docs.mixpost.app/server/) |
+
+Two other credible tools were compared but are weaker at this account count:
+
+- **Buffer Essentials** is polished and now includes API access, but per-channel billing costs $48/month for eight accounts or $76/month for fourteen on monthly billing; annual equivalents are $40 and about $63.33. [Buffer current pricing](https://support.buffer.com/article/595-features-available-on-each-buffer-plan)
+- **Zernio** includes publishing, analytics, inbox, webhooks, and API on every account, but graduated per-account pricing costs $36/month for eight accounts or $60/month for fourteen, before pass-through X calls. [Zernio pricing](https://zernio.com/pricing)
+
+### Practical selection
+
+1. Choose **Upload-Post Basic** if Telegram-controlled, end-to-end n8n automation and low cash cost matter most.
+2. Choose **Metricool Starter** if competitor tracking, reports, a mature dashboard, and manual final scheduling are worth more than API automation.
+3. Choose **self-hosted Postiz** if control and open-source ownership justify provisioning the recommended infrastructure; choose **hosted Postiz** if the same feature set is worth $39–49/month to avoid server work.
+4. Choose the **native hybrid** if the immediate scheduler budget is $0. Both brands still launch; only the final scheduling step stays manual.
 
 ## Tool-choice review
 
@@ -35,20 +79,22 @@ Under those conditions, a two-brand steady-state cash budget of roughly **$7–1
 | **Claude API** | **Keep, with model routing** | Budget $4–8/month for two brands | Use Haiku 4.5 for extraction, classification, caption variants, and simple rewrites. Use Sonnet 5 for weekly synthesis and final risk/quality review only. Batch processing gets a 50% token discount. Current standard prices are $1/$5 per million input/output tokens for Haiku 4.5 and $2/$10 for Sonnet 5; web search is $10 per 1,000 searches plus tokens. [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing) |
 | **Hermes using flat-rate Codex auth** | **Optional experiment; remove from critical path** | Marginal cash may be $0, but capacity is shared and limited | Do not route publishing, approval state, or time-sensitive weekly jobs through it. If retained, use it for noncritical offline synthesis with a Claude API fallback. The third-party Hermes integration and its authentication behavior still need a controlled test. Never copy `auth.json` into a container or repository; OpenAI describes it as password-equivalent. [Codex automation authentication](https://learn.chatgpt.com/docs/non-interactive-mode) |
 | **Telegram Bot API + custom n8n flow** | **Keep; prefer over Hermes gateway** | $0 | This is the smallest deterministic approval surface. Use buttons for Approve, Edit, and Reject; expire old approvals; and store the decision outside Telegram. Telegram is the interface, not the source of truth. |
-| **Postiz self-hosted** | **Good feature fit, conditional infrastructure fit** | $0 software fee; meaningful hosting, setup, patching, and app-review effort | It covers the desired providers and has an API, but the current host fails the documented disk gate. Self-hosting also means configuring each provider app. TikTok needs a public HTTPS/verified media domain, and unaudited clients can publish only privately. New unverified YouTube API projects also have private-only uploads until audit. [Postiz TikTok setup](https://docs.postiz.com/providers/tiktok), [TikTok Direct Post restrictions](https://developers.tiktok.com/doc/content-posting-api-reference-direct-post), [YouTube upload audit rule](https://developers.google.com/youtube/v3/docs/videos/insert) |
-| **Postiz production readiness** | **Require a release gate** | Mostly founder time | As of this review, an open, user-reported Postiz issue describes a Temporal retry path that can duplicate a successful social post repeatedly. Treat it as a release-blocking test case: either wait for a verified fix or prove the chosen release cannot reproduce it and provide a kill switch. Postiz supports only its latest release for security, and its 2026 advisory history makes staging and prompt patching essential. [Open duplicate-post issue](https://github.com/gitroomhq/postiz-app/issues/1321), [Postiz security policy/advisories](https://github.com/gitroomhq/postiz-app/security) |
-| **Mixpost** | **Do not switch blindly** | Lite $0; Pro $299 one-time with one year of updates | Lite only publishes to Facebook Pages, X, and Mastodon, so it does not meet the IG/TikTok/YouTube requirement. Pro supports the full set and approval flow, but $299 consumes almost the whole first-year platform budget when amortized at $24.92/month, before AI or hosting. It still needs MySQL, Redis, workers, FFmpeg, provider apps, and operational care. Trial it only if Postiz fails the capacity/reliability bake-off. [Mixpost pricing and platform comparison](https://mixpost.app/pricing), [Mixpost server requirements](https://docs.mixpost.app/server/), [Mixpost worker tiers](https://docs.mixpost.app/guides/horizon/) |
-| **Hosted Postiz** | **Fallback, not budget fit** | $29/month for 5 channels; $39 for 10; $49 for 30 | The desired two-brand map has more than 10 non-Telegram accounts, so the $49 tier is the first obvious fit. That exceeds the entire stated marginal budget but may still be cheaper than founder time plus a VPS upgrade. Use the trial only if self-host operations become a distraction. [Postiz pricing](https://postiz.com/pricing) |
+| **Postiz self-hosted** | **Viable after choosing an infrastructure route** | $0 software fee; hosting quote plus setup, patching, and app-review effort | It covers the desired providers and has an API. The current shared disk is too small, so choose a disk/RAM expansion or a separate host that meets the documented requirements. Both brands can then share the installation. TikTok needs a public HTTPS/verified media domain, and unaudited clients can publish only privately. New unverified YouTube API projects also have private-only uploads until audit. [Postiz TikTok setup](https://docs.postiz.com/providers/tiktok), [TikTok Direct Post restrictions](https://developers.tiktok.com/doc/content-posting-api-reference-direct-post), [YouTube upload audit rule](https://developers.google.com/youtube/v3/docs/videos/insert) |
+| **Postiz production readiness** | **Canary before enabling automatic publish** | Mostly founder time | As of this review, an open, user-reported Postiz issue describes a Temporal retry path that can duplicate a successful social post repeatedly. Prove the selected release cannot reproduce it, or deploy a verified fix, and provide a publisher kill switch. Postiz supports only its latest release for security, and its 2026 advisory history makes staging and prompt patching essential. Both brands can continue via native or managed publishing during this technical validation. [Open duplicate-post issue](https://github.com/gitroomhq/postiz-app/issues/1321), [Postiz security policy/advisories](https://github.com/gitroomhq/postiz-app/security) |
+| **Upload-Post** | **Best low-cost API-first candidate** | Free test; Basic $192/year ($16/month equivalent) | Its profile model is unusually favorable here: PoriPati and w3exam need two profiles even if each connects all supported networks. The Basic tier includes five profiles, unlimited uploads, scheduling, analytics, REST API, and n8n/Make support. Validate both real brands, all required post formats, token refresh, metrics, cancellation, and failure behavior on the free allowance before paying annually. [Upload-Post pricing](https://www.upload-post.com/), [Upload-Post API overview](https://docs.upload-post.com/api/overview/) |
+| **Metricool Starter** | **Best managed research/dashboard candidate** | $20/month equivalent annually or $25 month-to-month for up to five brands | It can schedule both brands and adds competitor tracking, reporting, and long analytics history. Starter does not expose the API/Make/Zapier or its native approval system, so use Telegram approval and schedule the approved output through Metricool's UI. This is a deliberate UI-first option, not an automated Postiz substitute. [Metricool pricing](https://metricool.com/pricing/), [Metricool plan/API limits](https://help.metricool.com/plans-add-ons-and-api-access-explained-xux1u) |
+| **Mixpost Pro** | **Credible one-time self-hosted option** | Lite $0; Pro $299 one-time with one year of updates | Lite only publishes to Facebook Pages, X, and Mastodon, so it does not meet the IG/TikTok/YouTube requirement. Pro supports the full set, unlimited accounts/workspaces, approval flow, API, MCP, and webhooks. It amortizes to $24.92/month in year one before AI or hosting and still needs MySQL, Redis, workers, FFmpeg, provider apps, and operational care. [Mixpost pricing and platform comparison](https://mixpost.app/pricing), [Mixpost server requirements](https://docs.mixpost.app/server/), [Mixpost worker tiers](https://docs.mixpost.app/guides/horizon/) |
+| **Hosted Postiz** | **Ready-to-use Postiz option** | $39/month for 10 channels; $49 for 30 | Eight core accounts across both brands fit Team at $39; fourteen full-footprint accounts fit Pro at $49. It exceeds the marginal target but avoids VPS changes and provider-app hosting work, and the base combined total remains under the $75 growth ceiling. [Postiz pricing](https://postiz.com/pricing) |
 | **Nano Banana 2** | **Keep as the one default image API** | About $0.067 per 1K output today | Gemini 3.1 Flash Image is paid-only and currently prices 1K output at about $0.067. Generate at 1K, allow no more than three candidates, and upscale only a selected winner. Do not pay for both Nano Banana and Flux on every asset. [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing) |
 | **Flux through fal.ai** | **Fallback only** | Variable, generally low per image/megapixel | Keep it as a fallback for backgrounds or a failed Nano Banana prompt class. Record model, price, dimensions, attempts, and accepted result so the fallback earns its complexity. [fal pricing](https://fal.ai/pricing) |
 | **Canva Free** | **Keep for exceptions; replace in the routine path** | $0 | Manual Canva work erodes the promised time saving and is hard to reproduce. Build recurring layouts as HTML/CSS templates rendered to PNG, with Noto Sans Bengali or another tested font. Let the image model create only backgrounds/objects; overlay every Bangla word programmatically. Canva remains useful for one-off campaigns. |
 | **CapCut** | **Keep as editor only** | $0 editor; asset licenses vary | Use founder-owned footage, separately licensed stock, and cross-platform-cleared audio. Do not assume CapCut's included music is safe for simultaneous Facebook, Instagram, YouTube, and TikTok commercial posts. |
 | **ElevenLabs** | **Optional paid tool** | $6/month Starter | First test founder-recorded voice: it is cheaper and more authentic for PoriPati. If AI voice measurably reduces time or improves completion rate, use the paid commercial tier and store the license/source metadata. Do not use free-plan output commercially. |
-| **AI video generation** | **Defer** | Unbounded retries make per-clip list price misleading | Remove Hailuo/Kling from the base budget. A usable clip often needs multiple generations, editing, captions, and review. Add a provider later only for a proven content format, behind a per-campaign cap. Recheck pricing and commercial terms at that time. |
+| **AI video generation** | **Optional experiment outside the baseline** | Unbounded retries make per-clip list price misleading | Remove Hailuo/Kling from the base budget. If either brand has a proven format that needs generated video, run a capped campaign experiment and track accepted-output cost after retries, editing, captions, and review. Recheck pricing and commercial terms before that experiment. |
 | **Cloudflare R2 Standard** | **Add** | Likely $0 at pilot scale; budget $0–1 | Postiz supports R2, and its free tier currently includes 10 GB-month, 1 million Class A operations, 10 million Class B operations, and free egress. Use a public custom media domain for provider pulls and lifecycle rules so media cannot grow without bound. [R2 pricing](https://developers.cloudflare.com/r2/pricing/), [Postiz uploads/storage](https://docs.postiz.com/configuration/uploads) |
-| **X API** | **Defer or hard-cap** | Exact endpoint prices are visible in the developer console, not the public pricing page | The fixed $2–3/brand estimate is not auditable from X's public documentation. X now uses prepaid, per-operation billing with no monthly minimum and supports spending limits/alerts. If enabled, start with a $1–5 monthly cap per brand and measure qualified traffic; do not use paid X reads for broad trend research. [X usage and billing](https://docs.x.com/x-api/fundamentals/post-cap) |
+| **X API** | **Optional, with a hard cap** | Exact endpoint prices are visible in the developer console, not the public pricing page | The fixed $2–3/brand estimate is not auditable from X's public documentation. X now uses prepaid, per-operation billing with no monthly minimum and supports spending limits/alerts. If enabled, start with a $1–5 monthly cap per brand and measure qualified traffic; do not use paid X reads for broad trend research. [X usage and billing](https://docs.x.com/x-api/fundamentals/post-cap) |
 
-Provider onboarding is a project cost even when API calls are free. A self-hosted scheduler supplies the connector code, not universal provider credentials. For example, Postiz requires a founder-owned Meta app; its instructions warn that development-mode Facebook posts may be visible only to app roles, while public applications can require business verification and advanced permissions. Estimate and track setup/review hours per provider, and do not promise an automation launch date before the real brand accounts pass public-visibility tests. [Postiz Facebook provider setup](https://docs.postiz.com/providers/facebook), [Postiz Instagram provider setup](https://docs.postiz.com/providers/instagram)
+Provider onboarding is a project cost even when API calls are free. A self-hosted scheduler supplies the connector code, not universal provider credentials. For example, Postiz requires a founder-owned Meta app; its instructions warn that development-mode Facebook posts may be visible only to app roles, while public applications can require business verification and advanced permissions. Managed publishers can reduce this work by using vendor-managed integrations, but the exact formats and visibility still need validation on both real brands before committing. [Postiz Facebook provider setup](https://docs.postiz.com/providers/facebook), [Postiz Instagram provider setup](https://docs.postiz.com/providers/instagram)
 
 ## The research plan needs an evidence-first redesign
 
@@ -145,21 +191,21 @@ The current target is 3 reels plus 1–2 static posts per brand each week. Acros
 
 Start with:
 
-- **One brand for six weeks.** Do not onboard w3exam until the workflow has operated for four consecutive weeks without an approval bypass, duplicate post, or unresolved publish failure.
-- **Two core ideas per week.** One can become a vertical video; the other a static/carousel. Adapt them to primary channels instead of creating five unrelated originals.
-- **No more than four primary destinations in the pilot.** For PoriPati, Facebook, Instagram, TikTok, and YouTube Shorts match the plan's market thesis. Publish manually/native until provider automation passes its gates. Telegram can remain a community distribution path outside the scheduler.
-- **Defer X, Threads, and Bluesky.** Add a channel only when there is an audience hypothesis, a channel-native adaptation, and a success metric. Cheap cross-posting still creates review, failure, analytics, and reputation cost.
-- **Three content pillars and one experiment at a time.** Example structure: problem education, proof/process, and product action. Test one hook or format variable per cycle so the metrics teach something.
+- **Both brands from week one.** Give PoriPati and w3exam separate profiles, evidence packs, approvals, schedules, UTMs, and outcome metrics.
+- **Two core ideas per brand per week.** For each brand, one can become a vertical video and the other a static/carousel. Adapt them to destinations instead of creating five unrelated originals.
+- **Choose one of two channel scopes.** The core option publishes both brands to Facebook, Instagram, TikTok, and YouTube (eight connections). The full option also publishes both to X, Threads, and Bluesky (fourteen connections). This is a founder-time and publisher-price decision, not a reason to exclude either brand.
+- **Make every enabled channel intentional.** Record its audience hypothesis, adaptation rule, and success metric. If a secondary channel adds little value, leave that channel out for both brands or handle it natively; do not pause a whole brand.
+- **Three content pillars and one experiment per brand at a time.** Example structure: problem education, proof/process, and product action. Test one hook or format variable per brand per cycle so the metrics teach something.
 
-A realistic weekly founder loop for one mature brand is:
+A realistic weekly founder loop across both brands is:
 
 | Activity | Target time |
 | --- | ---: |
-| Supply competitor/customer evidence | 10–15 min |
-| Approve/edit two ideas | 10–15 min |
-| Review two final asset packages | 20–30 min |
-| Review exceptions and D+7 learning | 10–15 min |
-| **Routine target** | **50–75 min** |
+| Supply competitor/customer evidence for both | 20–30 min |
+| Approve/edit four ideas | 20–30 min |
+| Review four final asset packages | 40–60 min |
+| Review exceptions and D+7 learning | 20–30 min |
+| **Routine target across both** | **100–150 min** |
 
 Reserve another 30–60 minutes per week during the first two months for provider setup, failed jobs, template refinement, and credential refreshes. That setup time should not be hidden inside the mature 1–2 hour promise.
 
@@ -169,7 +215,7 @@ Reserve another 30–60 minutes per week during the first two months for provide
 
 The following is a planning model, not a vendor quote:
 
-- two active brands after the pilot;
+- two active brands from the first week;
 - two core ideas per brand per week (about 16/month), with short channel adaptations;
 - eight weekly brand research/synthesis jobs per month;
 - approximately 0.8M Haiku input tokens + 0.15M output tokens;
@@ -189,7 +235,7 @@ The proposed $4–8 LLM cap is therefore reasonable. Batch jobs can lower token 
 
 For images, `48 × $0.067 = $3.22`, plus input tokens and retries. A **$3–6 total image budget across two brands** is a more defensible starting point than $5–10 per active brand. Enforce the candidate limit in code. If 100 1K outputs are generated, image output alone is about $6.70.
 
-### Monthly cash scenarios
+### Base monthly cash scenario, before publisher choice
 
 | Item | Lean two-brand target | With optional upgrades | Notes |
 | --- | ---: | ---: | --- |
@@ -200,18 +246,18 @@ For images, `48 × $0.067 = $3.22`, plus input tokens and retries. A **$3–6 to
 | Voice | $0 | $6 | Founder voice vs ElevenLabs Starter. |
 | X | $0 | $1–5 per enabled brand | Exact price must be checked in the developer console. |
 | Monitoring/backup allowance | $0–2 | $0–2 | Use existing systems if available; do not omit restore testing. |
-| **Total** | **$7–17** | **$15–33 for two X-enabled brands** | Excludes VPS expansion/new host, tax, committed subscriptions, and founder time. |
+| **Base-system total** | **$7–17** | **$15–33 for two X-enabled brands** | Excludes the chosen publisher, VPS expansion/new host, tax, committed subscriptions, and founder time. |
 
-The README's **$10–25/month** goal is plausible only if:
+The README's **$10–25/month** marginal goal is plausible as an all-in target with the native hybrid, and is nearly met by Upload-Post at the low end ($23–33 combined). Metricool and Postiz are still valid options under the broader $75 growth ceiling, but not under the narrow $25 cap. In every case:
 
 - founder voice is used or voice is not needed;
-- X is deferred or tightly limited;
-- the existing host genuinely passes the deployment gates;
+- X is disabled or tightly limited;
+- infrastructure cost is included if the self-hosted Postiz or Mixpost path is selected;
 - image candidates and web searches are capped;
 - paid AI video is excluded;
 - current subscriptions are treated as already committed costs.
 
-It is not a complete all-in cost if a VPS upgrade, hosted publisher, ElevenLabs, or meaningful X research is added.
+Do not label the $7–17 base as the complete all-in cost when a publisher, VPS upgrade, ElevenLabs, or meaningful X usage is added. The earlier two-brand option table supplies the publisher-inclusive totals.
 
 ### Cost controls to implement, not merely document
 
@@ -223,11 +269,18 @@ It is not a complete all-in cost if a VPS upgrade, hosted publisher, ElevenLabs,
 - Use async batch calls for weekly work; do not use a premium model for routing or formatting.
 - Do not count an existing VPS or Codex subscription as “free”; label it **committed cost / $0 marginal cash**.
 
-## Hosting, storage, and reliability gates
+## Hosting, storage, and reliability
 
-### Postiz gate
+### Postiz deployment choices and readiness
 
-Do not install Postiz on the VPS merely because `docker system prune` creates 8–10 GB. Proceed only after all of these are true:
+Postiz is an option, not a prerequisite for launching the two brands. Choose one of these routes:
+
+1. **Expand the current VPS** so Postiz has durable disk headroom and preferably the documented 8 GB recommended RAM, without taking capacity from existing workloads.
+2. **Use a separate Postiz host** sized near the documented 4 vCPU, 8 GB RAM, and 50 GB recommended configuration. This is the cleanest self-hosted route.
+3. **Use hosted Postiz** at $39/month for the eight-account core footprint or $49/month for the fourteen-account full footprint.
+4. **Use Upload-Post, Metricool, or the native hybrid** while retaining exactly the same research, asset, Telegram-approval, and measurement pipeline.
+
+The current 8–10 GB projected free space is not enough for the self-hosted route. For either self-host option, enable automatic publishing only after these readiness checks:
 
 1. At least 20 GB of durable disk is available to the Postiz stack after reserving space for the operating system, existing workloads, logs, backups, image pulls, database growth, and upgrades. Given the shared 30 GB disk, the safer answer is likely a disk expansion or separate host.
 2. A seven-day staging run records RAM, swap, CPU, database, Temporal, image-pull, and disk high-water marks under scheduled workloads.
@@ -239,7 +292,7 @@ Do not install Postiz on the VPS merely because `docker system prune` creates 8�
 
 Cloudflare Access should protect the administration UI. Expose only the exact OAuth/webhook/media endpoints providers require. Disable public registration, use long unique secrets, and never place provider tokens in git or Telegram.
 
-### n8n gate
+### n8n operating defaults
 
 The README correctly requires workflow exports in git. Add these operating defaults for the Community Edition:
 
@@ -250,7 +303,7 @@ save manual executions: false after development
 pruning: enabled
 maximum age: 7 days
 maximum saved count: 500–1,000
-production workflow concurrency: 1 during pilot
+production workflow concurrency: 1 during initial rollout
 per-workflow timeout: bounded
 ```
 
@@ -275,36 +328,41 @@ Keep source templates, prompts, profile data, and workflow exports in git; do no
 ### Week 0: baseline and decisions
 
 - Measure current free disk, per-container memory, database sizes, Docker storage, backup size, and current monthly committed spend.
-- Pick PoriPati, two core weekly ideas, three content pillars, one primary business metric, and four primary channels.
-- Record the founder's current manual time and outcomes for a comparison baseline.
+- Create separate profiles for **PoriPati and w3exam**. Give each two core weekly ideas, three content pillars, and one primary business metric.
+- Choose the eight-account core footprint or fourteen-account full footprint; both choices include both brands.
+- Pick a publisher evaluation path: Upload-Post free validation, Metricool Starter trial/UI validation, Postiz hosted trial, provisioned self-hosted Postiz, or native scheduling.
+- Record the founder's current manual time and outcomes for both brands as the comparison baseline.
 
 ### Weeks 1–2: research and approval, no auto-publish
 
-- Build brand profile schema, evidence inbox, Claude model routing, prompt versions, cost counters, and Telegram idea/final approval.
+- Build both brand profiles, separate evidence inboxes, Claude model routing, prompt versions, cost counters, and Telegram idea/final approval.
 - Render Bangla text programmatically.
 - Export n8n JSON and commit it.
-- Publish manually/native so content quality and founder time are evaluated independently of provider integration work.
+- Publish both brands through the selected trial or native tools so content quality and founder time are measured immediately; no brand waits for publisher automation.
 
 ### Weeks 3–4: metrics and templates
 
 - Add content IDs, UTMs, D+1/D+7 metrics, and native-dashboard reconciliation.
-- Keep only templates that reduce founder time without lowering quality.
-- Produce a weekly report of business result, content learning, cost, founder minutes, and system failures—not a generic AI summary.
+- Keep only templates that reduce founder time without lowering quality for the relevant brand.
+- Produce a separate weekly report for each brand covering business result, content learning, cost, founder minutes, and system failures—not a generic AI summary.
 
-### Weeks 5–6: publisher bake-off
+### Weeks 5–6: select and harden the publisher
 
-- If the VPS passes capacity gates, stage the latest Postiz release with R2 and canary accounts.
-- Test Mixpost only if Postiz fails a documented gate; Lite is not a functional substitute for the requested channels.
-- Keep native/manual publishing until every primary provider passes review/audit and failure testing.
+- **Upload-Post path:** connect a profile for each brand and test every required format, scheduling, analytics, token refresh, timeout, cancellation, and duplicate protection before buying Basic annually.
+- **Metricool path:** connect a Metricool brand for each business, validate competitor tracking and reports, and measure the manual time from Telegram approval to final scheduling.
+- **Postiz path:** use hosted Postiz immediately, or stage the latest self-hosted release with R2 after choosing the expanded/separate-host route. Connect both brand groups and use canary posts before automatic publishing.
+- **Mixpost path:** evaluate Pro only if its one-time-license and self-host model are preferable; Lite is not a substitute for the requested channels.
+- **Native path:** keep both brands on native scheduling and optimize the Telegram publish packet so the manual step is fast and auditable.
+- Retain a native/manual fallback for both brands until every automated provider passes visibility, permission, retry, and failure testing.
 
-### Exit criteria before adding w3exam
+### Exit criteria before increasing cadence or channel count
 
 - zero unapproved or duplicate posts;
-- four consecutive stable weekly runs;
+- four consecutive stable weekly runs across both brands;
 - at least 90% successful scheduled publishes on tested providers, with every failure alerted and recoverable;
-- median routine founder time at or below 90 minutes/week for the active brand;
+- median routine founder time at or below 150 minutes/week across both brands;
 - average variable AI cost at or below $2 per brand/week;
-- at least one meaningful business-signal hypothesis supported or rejected;
+- at least one meaningful business-signal hypothesis supported or rejected for each brand;
 - restore test passed and disk remains below the alert threshold during update/retry conditions.
 
 ## Specific changes I would make to the founding plan
@@ -315,15 +373,17 @@ Keep source templates, prompts, profile data, and workflow exports in git; do no
 4. Change image cost from `$5–10 per active brand` to an initial **$3–6 total for two brands**, with explicit output assumptions and a hard cap.
 5. Split video into **$0 founder voice** or **$6 commercial AI voice**. Remove unstable AI-video list prices from the base budget.
 6. Replace fixed X `$2–3/brand` with **console-verified pricing and a $1–5/brand experimental spend cap**; default off.
-7. Make **native/manual scheduling** an explicit Phase 0 and move Postiz behind capacity, security, duplicate-post, provider-review, and restore gates.
-8. Start at **two core ideas/week for one brand**, measure time for six weeks, then raise cadence or add the second brand.
+7. Replace a single assumed Postiz deployment with **five two-brand publisher choices**: Upload-Post, Metricool, self-hosted Postiz, hosted Postiz, or a native hybrid. Apply capacity and reliability checks only to the self-host route.
+8. Start **both brands at two core ideas/week each**. If workload is high, reduce destinations or cadence symmetrically instead of postponing a brand.
 9. Add a formal approval hash/state machine, edit invalidation, idempotency, publish kill switch, and D+1/D+7 metric windows.
 10. Add a cost ledger that distinguishes license fee, marginal usage, committed subscription/hosting, setup labor, and contingency.
 
 ## Final recommendation
 
-Build the smallest system that improves the founder's decisions before building the full publisher. In order: evidence inbox, AI synthesis, brand-aware drafts, deterministic assets, Telegram approval, measurement, and only then automated cross-posting.
+Run **PoriPati and w3exam together from the first week** through the same evidence, creation, Telegram approval, and measurement architecture, while keeping their data and decisions separate.
 
-The best near-term tool set is **n8n + Claude API + Telegram + scripted HTML/CSS image templates + Nano Banana 2 + R2 + native schedulers**. Postiz remains the preferred full-feature candidate, but only after a capacity upgrade or new placement and a successful production-readiness bake-off. Mixpost Lite is not feature-complete; Mixpost Pro and hosted Postiz are reasonable time-saving alternatives but do not fit the first-year marginal budget cleanly.
+My first choice for low-cost automation is **n8n + Claude API + Telegram + scripted HTML/CSS image templates + Nano Banana 2 + R2 + Upload-Post Basic**. It gives both brands API publishing for a $16/month annual equivalent and keeps the combined baseline near $23–33/month. Validate both profiles on the free allowance before committing $192.
+
+If competitor analysis and a polished dashboard are more valuable than automatic handoff, use **Metricool Starter** at $20 annual-equivalent/$25 monthly. If open-source control is the priority, use **Postiz** on an expanded or separate host; hosted Postiz is the operationally simpler $39–49 option. If no scheduler budget is available, use the native hybrid for both brands at $0 publisher cash. Mixpost Pro remains a credible $299 one-time self-hosted alternative.
 
 This ordering protects the scarce resource in the plan: not tokens or image credits, but the solo founder's attention.
