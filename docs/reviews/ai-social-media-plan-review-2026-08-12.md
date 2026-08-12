@@ -12,7 +12,7 @@ The overall design is sound: keep brand knowledge in profiles, use AI for eviden
 
 It should **not be deployed exactly as written**, however. Four assumptions need to change first:
 
-1. **Postiz does not fit the documented VPS headroom.** The plan expects only 8–10 GB free after cleanup. Postiz documents a 20 GB supported disk floor and a 50 GB recommendation; its canonical stack includes Postiz, PostgreSQL, Redis, and Temporal. The existing 6 GB RAM is below the 8 GB recommendation as well. The README's approximate 1 GB Postiz estimate is therefore not a safe capacity basis. [Postiz system requirements](https://docs.postiz.com/installation/system-requirements)
+1. **Postiz does not fit the current $7 VPS headroom, but VPSDime has a cost-effective remedy.** The plan expects only 8–10 GB free after cleanup. Postiz documents a 20 GB supported disk floor and a 50 GB recommendation; its canonical stack includes Postiz, PostgreSQL, Redis, and Temporal. The existing 6 GB RAM is below the 8 GB recommendation as well. VPSDime's next tier is $14/month for 4 vCPU, 12 GB RAM, 60 GB SSD, and 4 TB transfer—enough to make a measured, R2-backed self-hosted deployment credible for this single-user/two-brand workload. [Postiz system requirements](https://docs.postiz.com/installation/system-requirements), [VPSDime Linux plans](https://vpsdime.com/linux-vps)
 2. **Competitor and trend research cannot be fully automated through official social APIs.** TikTok explicitly excludes creators, advertisers, and commercial users from its Research Tools, and Meta's research access is intended for qualified academic/nonprofit research. A commercial founder needs a hybrid process: automate public web/YouTube/owned analytics and manually supply selected competitor links or screenshots. [TikTok Research Tools eligibility](https://developers.tiktok.com/products/research-api/), [TikTok Research API FAQ](https://developers.tiktok.com/doc/research-api-faq), [Meta Content Library overview](https://about.fb.com/news/2023/11/new-tools-to-support-independent-research/)
 3. **The $0 video line is incorrect if ElevenLabs is used commercially.** ElevenLabs' free plan has no commercial license; Starter is currently $6/month and includes one. CapCut is usable as an editor, but its ordinary Sounds are non-commercial and its Commercial Sounds are licensed only for CapCut, TikTok, and TikTok for Business unless separate rights are obtained. [ElevenLabs pricing](https://elevenlabs.io/pricing), [ElevenLabs commercial-use guidance](https://help.elevenlabs.io/hc/en-us/articles/13313564601361-Can-I-publish-the-content-I-generate-on-the-platform), [CapCut Materials License Agreement](https://www.capcut.com/clause/material-license-agreement?lang=en)
 4. **A flat-rate Codex subscription should not be the production cost baseline.** `codex exec` can run scheduled jobs, but OpenAI recommends API keys as the default for automation; ChatGPT-managed authentication is an advanced option. Subscription use has shared five-hour windows and may also have weekly limits. Hermes/Codex can be an opportunistic worker, but the pipeline should still work through a metered API with a hard budget. [Codex non-interactive mode](https://learn.chatgpt.com/docs/non-interactive-mode), [Codex usage and pricing](https://learn.chatgpt.com/docs/pricing)
@@ -21,11 +21,11 @@ My recommended direction is:
 
 - Run **PoriPati and w3exam from day one**, with two separate brand profiles, evidence queues, approval states, and metric views.
 - Keep n8n, Claude API, Telegram approval, Nano Banana 2, a scripted Bangla text renderer, CapCut as an editor, and Cloudflare R2.
-- Choose a publisher path rather than making publishing infrastructure a launch blocker: **Upload-Post Basic**, **Metricool Starter**, **self-hosted or hosted Postiz**, or a **native-scheduler hybrid** are all workable two-brand options.
+- Prefer the **$14 VPSDime upgrade + self-hosted Postiz + R2** as the lowest recurring-cost automated publisher, subject to the disk audit and canary below. Upload-Post, Metricool, hosted Postiz, and the native hybrid remain fully specified alternatives rather than blockers.
 - If attention is tight, stagger **channels**, not brands: either launch four core channels for each brand (eight scheduler connections) or the complete seven-channel footprint for each brand (fourteen connections). Telegram remains direct through the bot.
 - Start with two core ideas **for each brand** per week, then adapt each idea to channel-native outputs. Do not promise 3 reels plus 1–2 statics per brand until measured founder time supports it.
 
-The generation, storage, and monitoring baseline remains roughly **$7–17/month** for both brands without paid voice or X. The publisher is a separate choice: $0 for native scheduling, $16/month equivalent for Upload-Post Basic billed annually, $20/month equivalent for Metricool Starter billed annually, $39–49/month for hosted Postiz, or $0 software plus infrastructure for self-hosted Postiz. Exact combined scenarios appear below.
+The generation, storage, and monitoring baseline remains roughly **$7–17/month** for both brands without paid voice or X. With the VPSDime upgrade, self-hosted Postiz makes the cash paid for the complete base system **$21–31/month**, including the whole $14 server bill. Because $7 of that server is already committed, the additional cash from today's state is **$14–24/month**. Exact comparisons appear below.
 
 ## What Postiz facilitates
 
@@ -50,12 +50,12 @@ The account count changes by channel strategy, not by whether both brands operat
 - **Full footprint:** those four plus X, Threads, and Bluesky for each brand = **14 connected social accounts**.
 - **Telegram:** publish directly with the existing bot rather than buying another scheduler connection.
 
-| Option | Two-brand fit and automation | Publisher cash | Combined with $7–17 baseline | Best use and main trade-off |
+| Option | Two-brand fit and automation | Publisher/infra change from today's $7 VPS | Additional cash from today, including $7–17 baseline | Best use and main trade-off |
 | --- | --- | ---: | ---: | --- |
 | **Native-scheduler hybrid** | Both brands run through n8n/Telegram; approved publish packets are scheduled in Meta Business Suite, TikTok Studio, YouTube Studio, and other native tools. | **$0** | **$7–17/month** | Lowest cash and no provider-app hosting. It adds manual publishing time and fragmented analytics, but it is a complete option rather than a blocked state. |
 | **Upload-Post Basic** | Two brands consume two of five profiles; each profile can connect one account on every supported platform. Full REST API, scheduling, analytics, and official n8n/Make integrations fit the existing workflow. | **$16/month equivalent, $192 billed annually** | **$23–33/month** | Best budget/API match. The free plan can connect both brands but allows only 10 uploads/month, so use it to validate both brands and exact formats before the annual commitment. X posts containing links cost another $19/month add-on; normal platform limits still apply. [Upload-Post pricing](https://www.upload-post.com/), [API/platform list](https://docs.upload-post.com/api/overview/) |
 | **Metricool Starter 5** | Two brands consume two of five brand slots, with one profile per network in each brand. Unlimited publishing, reporting, long analytics history, and analysis of up to 100 competitor profiles are included. Starter has no public API, Make, Zapier, or built-in approval workflow, so Telegram remains approval and the founder transfers/schedules the approved package in Metricool. | **$20/month annual or $25 monthly** | **$27–37 annual-equivalent or $32–42 monthly** | Best dashboard/research option and the strongest consolidation candidate. X is a $10/month add-on per connected X account; API and native approval require Advanced ($53 annual-equivalent/$67 monthly). [Metricool pricing](https://metricool.com/pricing/), [plan/API limits](https://help.metricool.com/plans-add-ons-and-api-access-explained-xux1u) |
-| **Postiz self-hosted** | Both brands can use the same installation, with n8n calling the Postiz API after Telegram approval. | **$0 software + infrastructure quote** | **$7–17 + infrastructure** | Best open-source/control option. Choose either a disk/RAM upgrade to the current host or a separate host; do not squeeze it into 8–10 GB of free disk. Provider app review and maintenance remain founder work. |
+| **Postiz self-hosted on upgraded VPSDime** | Both brands use one installation, with n8n calling the Postiz API after Telegram approval. Upgrade the existing Linux VPS from 4 vCPU/6 GB/30 GB to 4 vCPU/12 GB/60 GB. | **+$7/month** ($14 total VPS) | **$14–24/month** | Best recurring-cash automated option. Complete cash including the whole VPS is $21–31. Use R2 for all media, prebuilt images, bounded logs/executions, and the canary thresholds below. Provider app review and maintenance remain founder work. [VPSDime 12 GB plan](https://vpsdime.com/buy/linux12gb) |
 | **Postiz hosted** | Same Postiz workflow without server operations. Eight core accounts fit Team; fourteen full-footprint accounts fit Pro. | **$39/month Team (10 channels)** or **$49/month Pro (30)** | **$46–56** or **$56–66/month** | Fastest way to use Postiz for both brands. It remains below the repository's $75 growth ceiling in the base scenario, although it exceeds the $10–25 marginal target. [Postiz pricing](https://postiz.com/pricing) |
 | **Mixpost Pro self-hosted** | Unlimited social accounts and isolated workspaces for both brands; API, webhooks, automation, analytics, and approval flow are included. | **$299 one-time** (about **$24.92/month** over year one) + hosting | **$31.92–41.92 + hosting** in year one | Good one-time-license alternative when data ownership matters. It still needs a host, MySQL, Redis, queue workers, FFmpeg, updates, and provider configuration. [Mixpost pricing](https://mixpost.app/pricing), [server requirements](https://docs.mixpost.app/server/) |
 
@@ -66,10 +66,101 @@ Two other credible tools were compared but are weaker at this account count:
 
 ### Practical selection
 
-1. Choose **Upload-Post Basic** if Telegram-controlled, end-to-end n8n automation and low cash cost matter most.
-2. Choose **Metricool Starter** if competitor tracking, reports, a mature dashboard, and manual final scheduling are worth more than API automation.
-3. Choose **self-hosted Postiz** if control and open-source ownership justify provisioning the recommended infrastructure; choose **hosted Postiz** if the same feature set is worth $39–49/month to avoid server work.
-4. Choose the **native hybrid** if the immediate scheduler budget is $0. Both brands still launch; only the final scheduling step stays manual.
+1. Choose **the $14 VPSDime upgrade + self-hosted Postiz** if the founder accepts maintenance in exchange for the lowest automated-publisher cash cost.
+2. Choose **Upload-Post Basic** if avoiding Postiz maintenance and provider-app hosting is worth another $9/month.
+3. Choose **Metricool Starter** if competitor tracking, reports, a mature dashboard, and manual final scheduling are worth more than API automation.
+4. Choose **hosted Postiz** if the same feature set is worth $39–49/month to avoid server work.
+5. Choose the **native hybrid** if the immediate scheduler budget is $0. Both brands still launch; only the final scheduling step stays manual.
+
+## VPSDime sizing and cost optimization
+
+### The $14 tier is the sweet spot
+
+Public VPSDime pricing checked on 2026-08-12 shows this unusually favorable step-up. The customer portal remains authoritative for any legacy-plan difference and the exact prorated amount due today.
+
+| VPSDime choice | Host bill | Change from current | Resources | Assessment for this workload |
+| --- | ---: | ---: | --- | --- |
+| **Keep current Linux6GB** | $7/month | $0 | 4 vCPU, 6 GB RAM, 30 GB SSD, 2 TB transfer | CPU meets Postiz's recommendation, but RAM is below it and the repository projects only 8–10 GB free. Use this with a managed/native publisher, not the full Postiz stack. |
+| **Add 20 GB storage to current plan** | $12/month | +$5 | 4 vCPU, 6 GB RAM, 50 GB SSD | Technically reaches the disk headline but keeps RAM below recommendation. Saving $2 versus the full plan upgrade is not worth losing 6 GB RAM and 2 TB of additional transfer. |
+| **Add 30 GB storage to current plan** | $14.50/month | +$7.50 | 4 vCPU, 6 GB RAM, 60 GB SSD | Dominated by the $14 plan: it costs $0.50 more and provides half the RAM. VPSDime currently charges $2.50 per extra 10 GB. [Current-plan add-ons](https://vpsdime.com/buy/linux6gb) |
+| **Upgrade to Linux12GB** | **$14/month** | **+$7** | **4 vCPU, 12 GB RAM, 60 GB SSD, 4 TB transfer** | **Recommended.** It clears Postiz's 4 vCPU/8 GB/50 GB recommended headline while R2 supplies the separate persistent upload store. [Linux12GB plan](https://vpsdime.com/buy/linux12gb) |
+| **Keep current + add a second Linux6GB** | $14/month total | +$7 | Two isolated 4 vCPU/6 GB/30 GB boxes | Same cash and better isolation, but the Postiz box itself remains below recommended RAM/disk and introduces a second host, tunnel, backup, and network boundary. Useful as a disposable bake-off box, not the best steady state. |
+| **Upgrade to Linux18GB** | $21/month | +$14 | 4 vCPU, 18 GB RAM, 90 GB SSD, 6 TB transfer | Do not start here. It adds RAM/disk but no CPU. Move to it only if the measured $14 deployment crosses the explicit thresholds below. [Linux18GB plan](https://vpsdime.com/buy/vd18gb7) |
+
+VPSDime says a Linux-plan resize is live and instant, keeps the IP, preserves data, and bills only the prorated upgrade for the rest of the current term. A downgrade is also possible if the smaller disk has room, although it produces no refund for the current term. Take an independent backup anyway; “live” is not a substitute for recoverability. [VPSDime upgrade/downgrade procedure](https://vpsdime.com/knowledgebase/client-area/services/upgrade-downgrade)
+
+Do **not** buy these at launch:
+
+- The **$5/month nightly-backup add-on** has only three-day retention. Because the stack is reproducible from git, start with encrypted PostgreSQL/config backups to a private R2 bucket and test restores. Buy VPS snapshots later if their faster whole-server recovery is worth $60/year.
+- **Additional vCPU at $5/core** is unnecessary before measurements; the base four vCPUs already match Postiz's recommendation.
+- VPSDime's **$20 one-time offloaded MySQL** service does not help: Postiz requires PostgreSQL, not MySQL.
+- A **Storage VPS** is useful for large archives, not the live PostgreSQL/Temporal volumes. R2 Standard is cheaper and operationally simpler at this initial scale.
+
+### Cash comparison using the server already being paid for
+
+The following includes the complete current/upgraded VPS bill and the $7–17 two-brand generation/storage/monitoring baseline. It excludes optional voice, X, tax, and founder labor.
+
+| Publishing path | Server + publisher cash | Complete base-system cash | Additional cash from today's $7 VPS state |
+| --- | ---: | ---: | ---: |
+| **Native hybrid** | $7 | **$14–24/month** | **$7–17/month** |
+| **Upgrade VPSDime + self-host Postiz** | $14 | **$21–31/month** | **$14–24/month** |
+| **Keep VPS + Upload-Post Basic** | $7 + $16 annual-equivalent | **$30–40/month** | **$23–33/month** |
+| **Keep VPS + Metricool Starter** | $7 + $20 annual-equivalent / $25 monthly | **$34–44 / $39–49** | **$27–37 / $32–42** |
+| **Keep VPS + hosted Postiz Team** | $7 + $39 | **$53–63/month** | **$46–56/month** |
+| **Keep VPS + hosted Postiz Pro** | $7 + $49 | **$63–73/month** | **$56–66/month** |
+
+The self-hosted upgrade saves **$9/month or $108/year** versus Upload-Post Basic, **$32/month** versus hosted Postiz Team, and **$42/month** versus hosted Postiz Pro. That cash comparison needs a founder-time check: at a $20/hour value for founder time, the $108 annual Upload-Post saving pays for only **5.4 hours/year** of extra Postiz setup and maintenance. Self-hosting remains economically attractive only if operations stay deliberately boring, or if the larger VPS also benefits its existing workloads.
+
+### Lean one-box architecture
+
+Use the VPS for orchestration and publishing, not heavy media or AI computation:
+
+```text
+Claude/Gemini APIs -> n8n -> Telegram approval -> Postiz -> social providers
+                         |                         |
+                    durable state            Cloudflare R2 media
+                         |
+                 encrypted R2 backups
+```
+
+- Run the official prebuilt Postiz Docker Compose stack: Postiz, PostgreSQL, Redis, and Temporal. Do not build Postiz from source on production.
+- Set Postiz `STORAGE_PROVIDER=cloudflare`; never retain the authoritative media library on the 60 GB disk. R2's Standard free tier currently covers 10 GB-month, one million Class A operations, ten million Class B operations, and free egress. [Postiz R2 configuration](https://docs.postiz.com/configuration/r2), [R2 pricing](https://developers.cloudflare.com/r2/pricing/)
+- Use prefixes/lifecycle rules such as `candidates/` 7 days, `working/` 14 days, and `published/` 90 days. Keep brand originals only when explicitly marked. [R2 lifecycle rules](https://developers.cloudflare.com/r2/buckets/object-lifecycles/)
+- Keep image/video generation in external APIs and editing on the founder's normal tools. Send platform-ready media to Postiz; do not add a local LLM, generative-video service, or routine transcoding workload.
+- Stagger resource peaks: run n8n research/generation batches outside the publishing window, set n8n production concurrency to one initially, and do not overlap Hermes batch work with Postiz upgrades or large video publishes.
+- Put Docker JSON-log rotation on every service, prune n8n executions, and send final media directly to R2. A bigger disk is headroom, not permission for unbounded retention.
+- Keep Temporal UI disabled or behind an on-demand Compose profile in steady state. It is diagnostic UI, not part of the publish path.
+- Start with Postiz's own PostgreSQL/Redis topology. After one stable month, sharing a PostgreSQL cluster with n8n through separate databases/users is an optional small optimization—not a launch dependency.
+- Expose the administration UI only through Cloudflare Access. Publish only the OAuth, webhook, and required media endpoints; keep PostgreSQL, Redis, and Temporal private.
+
+Postiz v2.23.0, the latest release during this review, adds streamed provider uploads to reduce worker memory and a pending-post workflow intended to prevent duplicate posts. That strengthens the case for the 12 GB box. The older duplicate-loop report remains open, however, so reproduce that exact failure class before connecting automatic publishing to production accounts. [Postiz v2.23.0 release](https://github.com/gitroomhq/postiz-app/releases/tag/v2.23.0), [open duplicate-loop report](https://github.com/gitroomhq/postiz-app/issues/1321)
+
+### Upgrade and canary gates
+
+Before changing the plan, capture a backup and record this post-migration baseline:
+
+```text
+filesystem usage and inode usage
+Docker image, volume, container, and build-cache usage
+largest directories on the root filesystem
+24-hour and 7-day RAM/CPU high-water marks
+PostgreSQL/database sizes and backup size
+current monthly transfer
+```
+
+Then use **Manage VPS → Upgrade/Downgrade → Linux12GB**, confirm the customer-specific recurring and prorated totals, and pay only after the independent backup is restorable. No subscription purchase or account change was performed as part of this review.
+
+Run both brands from the first week, but use private/canary destinations for the publisher failure tests. Promote automatic publishing only when:
+
+- the cleaned pre-Postiz host uses no more than roughly 22 GB, matching the repository's existing 8–10 GB-free expectation on the old disk;
+- steady-state disk use after Postiz is below 36 GB (60%), the warning fires at 42 GB (70%), and nonessential generation pauses at 48 GB (80%);
+- at least 12 GB remains free during an update with both current and replacement images present;
+- seven-day peak RAM stays below 10 GB with no OOM kill, uncontrolled swap/thrashing, or overlapping batch spike;
+- both brand workspaces pass immediate/scheduled publish, token refresh, timeout, cancel, and delete tests on every enabled provider;
+- the duplicate-loop reproduction does not repeat a post, the publisher kill switch works, and Telegram approval cannot be bypassed;
+- database/config restore succeeds on a disposable environment and R2 media URLs remain valid for provider pulls.
+
+Move to the $21/18 GB/90 GB plan only if lifecycle/pruning cannot keep disk below 42 GB or seven-day peak RAM repeatedly exceeds 10 GB. Because the $21 plan still has four vCPUs, a sustained CPU bottleneck should trigger workload rescheduling or the separately priced vCPU add-on—not a blind RAM/disk upgrade.
 
 ## Tool-choice review
 
@@ -79,9 +170,9 @@ Two other credible tools were compared but are weaker at this account count:
 | **Claude API** | **Keep, with model routing** | Budget $4–8/month for two brands | Use Haiku 4.5 for extraction, classification, caption variants, and simple rewrites. Use Sonnet 5 for weekly synthesis and final risk/quality review only. Batch processing gets a 50% token discount. Current standard prices are $1/$5 per million input/output tokens for Haiku 4.5 and $2/$10 for Sonnet 5; web search is $10 per 1,000 searches plus tokens. [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing) |
 | **Hermes using flat-rate Codex auth** | **Optional experiment; remove from critical path** | Marginal cash may be $0, but capacity is shared and limited | Do not route publishing, approval state, or time-sensitive weekly jobs through it. If retained, use it for noncritical offline synthesis with a Claude API fallback. The third-party Hermes integration and its authentication behavior still need a controlled test. Never copy `auth.json` into a container or repository; OpenAI describes it as password-equivalent. [Codex automation authentication](https://learn.chatgpt.com/docs/non-interactive-mode) |
 | **Telegram Bot API + custom n8n flow** | **Keep; prefer over Hermes gateway** | $0 | This is the smallest deterministic approval surface. Use buttons for Approve, Edit, and Reject; expire old approvals; and store the decision outside Telegram. Telegram is the interface, not the source of truth. |
-| **Postiz self-hosted** | **Viable after choosing an infrastructure route** | $0 software fee; hosting quote plus setup, patching, and app-review effort | It covers the desired providers and has an API. The current shared disk is too small, so choose a disk/RAM expansion or a separate host that meets the documented requirements. Both brands can then share the installation. TikTok needs a public HTTPS/verified media domain, and unaudited clients can publish only privately. New unverified YouTube API projects also have private-only uploads until audit. [Postiz TikTok setup](https://docs.postiz.com/providers/tiktok), [TikTok Direct Post restrictions](https://developers.tiktok.com/doc/content-posting-api-reference-direct-post), [YouTube upload audit rule](https://developers.google.com/youtube/v3/docs/videos/insert) |
-| **Postiz production readiness** | **Canary before enabling automatic publish** | Mostly founder time | As of this review, an open, user-reported Postiz issue describes a Temporal retry path that can duplicate a successful social post repeatedly. Prove the selected release cannot reproduce it, or deploy a verified fix, and provide a publisher kill switch. Postiz supports only its latest release for security, and its 2026 advisory history makes staging and prompt patching essential. Both brands can continue via native or managed publishing during this technical validation. [Open duplicate-post issue](https://github.com/gitroomhq/postiz-app/issues/1321), [Postiz security policy/advisories](https://github.com/gitroomhq/postiz-app/security) |
-| **Upload-Post** | **Best low-cost API-first candidate** | Free test; Basic $192/year ($16/month equivalent) | Its profile model is unusually favorable here: PoriPati and w3exam need two profiles even if each connects all supported networks. The Basic tier includes five profiles, unlimited uploads, scheduling, analytics, REST API, and n8n/Make support. Validate both real brands, all required post formats, token refresh, metrics, cancellation, and failure behavior on the free allowance before paying annually. [Upload-Post pricing](https://www.upload-post.com/), [Upload-Post API overview](https://docs.upload-post.com/api/overview/) |
+| **Postiz self-hosted** | **Preferred recurring-cash automation path** | $0 software; VPS rises from $7 to $14/month | The Linux12GB upgrade provides 4 vCPU, 12 GB RAM, 60 GB SSD, and 4 TB transfer for a $7 marginal increase. With R2 uploads and bounded local data, both brands can share the installation. TikTok needs a public HTTPS/verified media domain, and unaudited clients can publish only privately. New unverified YouTube API projects also have private-only uploads until audit. [VPSDime Linux12GB](https://vpsdime.com/buy/linux12gb), [Postiz TikTok setup](https://docs.postiz.com/providers/tiktok), [TikTok Direct Post restrictions](https://developers.tiktok.com/doc/content-posting-api-reference-direct-post), [YouTube upload audit rule](https://developers.google.com/youtube/v3/docs/videos/insert) |
+| **Postiz production readiness** | **Canary before enabling automatic publish** | Mostly founder time | Postiz v2.23.0 adds streamed media and a pending-post duplicate-protection workflow. An older user-reported Temporal duplicate-loop issue remains open, so test that exact reproduction and provide a publisher kill switch instead of assuming the newer mechanism covers every failure path. Postiz supports only its latest release for security, making staged prompt patching essential. Both brands can continue via native or managed publishing during validation. [Postiz v2.23.0](https://github.com/gitroomhq/postiz-app/releases/tag/v2.23.0), [open duplicate-post issue](https://github.com/gitroomhq/postiz-app/issues/1321), [Postiz security policy/advisories](https://github.com/gitroomhq/postiz-app/security) |
+| **Upload-Post** | **Best managed API-first candidate** | Free test; Basic $192/year ($16/month equivalent) | Its profile model is unusually favorable here: PoriPati and w3exam need two profiles even if each connects all supported networks. The Basic tier includes five profiles, unlimited uploads, scheduling, analytics, REST API, and n8n/Make support. It costs $9/month more than the VPS upgrade but removes most Postiz maintenance/provider-app hosting. Validate both real brands, all required post formats, token refresh, metrics, cancellation, and failure behavior on the free allowance before paying annually. [Upload-Post pricing](https://www.upload-post.com/), [Upload-Post API overview](https://docs.upload-post.com/api/overview/) |
 | **Metricool Starter** | **Best managed research/dashboard candidate** | $20/month equivalent annually or $25 month-to-month for up to five brands | It can schedule both brands and adds competitor tracking, reporting, and long analytics history. Starter does not expose the API/Make/Zapier or its native approval system, so use Telegram approval and schedule the approved output through Metricool's UI. This is a deliberate UI-first option, not an automated Postiz substitute. [Metricool pricing](https://metricool.com/pricing/), [Metricool plan/API limits](https://help.metricool.com/plans-add-ons-and-api-access-explained-xux1u) |
 | **Mixpost Pro** | **Credible one-time self-hosted option** | Lite $0; Pro $299 one-time with one year of updates | Lite only publishes to Facebook Pages, X, and Mastodon, so it does not meet the IG/TikTok/YouTube requirement. Pro supports the full set, unlimited accounts/workspaces, approval flow, API, MCP, and webhooks. It amortizes to $24.92/month in year one before AI or hosting and still needs MySQL, Redis, workers, FFmpeg, provider apps, and operational care. [Mixpost pricing and platform comparison](https://mixpost.app/pricing), [Mixpost server requirements](https://docs.mixpost.app/server/), [Mixpost worker tiers](https://docs.mixpost.app/guides/horizon/) |
 | **Hosted Postiz** | **Ready-to-use Postiz option** | $39/month for 10 channels; $49 for 30 | Eight core accounts across both brands fit Team at $39; fourteen full-footprint accounts fit Pro at $49. It exceeds the marginal target but avoids VPS changes and provider-app hosting work, and the base combined total remains under the $75 growth ceiling. [Postiz pricing](https://postiz.com/pricing) |
@@ -248,7 +339,7 @@ For images, `48 × $0.067 = $3.22`, plus input tokens and retries. A **$3–6 to
 | Monitoring/backup allowance | $0–2 | $0–2 | Use existing systems if available; do not omit restore testing. |
 | **Base-system total** | **$7–17** | **$15–33 for two X-enabled brands** | Excludes the chosen publisher, VPS expansion/new host, tax, committed subscriptions, and founder time. |
 
-The README's **$10–25/month** marginal goal is plausible as an all-in target with the native hybrid, and is nearly met by Upload-Post at the low end ($23–33 combined). Metricool and Postiz are still valid options under the broader $75 growth ceiling, but not under the narrow $25 cap. In every case:
+The README's **$10–25/month** marginal goal is achievable with the native hybrid and with the recommended self-hosted route: the VPSDime upgrade plus the base AI system adds **$14–24/month** to today's committed $7 server. Upload-Post reaches $23–33 additional, while Metricool and hosted Postiz fit only the broader $75 growth ceiling. In every case:
 
 - founder voice is used or voice is not needed;
 - X is disabled or tightly limited;
@@ -275,14 +366,14 @@ Do not label the $7–17 base as the complete all-in cost when a publisher, VPS 
 
 Postiz is an option, not a prerequisite for launching the two brands. Choose one of these routes:
 
-1. **Expand the current VPS** so Postiz has durable disk headroom and preferably the documented 8 GB recommended RAM, without taking capacity from existing workloads.
-2. **Use a separate Postiz host** sized near the documented 4 vCPU, 8 GB RAM, and 50 GB recommended configuration. This is the cleanest self-hosted route.
+1. **Recommended: upgrade the current VPS to Linux12GB for $14/month.** Its 4 vCPU, 12 GB RAM, and 60 GB SSD match or exceed Postiz's recommended headline; R2 supplies the separate upload volume. The marginal infrastructure cost is $7/month.
+2. **Isolation alternative: add another $7 Linux6GB host.** It keeps Postiz away from existing workloads for the same combined $14 bill, but the Postiz node itself remains below the recommended 8 GB/50 GB and doubles operational surfaces.
 3. **Use hosted Postiz** at $39/month for the eight-account core footprint or $49/month for the fourteen-account full footprint.
 4. **Use Upload-Post, Metricool, or the native hybrid** while retaining exactly the same research, asset, Telegram-approval, and measurement pipeline.
 
-The current 8–10 GB projected free space is not enough for the self-hosted route. For either self-host option, enable automatic publishing only after these readiness checks:
+The current 8–10 GB projected free space is not enough before the resize. After upgrading, enable automatic publishing only after these readiness checks:
 
-1. At least 20 GB of durable disk is available to the Postiz stack after reserving space for the operating system, existing workloads, logs, backups, image pulls, database growth, and upgrades. Given the shared 30 GB disk, the safer answer is likely a disk expansion or separate host.
+1. The 60 GB filesystem stays below the 60% steady-state and 70% warning thresholds defined in the VPSDime section, including existing workloads, logs, databases, current images, and one replacement-image set.
 2. A seven-day staging run records RAM, swap, CPU, database, Temporal, image-pull, and disk high-water marks under scheduled workloads.
 3. R2 is configured for public provider pulls through a verified media domain, with bounded lifecycle rules.
 4. The selected release is the latest security-supported version, pinned by image digest in deployment; updates are staged promptly when advisories/releases appear.
@@ -307,7 +398,7 @@ production workflow concurrency: 1 during initial rollout
 per-workflow timeout: bounded
 ```
 
-n8n currently defaults to retaining successful executions and a 14-day pruning age, which is too generous for a 30 GB shared host carrying media workflows. Binary execution data remains local in Community Edition even if final assets are copied to R2, so inspect and alert on both the database and binary-data directory. [n8n execution environment variables](https://docs.n8n.io/deploy/host-n8n/configure-n8n/basic-configuration/use-environment-variables/executions)
+n8n currently defaults to retaining successful executions and a 14-day pruning age, which is too generous even after moving to a 60 GB shared host carrying media workflows. Binary execution data remains local in Community Edition even if final assets are copied to R2, so inspect and alert on both the database and binary-data directory. [n8n execution environment variables](https://docs.n8n.io/deploy/host-n8n/configure-n8n/basic-configuration/use-environment-variables/executions)
 
 Use built-in nodes or direct HTTP requests where practical. Each community node is another dependency that can access credentials and needs separate review/pinning.
 
@@ -330,7 +421,7 @@ Keep source templates, prompts, profile data, and workflow exports in git; do no
 - Measure current free disk, per-container memory, database sizes, Docker storage, backup size, and current monthly committed spend.
 - Create separate profiles for **PoriPati and w3exam**. Give each two core weekly ideas, three content pillars, and one primary business metric.
 - Choose the eight-account core footprint or fourteen-account full footprint; both choices include both brands.
-- Pick a publisher evaluation path: Upload-Post free validation, Metricool Starter trial/UI validation, Postiz hosted trial, provisioned self-hosted Postiz, or native scheduling.
+- Use the $14 VPSDime/self-hosted Postiz path as the default evaluation; keep Upload-Post free validation, Metricool Starter, hosted Postiz, and native scheduling as the measured alternatives.
 - Record the founder's current manual time and outcomes for both brands as the comparison baseline.
 
 ### Weeks 1–2: research and approval, no auto-publish
@@ -350,7 +441,7 @@ Keep source templates, prompts, profile data, and workflow exports in git; do no
 
 - **Upload-Post path:** connect a profile for each brand and test every required format, scheduling, analytics, token refresh, timeout, cancellation, and duplicate protection before buying Basic annually.
 - **Metricool path:** connect a Metricool brand for each business, validate competitor tracking and reports, and measure the manual time from Telegram approval to final scheduling.
-- **Postiz path:** use hosted Postiz immediately, or stage the latest self-hosted release with R2 after choosing the expanded/separate-host route. Connect both brand groups and use canary posts before automatic publishing.
+- **Postiz path:** take and test the independent backup, upgrade the existing Linux VPS to the $14/12 GB/60 GB tier, configure R2, and stage the latest supported Postiz release. Connect both brand groups and use canary posts before automatic publishing. Hosted Postiz remains the no-server variant.
 - **Mixpost path:** evaluate Pro only if its one-time-license and self-host model are preferable; Lite is not a substitute for the requested channels.
 - **Native path:** keep both brands on native scheduling and optimize the Telegram publish packet so the manual step is fast and auditable.
 - Retain a native/manual fallback for both brands until every automated provider passes visibility, permission, retry, and failure testing.
@@ -367,13 +458,13 @@ Keep source templates, prompts, profile data, and workflow exports in git; do no
 
 ## Specific changes I would make to the founding plan
 
-1. Change “Postiz + postgres/redis ~1 GB” to **unverified until measured; official stack includes Temporal; host currently fails the disk floor**.
+1. Change “Postiz + postgres/redis ~1 GB” to **unverified until measured; official stack includes Temporal; current $7 host lacks headroom; the $14 VPSDime tier is the cost-optimized candidate**.
 2. Change “Hermes as the ~$0 batch alternative” to **optional noncritical worker; API remains the supported fallback and budget baseline**.
 3. Change “competitor pages” to **founder-supplied competitor evidence plus officially accessible sources**.
 4. Change image cost from `$5–10 per active brand` to an initial **$3–6 total for two brands**, with explicit output assumptions and a hard cap.
 5. Split video into **$0 founder voice** or **$6 commercial AI voice**. Remove unstable AI-video list prices from the base budget.
 6. Replace fixed X `$2–3/brand` with **console-verified pricing and a $1–5/brand experimental spend cap**; default off.
-7. Replace a single assumed Postiz deployment with **five two-brand publisher choices**: Upload-Post, Metricool, self-hosted Postiz, hosted Postiz, or a native hybrid. Apply capacity and reliability checks only to the self-host route.
+7. Make **the $14 VPSDime upgrade + R2 + self-hosted Postiz** the recurring-cash recommendation, with Upload-Post, Metricool, hosted Postiz, and a native hybrid retained as explicit two-brand alternatives.
 8. Start **both brands at two core ideas/week each**. If workload is high, reduce destinations or cadence symmetrically instead of postponing a brand.
 9. Add a formal approval hash/state machine, edit invalidation, idempotency, publish kill switch, and D+1/D+7 metric windows.
 10. Add a cost ledger that distinguishes license fee, marginal usage, committed subscription/hosting, setup labor, and contingency.
@@ -382,8 +473,8 @@ Keep source templates, prompts, profile data, and workflow exports in git; do no
 
 Run **PoriPati and w3exam together from the first week** through the same evidence, creation, Telegram approval, and measurement architecture, while keeping their data and decisions separate.
 
-My first choice for low-cost automation is **n8n + Claude API + Telegram + scripted HTML/CSS image templates + Nano Banana 2 + R2 + Upload-Post Basic**. It gives both brands API publishing for a $16/month annual equivalent and keeps the combined baseline near $23–33/month. Validate both profiles on the free allowance before committing $192.
+My first choice for low-cost automation is **the existing VPSDime server upgraded to its $14 Linux12GB tier + n8n + Claude API + Telegram + scripted HTML/CSS image templates + Nano Banana 2 + R2 + self-hosted Postiz**. It gives both brands API publishing for a $7/month infrastructure increase and keeps complete base-system cash near **$21–31/month**, or **$14–24 additional** beyond today's committed $7 server.
 
-If competitor analysis and a polished dashboard are more valuable than automatic handoff, use **Metricool Starter** at $20 annual-equivalent/$25 monthly. If open-source control is the priority, use **Postiz** on an expanded or separate host; hosted Postiz is the operationally simpler $39–49 option. If no scheduler budget is available, use the native hybrid for both brands at $0 publisher cash. Mixpost Pro remains a credible $299 one-time self-hosted alternative.
+This recommendation is conditional on the preflight, seven-day resource canary, restore test, and duplicate-post test. If Postiz consumes more than roughly 5.4 extra founder hours per year at a $20/hour time value, **Upload-Post Basic** becomes economically competitive despite costing $9/month more. If competitor analysis and a polished dashboard matter more than automatic handoff, use **Metricool Starter** at $20 annual-equivalent/$25 monthly. Hosted Postiz is the operationally simpler $39–49 option; the native hybrid keeps both brands active with no publisher fee. Mixpost Pro remains a credible $299 one-time alternative.
 
 This ordering protects the scarce resource in the plan: not tokens or image credits, but the solo founder's attention.
