@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rtk git status:*)",
+      "Bash(rtk git diff:*)",
+      "Bash(rtk git log:*)",
+      "Bash(rtk grep:*)",
+      "Bash(rtk ls:*)",
+      "Bash(rtk find:*)",
+      "Bash(git worktree list:*)",
+      "Bash(git branch --list:*)",
+      "Bash(scripts/lanes.sh)",
+      "Bash(scripts/new-worktree.sh:*)"
+    ],
+    "ask": [
+      "Bash(git merge:*)",
+      "Bash(scripts/rm-worktree.sh:*)"
+    ],
+    "deny": [
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/*.key)",
+      "Read(**/*.pem)",
+      "Read(**/credentials*.json)",
+      "Read(**/media/**)",
+      "Read(**/node_modules/**)",
+      "Bash(git push --force:*)",
+      "Bash(git commit --no-verify:*)"
+    ]
+  }
+}

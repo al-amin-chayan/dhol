@@ -1,0 +1,38 @@
+# Agent-isolation worktrees (scripts/new-worktree.sh). Each lives on its own
+# branch and is removed via scripts/rm-worktree.sh once merged.
+.worktrees/
+
+# Per-worktree lane metadata written by scripts/new-worktree.sh
+.dholbeat-agent
+.git-commit-template
+
+# Secrets — real values live in the password manager and on the host.
+# Only *.example templates are committed.
+.env
+.env.*
+!.env.example
+!*.env.example
+*.key
+*.pem
+credentials*.json
+
+# Generated / ephemeral media: purge after publish, never committed.
+media/
+out/
+*.mp4
+*.mov
+*.png
+*.jpg
+*.jpeg
+!docs/**/*.png
+
+# n8n runtime data (only exported flow JSON under n8n/ is committed)
+stack/data/
+n8n/.cache/
+
+# Tooling noise
+node_modules/
+__pycache__/
+.venv/
+.DS_Store
+*.log

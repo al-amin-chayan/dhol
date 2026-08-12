@@ -20,6 +20,10 @@
 | Hosting | VPSDime box (Dallas) — decided 2026-08-12 |
 | Budget | Shares the founder's ≤$75/mo growth ceiling; platform's own marginal cost ≈ $10–25/mo |
 
+> **Working in this repo?** Read `AGENTS.md` first (auto-loads in Claude Code
+> and Codex sessions), and run `scripts/lanes.sh` before starting a task —
+> both agents work here in parallel on isolated worktree lanes.
+
 ## 1. Objective
 
 One self-hosted, multi-brand platform that keeps every project's social
@@ -165,3 +169,4 @@ moving all batch load onto it.
 | --- | --- |
 | 2026-08-12 | Extracted from PoriPati AI_GROWTH_ENGINE_PLAN.md (Track 2) as a standalone project seed: brand-profile model, VPSDime hosting, Hermes batch roles, costs, phases |
 | 2026-08-12 | Named **Dholbeat** (dholbeat.com + GitHub handle verified available); seeded as this repository's README/plan; scope removed from the PoriPati repo |
+| 2026-08-12 | Repo configured for parallel Claude Code + Codex work: `AGENTS.md` (+ `CLAUDE.md` symlink), per-agent worktree lanes (`scripts/new-worktree.sh` / `rm-worktree.sh` / `lanes.sh`), cross-review + handoff protocol (`docs/agents/parallel-work.md`), skeleton `brands/ stack/ n8n/ prompts/` |
