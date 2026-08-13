@@ -1,5 +1,14 @@
 # AI-assisted social media plan review
 
+> **Topology superseded 2026-08-13.** This review's single-Linux12GB
+> recommendation and “preserve Paperclip” adoption framing are superseded by
+> the founder-approved [two-VPS infrastructure-as-code plan](../plans/two-vps-infrastructure-as-code.md):
+> two Linux6GB services in the existing account, with Paperclip managed through
+> before/after effective-configuration parity. The publisher choice remains
+> open between Postiz and Mixpost. The research, tool comparison, and other cost
+> findings below remain historical inputs unless the newer plan explicitly
+> changes them.
+
 **Reviewed:** 2026-08-12  
 **Plan reviewed:** the founding plan in `README.md`  
 **Perspective:** a solo founder operating PoriPati and w3exam from the first week, with a target of 1–2 hours per brand per week and roughly $10–25/month of marginal platform spend

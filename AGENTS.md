@@ -20,9 +20,11 @@ ambiguous calls, not the dispatcher.
    SaaS tier. Show a monthly-cost table whenever you add a paid component.
 2. **Office laptop only, chronically full SSD.** Nothing load-bearing may live
    only on the laptop. Everything must be reproducible from git: compose files,
-   n8n flow exports (JSON), brand profiles, prompts. Secrets live in a password
-   manager and in `.env` files that are **never** committed. Generated media is
-   ephemeral — purge after publish.
+   n8n flow exports (JSON), brand profiles, prompts. No plaintext secret may be
+   committed. SOPS+age ciphertext is allowed only under the committed
+   `.sops.yaml` policy; age private keys and provider recovery logins live in a
+   password manager, and `.env` files are **never** committed. Generated media
+   is ephemeral — purge after publish.
 3. **Disk is the binding constraint** on the VPSDime host (§5 of `README.md`).
    Anything that grows unboundedly on disk is a bug.
 
@@ -85,6 +87,7 @@ Detail — worktree lifecycle, conflict recovery, handoff notes:
 |---|---|---|
 | `README.md` | Founding plan, decisions, change log | shared — append only |
 | `brands/` | Per-brand profile YAML (the extension point, §4) | brand lane |
+| `infra/` | Ansible/OpenTofu desired state, inventory, SOPS policy/ciphertext | infra lane |
 | `stack/` | Docker compose, env templates, host bootstrap | infra lane |
 | `n8n/` | Exported n8n flow JSON (researcher, drafting, publish) | pipeline lane |
 | `prompts/` | LLM prompt templates, brand-agnostic | content lane |
@@ -119,8 +122,10 @@ outside `brands/`, that is the bug; fix the abstraction instead.
   (Meta, TikTok, YouTube) — see `README.md` §8.
 - **Bangla text is never rendered by an image model.** Always a separate
   overlay step.
-- **No secrets in git.** `.env.example` templates only; real values go to the
-  password manager and the host.
+- **No plaintext secrets in git.** SOPS+age-encrypted values may be committed
+  only as `*.sops.yml` under the `.sops.yaml` policy with CI verification. Age
+  private keys and provider recovery logins stay in the password manager;
+  `.env` files are never committed.
 - **No unbounded disk growth.** Media is purge-after-publish.
 
 ## Open items needing the founder
