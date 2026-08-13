@@ -1,7 +1,7 @@
 # codex/two-vps-iac-plan
 
 Agent: codex  
-Head: pending commit
+Head: see PR metadata; the cross-review verdict must record the exact reviewed SHA
 
 ## What changed
 
