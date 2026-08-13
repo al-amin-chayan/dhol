@@ -14,10 +14,10 @@
 | Field | Value |
 | --- | --- |
 | Owner | Chayan |
-| Last updated | 2026-08-12 |
+| Last updated | 2026-08-13 |
 | Status | Draft — extracted from the PoriPati AI growth engine plan (Track 2) |
 | Brands (initial) | **PoriPati** (salon/beauty marketplace, BD) · **w3exam** (exam-prep) |
-| Hosting | VPSDime box (Dallas) — decided 2026-08-12 |
+| Hosting | Two VPSDime Linux6GB services in one account — decided 2026-08-13 |
 | Budget | Shares the founder's ≤$75/mo growth ceiling; platform's own marginal cost ≈ $10–25/mo |
 
 > **Working in this repo?** Read `AGENTS.md` first (auto-loads in Claude Code
@@ -44,6 +44,10 @@ No per-project rebuild: adding a brand = adding a **brand profile**, not code.
 - **Reproducible from git** (founder's laptop-loss rule): compose stack,
   n8n flow exports (JSON), brand profiles, prompts — all committed.
   Local media is ephemeral: purge after publish (or push to B2).
+- **No plaintext secrets in git.** SOPS+age-encrypted `*.sops.yml` values may
+  be committed only under the repository's `.sops.yaml` policy with CI
+  verification. Age private keys and provider recovery logins stay in the
+  password manager; `.env` files are never committed.
 - **Human approval gate.** Nothing publishes without founder approval in
   the brand's Telegram channel. AI-content disclosure rules honoured
   (see §8 research).
@@ -55,7 +59,7 @@ No per-project rebuild: adding a brand = adding a **brand profile**, not code.
 | **Social Media Researcher** | Weekly per-brand: niche trend scan, competitor pages, own-post engagement analytics → audience-interest analysis → next week's suggested content calendar | n8n scheduled flow + LLM (Claude API; Hermes cron as the ~$0 batch alternative) |
 | **Content Studio** | Turns approved ideas into drafts: bilingual captions, images (AI background + manual/scripted text overlay), short vertical videos | Claude API · Nano Banana 2 / Flux (fal.ai) · Canva free (Bangla/Latin text overlay) · CapCut + stock B-roll + ElevenLabs voiceover |
 | **Approval queue** | Per-brand Telegram channel: idea approval (weekly batch) + final draft approval | Telegram Bot API (or Hermes Telegram gateway) |
-| **Publisher** | Scheduled cross-posting to all brand channels | **Postiz** self-hosted (one workspace per brand) · Telegram Bot API (channels) · X API pay-per-use |
+| **Publisher** | Scheduled cross-posting to all brand channels | **Postiz** self-hosted by default (one workspace per brand), or Mixpost if the open comparison selects it · Telegram Bot API (channels) · X API pay-per-use |
 | **Metrics loop** | Pull engagement per post; feeds the next researcher run | Platform insights APIs via n8n |
 
 ## 4. Brand profile (the extension point)
@@ -80,48 +84,61 @@ visual: {palette: ..., logo: ..., fonts: ...}
 no_go: ["AI avatar testimonials", "medical claims", ...]
 ```
 
-## 5. Hosting & operations (decided 2026-08-12)
+## 5. Hosting & operations (decided 2026-08-13)
 
-**VPSDime box** (Dallas, 4 vCPU LXC, 6GB RAM, 30GB disk; already runs
-paperclip; w3exam migrating off):
+The founder approved **two independent VPSDime Linux6GB services under the
+existing customer account**, at $7/month each ($14/month total):
 
-- RAM/CPU: comfortable — full stack (n8n ~300MB, Postiz + postgres/redis
-  ~1GB, Hermes gateway ~0.5GB) ≈ 2GB; host is oversold but nothing here is
-  latency-critical.
-- Public HTTPS: existing cloudflared tunnels → Postiz UI behind Cloudflare
-  Access; webhook endpoints as needed.
-- **Binding constraint: disk** (80% full at decision time). Conditions:
-  deploy after w3exam migration + `docker system prune` (expect ~8–10GB
-  free); disk alert at 85%; media ephemeral; VPSDime storage add-on only
-  when actually forced.
-- Isolation from the PoriPati Hetzner fleet is physical.
+| Host | Workloads | Operating boundary |
+| --- | --- | --- |
+| `core-1` | Paperclip, n8n, bounded Hermes worker, monitoring, restic | Paperclip becomes reproducible from Git under a strict before/after configuration-parity guard. A planned container recreation is allowed; its image digest and effective configuration must not change during adoption. |
+| `publish-1` | The selected publisher stack, monitoring, restic | Postiz is the current default but the Postiz-vs-Mixpost decision remains open. The publisher and its state stay isolated from Paperclip. |
 
-**Hermes Agent** (founder's install: GPT-5.5 via flat-rate Codex sub) runs
-here as the cheap batch worker (researcher sweeps, drafting runs via
-`hermes cron`) and Telegram-gateway candidate. Verify Codex fair-use before
-moving all batch load onto it.
+These hosts are not a cluster and cannot pool their RAM or disk. The benefit is
+two four-vCPU scheduling envelopes and two failure domains. Public traffic uses
+separate Cloudflare tunnels; backups use separate encrypted restic repositories
+in private R2. The 6GB/30GB publisher is a measured canary below Postiz's
+recommended 8GB/50GB sizing, with an evidence-based publisher-only upgrade
+path. The detailed and current infrastructure source of truth is the
+[two-VPS infrastructure-as-code plan](docs/plans/two-vps-infrastructure-as-code.md).
+
+**Hermes Agent** is a planned, noncritical resident of `core-1`: useful for
+bounded research and drafting batches, but never required for an approval or
+publishing deadline. n8n remains the deterministic workflow authority, with a
+metered API fallback rather than a flat-rate Codex subscription as the
+production cost baseline.
 
 ## 6. Costs (platform marginal, verified Aug 2026)
 
 | Item | Est./mo |
 | --- | --- |
-| n8n, Postiz, Chat approval bot (self-hosted) | $0 |
+| n8n, selected publisher, Chat approval bot (self-hosted software) | $0 |
 | LLM (Claude API; less if Hermes batch absorbs it) | $3–8 |
 | Image gen (Nano Banana 2 / Flux) | $5–10 per active brand |
 | Video (CapCut + stock + ElevenLabs DIY) | $0 (paid gen only for proven formats: Hailuo $0.19–0.56/clip, Kling $6.99/mo) |
 | X API (pay-per-use, ~4 posts/wk) | $2–3 per brand using X |
 | **Total (two brands)** | **≈ $10–25** |
 
+The approved second $7 host keeps the initial VPS bill at $14, the
+same as the earlier single-Linux12GB recommendation. From today's already-paid
+$7 host, the new host plus the $7–17 generation/storage baseline is an
+additional **$14–24/month**, within the $10–25 marginal target. If measured
+publisher pressure requires upgrading only `publish-1` to $14, additional cash
+becomes **$21–31/month** and total cash becomes **$28–38/month**; that escalation
+requires a fresh founder cost decision. See the linked IaC plan for thresholds.
+
 ## 7. Phases
 
-1. **Stack up** (post-w3exam migration): compose stack (n8n + Postiz +
-   postgres/redis) on VPSDime; connect PoriPati brand channels to Postiz;
-   Telegram approval bot.
-2. **Pipeline v1 (PoriPati brand):** researcher flow → weekly idea batch →
-   founder approval → draft generation → approval → scheduled publish.
-   Target cadence: 3 reels + 1–2 statics/week.
-3. **Second brand (w3exam):** add brand profile + workspace; prove the
-   brand-agnostic claim (zero code changes).
+1. **Infrastructure as code:** capture and parity-adopt Paperclip on `core-1`,
+   repair/restore-test backups, then deploy isolated n8n and bounded Hermes.
+   Bootstrap founder-approved `publish-1` from the same repository and deploy
+   the selected Postiz or Mixpost stack after the open tool decision closes.
+2. **Pipeline v1 (both brands):** create separate PoriPati and w3exam profiles,
+   evidence queues, approval states, publisher workspaces, and metric views.
+   Start with two core ideas for each brand per week and stagger channels—not
+   brands—if founder attention is tight.
+3. **Prove the extension point:** run both brands without hard-coded brand
+   logic; adding any later brand is a profile and workspace change, not code.
 4. **Metrics loop:** engagement pulled per post; researcher uses it.
 5. **Extract to own repo** as the project package; this file becomes its
    founding README/plan.
@@ -158,6 +175,9 @@ moving all batch load onto it.
       2026-08-12); push to GitHub `dholbeat` when created
 - [ ] Register dholbeat.com (availability confirmed 2026-08-12 — act soon)
 - [ ] Create the GitHub repo + remote (handle `dholbeat` free as of 2026-08-12)
+- [x] ~~Hosting topology~~ → **two $7/month VPSDime Linux6GB services under
+      the existing account**, founder-approved 2026-08-13; purchase and manage
+      `publish-1` through the detailed IaC plan
 - [ ] Postiz vs Mixpost final call (Postiz default: AGPL, 30+ platforms)
 - [ ] Approval bot: custom Telegram bot vs Hermes gateway
 - [ ] Per-brand X usage (worth $2–3/mo per brand?)
@@ -170,3 +190,4 @@ moving all batch load onto it.
 | 2026-08-12 | Extracted from PoriPati AI_GROWTH_ENGINE_PLAN.md (Track 2) as a standalone project seed: brand-profile model, VPSDime hosting, Hermes batch roles, costs, phases |
 | 2026-08-12 | Named **Dholbeat** (dholbeat.com + GitHub handle verified available); seeded as this repository's README/plan; scope removed from the PoriPati repo |
 | 2026-08-12 | Repo configured for parallel Claude Code + Codex work: `AGENTS.md` (+ `CLAUDE.md` symlink), per-agent worktree lanes (`scripts/new-worktree.sh` / `rm-worktree.sh` / `lanes.sh`), cross-review + handoff protocol (`docs/agents/parallel-work.md`), skeleton `brands/ stack/ n8n/ prompts/` |
+| 2026-08-13 | Founder approved two $7/month Linux6GB VPSDime services in the existing account: `core-1` for Paperclip/n8n/Hermes and `publish-1` for the selected publisher. The [IaC plan](docs/plans/two-vps-infrastructure-as-code.md) supersedes the earlier single-host topology and adopts SOPS+age secrets plus Paperclip configuration-parity convergence. |
