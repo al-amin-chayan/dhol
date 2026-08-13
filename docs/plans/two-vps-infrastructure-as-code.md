@@ -1,7 +1,9 @@
 # Two-VPS infrastructure-as-code plan
 
-**Decision date:** 2026-08-13  
-**Status:** Proposed for cross-review; implementation is a separate lane  
+**Decision date:** 2026-08-13
+
+**Status:** Proposed for cross-review; implementation is a separate lane
+
 **Hosting budget:** two VPSDime Linux6GB services under the existing customer account, $7/month each ($14/month total), before tax or optional add-ons
 
 ## Decision

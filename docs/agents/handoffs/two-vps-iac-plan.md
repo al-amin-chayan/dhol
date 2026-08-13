@@ -1,6 +1,7 @@
 # codex/two-vps-iac-plan
 
-Agent: codex  
+Agent: codex
+
 Head: see PR metadata; the cross-review verdict must record the exact reviewed SHA
 
 ## What changed
