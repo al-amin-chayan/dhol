@@ -4,7 +4,15 @@
 
 **Amended:** 2026-08-14 — shared services are multi-project-ready; PoriPati Track-1 is the first external n8n consumer
 
-**Status:** Founder-approved topology and multi-project shared-service direction (confirmed 2026-08-14); amendment pending cross-review; implementation is a separate lane
+**Amended:** 2026-08-15 — supported Cloudflare/R2 control-plane resources must
+be reproducible from this repository before their production cutover
+
+**Status:** Founder-approved topology and multi-project shared-service direction
+(confirmed 2026-08-14); cross-reviewed and merged 2026-08-15; implementation
+has not started
+
+**Implementation companion:**
+[Two-VPS reproducible implementation plan](two-vps-reproducible-implementation-plan.md)
 
 **Hosting budget:** two VPSDime Linux6GB services under the existing customer account, $7/month each ($14/month total), before tax or optional add-ons
 
@@ -89,17 +97,28 @@ This plan supersedes only that review's hosting topology, Paperclip-adoption wor
 
 ## Why Ansible is the primary tool
 
-Choose **Ansible Core plus pinned Docker Compose** for host and service configuration. Keep **OpenTofu optional and narrowly scoped to supported external APIs**, initially Cloudflare DNS/Tunnel/Access and R2 bucket metadata if those resources are brought under code.
+Choose **Ansible Core plus pinned Docker Compose** for host and service
+configuration. Use **OpenTofu narrowly for supported external APIs**, initially
+Cloudflare DNS/Tunnel/Access and R2 bucket metadata. Those resources must be
+imported and code-owned before their production cutover; OpenTofu still does not
+manage unsupported VPSDime lifecycle operations.
 
 | Tool | Decision | What it owns | Why |
 | --- | --- | --- | --- |
 | Ansible Core | **Primary** | OS baseline, users/SSH, firewall, Docker repository/engine/plugin, directories, systemd units/timers, Compose deployment, backup jobs, monitoring, health verification and migration orchestration | It works over ordinary SSH against both current and replacement hosts, is idempotent, supports check/diff modes, and does not require an agent on the VPS. |
 | Docker Compose v2 | **Runtime contract** | The complete service definitions, networks, volumes, health checks, resource limits, image digests and logging limits on each single host | It matches the upstream Postiz deployment model and keeps each application portable to any Docker-capable Ubuntu host. Ansible's `community.docker.docker_compose_v2` module manages it directly. [Ansible Compose module](https://docs.ansible.com/projects/ansible/latest/collections/community/docker/docker_compose_v2_module.html) |
-| OpenTofu | **Optional phase 2** | Only providers with supported APIs: Cloudflare DNS, tunnels, Access and R2 bucket declarations | VPSDime's documented deployment flow is a customer-panel workflow; no supported public VPSDime provider/API was found. OpenTofu cannot safely declare the VPS lifecycle without a provider. Cloudflare does publish supported IaC interfaces. [Cloudflare Tunnel IaC](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/deployment-guides/terraform/), [R2 bucket resource](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/r2_bucket) |
+| OpenTofu | **Required for the supported control plane** | Only providers with supported APIs: Cloudflare DNS, tunnels, Access and R2 bucket declarations | Reproducibility forbids dashboard-only production state where a supported provider exists. VPSDime's documented deployment flow remains a customer-panel workflow; no supported public VPSDime provider/API was found, so OpenTofu cannot safely declare that lifecycle. [Cloudflare Tunnel IaC](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/deployment-guides/terraform/), [R2 bucket resource](https://registry.terraform.io/providers/cloudflare/cloudflare/latest/docs/resources/r2_bucket) |
 | Docker Swarm/Kubernetes | **Reject for two hosts** | Nothing | Two nodes do not provide a sound quorum, do not pool RAM, and make stateful publisher recovery harder. Docker recommends more than two and an odd manager count for fault tolerance. [Docker Swarm quorum](https://docs.docker.com/engine/swarm/admin_guide/) |
 | A web control panel (Coolify, Portainer, etc.) | **Reject as authority** | Optional read-only convenience only | It would create a second mutable configuration surface. Git plus Ansible must remain authoritative. |
 
-The intentionally manual boundary is small: order/reinstall/resize a VPS in the VPSDime panel, choose Ubuntu 24.04 LTS, attach the bootstrap SSH public key, and record its stable hostname and role in the committed inventory. A temporary IP override may remain local only while old and replacement hosts coexist. Everything after first SSH must be reproducible from code. If VPSDime later publishes a supported API/provider, add a reviewed OpenTofu module rather than browser automation.
+The intentionally manual boundary is small: order/reinstall/resize a VPS in the
+VPSDime panel, choose Ubuntu 24.04 LTS, attach the bootstrap SSH public key, and
+record its stable hostname and role in the committed inventory. A temporary IP
+override may remain local only while old and replacement hosts coexist. Every
+host and supported control-plane configuration after first SSH must be
+reproducible from code; unavoidable provider/OAuth grants follow committed
+runbooks and verification receipts. If VPSDime later publishes a supported
+API/provider, add a reviewed OpenTofu module rather than browser automation.
 
 ## What “reproducible” means
 
@@ -155,7 +174,7 @@ infra/
     n8n/
     hermes/
     publisher/                      # selected Postiz or Mixpost implementation
-  tofu/                             # optional supported-provider phase
+  tofu/                             # supported external control-plane state
     cloudflare/
 stack/
   paperclip/                        # imported desired config; parity is invariant
@@ -591,7 +610,10 @@ Required flow:
 5. Unset `SOPS_AGE_KEY` after the run and verify logs/artifacts contain neither plaintext nor decrypted diffs. Rotate any value ever printed. The password manager remains authoritative for private age keys, bootstrap SSH keys and provider recovery logins.
 6. If an age private key leaks, remove its recipient and add a replacement, but also rotate **every underlying secret it could decrypt**. Re-encryption alone is insufficient because old ciphertext remains recoverable from Git history with the leaked key.
 
-OpenTofu state, if phase 2 is used, goes to an encrypted remote backend with locking; backend credentials are supplied through environment variables because plans/state may contain sensitive data. Production application secrets should not pass through OpenTofu. [OpenTofu backend security](https://opentofu.org/docs/language/settings/backends/configuration/)
+OpenTofu state goes to an encrypted remote backend with locking; backend
+credentials are supplied through environment variables because plans/state may
+contain sensitive data. Production application secrets should not pass through
+OpenTofu. [OpenTofu backend security](https://opentofu.org/docs/language/settings/backends/configuration/)
 
 ## CI and change workflow
 
@@ -618,7 +640,8 @@ Every infrastructure pull request should run read-only checks:
   organization/workspace and brand-to-social-account mapping, and reject
   duplicate account ownership or cross-project credential references.
 - Molecule/container tests for roles that can be tested locally; a disposable Ubuntu VM test for Docker/firewall roles before production use.
-- `tofu fmt -check`, `tofu validate`, provider lockfile verification and a saved, reviewed plan only when the optional Cloudflare layer exists.
+- `tofu fmt -check`, `tofu validate`, provider lockfile verification and a
+  saved, reviewed plan for the supported Cloudflare/R2 control plane.
 
 Production apply is never automatic on merge. The founder runs:
 
@@ -709,6 +732,8 @@ Perform a disposable restore drill quarterly and after any database/topology upg
 - Capture `team.chayan.me` as Paperclip's current stable hostname, audit its
   current DNS/origin route and Access state, and record the complete desired
   public-hostname/Access-policy map without changing live DNS.
+- Bootstrap encrypted/locked OpenTofu state, import the existing Cloudflare/R2
+  resources and require a reviewed no-change plan before any public cutover.
 - Commit the `hooks.chayan.me` Telegram route manifest, including its exact
   method/path boundary, secret owner, verification point, WAF/rate limit, data
   class, execution retention and negative tests.
@@ -747,9 +772,10 @@ Perform a disposable restore drill quarterly and after any database/topology upg
   superseded local backup artifacts under the separately reviewed cleanup
   procedure. Record `B_core`; require `B_core ≤ 14 GB` before admitting n8n or
   Hermes, or stop for a founder capacity decision.
-- Deploy n8n's editor at `n8n.chayan.me` behind its own Access application and
-  its production webhook base at `hooks.chayan.me` through the restricted
-  machine route above. Verify that non-`POST` methods, non-`/webhook/*` paths,
+- Apply the reviewed OpenTofu route/Access plan, then deploy n8n's editor at
+  `n8n.chayan.me` behind its own Access application and its production webhook
+  base at `hooks.chayan.me` through the restricted machine route above. Verify
+  that non-`POST` methods, non-`/webhook/*` paths,
   and requests with a missing or wrong Telegram secret are rejected before
   n8n. A valid canary plus a replay must reach the correct brand/channel
   workflow while producing one durable approval transition. Then measure
@@ -773,7 +799,8 @@ Perform a disposable restore drill quarterly and after any database/topology upg
 - Exercise the founder's approved purchase by manually adding a second monthly Linux6GB service to the existing account, ideally in a different available datacenter, using key-only bootstrap access.
 - Run the full Ansible bootstrap; configure a distinct tunnel and R2 credentials.
 - Close the existing Postiz-vs-Mixpost decision, then deploy only the selected complete publisher stack with R2 media, automatic registration disabled after founder creation and no public state-service ports.
-- Expose the publisher at `publish.chayan.me` behind Access, then connect both
+- Apply the reviewed OpenTofu route/Access plan and expose the publisher at
+  `publish.chayan.me`, then connect both
   project spaces/brand mappings and n8n through its public HTTPS API using both
   a scoped Cloudflare Access service token and a scoped application credential.
 - Prove the generic organization/workspace mapper can add another project/brand
@@ -783,10 +810,13 @@ Perform a disposable restore drill quarterly and after any database/topology upg
 
 **Exit:** immediate/scheduled/cancel/delete/token-refresh tests pass for both brands; cross-workspace negative tests and the generic workspace fixture pass; duplicate-post kill switch works; backup/restore passes; seven-day peak RAM is below 4.5 GB; steady disk is below 18 GB and an image update leaves at least 8 GB free.
 
-### Phase 3 — optional supported-provider OpenTofu
+### Phase 3 — complete supported-provider OpenTofu coverage
 
-- Import existing Cloudflare DNS/tunnel/Access/R2 declarations rather than recreate them.
-- Bootstrap remote encrypted/locked state separately; never have OpenTofu manage the VPSDime services until a supported provider exists.
+- Cloudflare/R2 resources needed by Phases 1 and 2 must already be imported and
+  code-owned before their respective public cutovers. Import any remaining
+  supported declarations rather than recreate them.
+- Recover and verify the remote encrypted/locked state independently; never
+  have OpenTofu manage the VPSDime services until a supported provider exists.
 - Require reviewed plans and manual applies.
 
 **Exit:** a no-change plan is clean, imports match production, state recovery is documented and no secret is committed or exposed in CI artifacts.
