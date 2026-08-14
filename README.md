@@ -41,10 +41,10 @@ No per-project rebuild: adding a brand = adding a **brand profile**, not code.
   pipelines have no dependency on a client project's code, DB, or infra. The
   tools on the two hosts are multi-project-ready where the tool can support it:
   central n8n uses registered consumer manifests, Hermes uses a separately
-  managed profile/process, state directory, workspace and credentials for each
-  project, and the publisher uses separate project organizations/workspaces
-  and brand account mappings. PoriPati
-  Track-1 is the first external automation consumer; w3exam and later
+  managed same-image container, verified `/opt/data`/state backend, workspace
+  and credentials for each project, and the publisher uses separate project
+  organizations/workspaces and brand account mappings. PoriPati Track-1 is the
+  first external automation consumer; w3exam and later
   founder-owned projects can join through the same contracts. Implementations
   remain canonical at exact reviewed commits in their owning repositories and
   reach products only through narrow authenticated HTTPS APIs. Paperclip,
@@ -102,7 +102,7 @@ existing customer account**, at $7/month each ($14/month total):
 
 | Host | Workloads | Operating boundary |
 | --- | --- | --- |
-| `core-1` | Paperclip, central n8n, profile-isolated and globally bounded Hermes, monitoring, restic | Paperclip becomes reproducible from Git under a strict before/after configuration-parity guard. n8n and Hermes can serve registered founder-owned projects through separate manifests, credentials, source pins and state/workspace boundaries; their shared host and runtime limits remain explicit. |
+| `core-1` | Paperclip, central n8n, per-project-container and globally bounded Hermes, monitoring, restic | Paperclip becomes reproducible from Git under a strict before/after configuration-parity guard. n8n and Hermes can serve registered founder-owned projects through separate manifests, credentials, source pins and verified state/workspace boundaries; their shared host and runtime limits remain explicit. |
 | `publish-1` | The selected multi-project publisher stack, monitoring, restic | Postiz is the current default but the Postiz-vs-Mixpost decision remains open. Each project receives a separate organization/workspace and brand connection mapping; the publisher and its state stay isolated from Paperclip. |
 
 These hosts are not a cluster and cannot pool their RAM or disk. The benefit is
@@ -120,16 +120,18 @@ interfaces and machine-only routes are authoritative in the plan's
 `dholbeat.com` remains the separate product/marketing domain decision in §9.
 
 **Hermes Agent** is a planned, noncritical resident of `core-1`. One pinned
-installation can serve multiple registered projects, but each project runs as
-its own managed profile/process with a separate data directory, memory and
-session state, workspace, approved skills, schedules and credentials. The
-initial host-wide Hermes envelope is approximately 2 GB with only one active
-agent job across all profiles, so this is a reusable capability rather than an
-unlimited capacity promise. A future w3exam profile is a manifest, scoped
-secret set and reviewed source pin—not another Hermes installation. No Hermes
-profile is required for an approval or publishing deadline; n8n remains the
-deterministic workflow authority, with a metered API fallback rather than a
-flat-rate Codex subscription as the production cost baseline.
+image/version serves multiple registered projects, but each project runs in its
+own container/service with a unique `/opt/data` mount, local state backend,
+workspace, approved skills, schedules and credentials. Activation fails if the
+resolved state store is shared; Hermes' native session-key namespacing alone is
+not treated as isolation. The initial host-wide Hermes envelope is
+approximately 2 GB with only one active agent job across all containers, so
+this is a reusable capability rather than an unlimited capacity promise. A
+future w3exam profile is a manifest, scoped secret set and reviewed source
+pin—not another Hermes code installation. No Hermes profile is required for an
+approval or publishing deadline; n8n remains the deterministic workflow
+authority, with a metered API fallback rather than a flat-rate Codex
+subscription as the production cost baseline.
 
 ## 6. Costs (platform marginal, verified Aug 2026)
 
@@ -208,7 +210,17 @@ requires a fresh founder cost decision. See the linked IaC plan for thresholds.
 - [x] ~~Hosting topology~~ → **two $7/month VPSDime Linux6GB services under
       the existing account**, founder-approved 2026-08-13; purchase and manage
       `publish-1` through the detailed IaC plan
-- [ ] Postiz vs Mixpost final call (Postiz default: AGPL, 30+ platforms)
+- [x] ~~Central automation ownership~~ → founder-approved 2026-08-14: the
+      Dholbeat-managed n8n on `core-1` serves PoriPati Track-1 and may serve
+      later registered founder-owned projects such as w3exam; no project gets a
+      duplicate stack by default, and admission remains subject to the IaC
+      plan's access, data, isolation and measured-capacity gates
+- [ ] Postiz vs Mixpost final call. The founder-approved multi-project
+      requirement is now a selection constraint: the exact deployed edition
+      must demonstrate project-scoped organization/workspace authorization
+      within budget. Mixpost documents multiple workspaces under Enterprise;
+      surface an exact-edition test and monthly-cost table rather than silently
+      choosing Postiz or a paid Mixpost tier.
 - [ ] Approval bot: custom Telegram bot vs Hermes gateway
 - [ ] Per-brand X usage (worth $2–3/mo per brand?)
 - [ ] Media archival: purge-only vs B2 push
@@ -222,5 +234,5 @@ requires a fresh founder cost decision. See the linked IaC plan for thresholds.
 | 2026-08-12 | Repo configured for parallel Claude Code + Codex work: `AGENTS.md` (+ `CLAUDE.md` symlink), per-agent worktree lanes (`scripts/new-worktree.sh` / `rm-worktree.sh` / `lanes.sh`), cross-review + handoff protocol (`docs/agents/parallel-work.md`), skeleton `brands/ stack/ n8n/ prompts/` |
 | 2026-08-13 | Founder approved two $7/month Linux6GB VPSDime services in the existing account: `core-1` for Paperclip/n8n/Hermes and `publish-1` for the selected publisher. The [IaC plan](docs/plans/two-vps-infrastructure-as-code.md) supersedes the earlier single-host topology and adopts SOPS+age secrets plus Paperclip configuration-parity convergence. |
 | 2026-08-13 | Reserved `chayan.me` as the two-VPS operations/admin namespace, preserved Paperclip at `team.chayan.me`, and required Cloudflare Tunnel plus default-deny Cloudflare Zero Trust Access for every human-facing interface; `dholbeat.com` remains the product/marketing domain decision. |
-| 2026-08-14 | Declared `core-1` n8n the central trusted workflow runtime for Dholbeat and registered founder-owned external workloads, initially PoriPati Track-1. Dholbeat owns runtime/security/recovery; each consumer repository owns its workflows and product rules. No separate PoriPati n8n stack is planned. |
-| 2026-08-14 | Generalized the two-host plan so shared tools are multi-project-ready from first deployment: manifest-scoped n8n consumers, one managed Hermes profile/process and state boundary per project, and separate publisher organizations/workspaces. This is trusted logical/process separation with measured shared capacity, not universal tenant isolation; product applications, databases and Paperclip remain isolated. |
+| 2026-08-14 | Founder approved `core-1` n8n as the central trusted workflow runtime for Dholbeat and registered founder-owned external workloads, initially PoriPati Track-1. Dholbeat owns runtime/security/recovery; each consumer repository owns its workflows and product rules. No separate PoriPati n8n stack is planned. |
+| 2026-08-14 | Generalized the two-host plan so shared tools are multi-project-ready from first deployment: manifest-scoped n8n consumers, one same-image Hermes container with a verified data/state boundary per project, and separate publisher organizations/workspaces. This is trusted logical/process separation with measured shared capacity, not universal tenant isolation; product applications, databases and Paperclip remain isolated. |
