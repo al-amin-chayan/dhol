@@ -15,7 +15,7 @@
 | Field | Value |
 | --- | --- |
 | Owner | Chayan |
-| Last updated | 2026-08-13 |
+| Last updated | 2026-08-14 |
 | Status | Draft — extracted from the PoriPati AI growth engine plan (Track 2) |
 | Brands (initial) | **PoriPati** (salon/beauty marketplace, BD) · **w3exam** (exam-prep) |
 | Hosting | Two VPSDime Linux6GB services in one account — decided 2026-08-13 |
@@ -37,9 +37,19 @@ No per-project rebuild: adding a brand = adding a **brand profile**, not code.
 - **Brand-agnostic core.** All brand knowledge lives in per-brand profile
   config (accounts, language mix, tone, niche, visual tokens, posting
   windows). The pipelines never hard-code a brand.
-- **Isolated from client products.** No dependency on any client project's
-  code, DB, or infra. Clients interact only through their brand profile,
-  their Telegram approval channel, and (optionally) webhooks.
+- **Product boundaries survive shared infrastructure.** Dholbeat's social
+  pipelines have no dependency on a client project's code, DB, or infra. The
+  tools on the two hosts are multi-project-ready where the tool can support it:
+  central n8n uses registered consumer manifests, Hermes uses a separately
+  managed same-image container, verified `/opt/data`/state backend, workspace
+  and credentials for each project, and the publisher uses separate project
+  organizations/workspaces and brand account mappings. PoriPati Track-1 is the
+  first external automation consumer; w3exam and later
+  founder-owned projects can join through the same contracts. Implementations
+  remain canonical at exact reviewed commits in their owning repositories and
+  reach products only through narrow authenticated HTTPS APIs. Paperclip,
+  product databases and product container networks are not shared tenant
+  surfaces.
 - **Free/self-hosted first.** Open-source stack on owned infra; paid APIs
   only where they demonstrably win (image gen, X posting).
 - **Reproducible from git** (founder's laptop-loss rule): compose stack,
@@ -59,8 +69,8 @@ No per-project rebuild: adding a brand = adding a **brand profile**, not code.
 | --- | --- | --- |
 | **Social Media Researcher** | Weekly per-brand: niche trend scan, competitor pages, own-post engagement analytics → audience-interest analysis → next week's suggested content calendar | n8n scheduled flow + LLM (Claude API; Hermes cron as the ~$0 batch alternative) |
 | **Content Studio** | Turns approved ideas into drafts: bilingual captions, images (AI background + manual/scripted text overlay), short vertical videos | Claude API · Nano Banana 2 / Flux (fal.ai) · Canva free (Bangla/Latin text overlay) · CapCut + stock B-roll + ElevenLabs voiceover |
-| **Approval queue** | Per-brand Telegram channel: idea approval (weekly batch) + final draft approval | Telegram Bot API (or Hermes Telegram gateway) |
-| **Publisher** | Scheduled cross-posting to all brand channels | **Postiz** self-hosted by default (one workspace per brand), or Mixpost if the open comparison selects it · Telegram Bot API (channels) · X API pay-per-use |
+| **Approval queue** | Per-brand Telegram channel: idea approval (weekly batch) + final draft approval | Telegram Bot API (or a project-scoped Hermes Telegram profile) |
+| **Publisher** | Scheduled cross-posting to all brand channels | **Postiz** self-hosted by default (separate organization per project and account mapping per brand), or Mixpost only if the open comparison proves equivalent $0 separation · Telegram Bot API (channels) · X API pay-per-use |
 | **Metrics loop** | Pull engagement per post; feeds the next researcher run | Platform insights APIs via n8n |
 
 ## 4. Brand profile (the extension point)
@@ -92,8 +102,8 @@ existing customer account**, at $7/month each ($14/month total):
 
 | Host | Workloads | Operating boundary |
 | --- | --- | --- |
-| `core-1` | Paperclip, n8n, bounded Hermes worker, monitoring, restic | Paperclip becomes reproducible from Git under a strict before/after configuration-parity guard. A planned container recreation is allowed; its image digest and effective configuration must not change during adoption. |
-| `publish-1` | The selected publisher stack, monitoring, restic | Postiz is the current default but the Postiz-vs-Mixpost decision remains open. The publisher and its state stay isolated from Paperclip. |
+| `core-1` | Paperclip, central n8n, per-project-container and globally bounded Hermes, monitoring, restic | Paperclip becomes reproducible from Git under a strict before/after configuration-parity guard. n8n and Hermes can serve registered founder-owned projects through separate manifests, credentials, source pins and verified state/workspace boundaries; their shared host and runtime limits remain explicit. |
+| `publish-1` | The selected multi-project publisher stack, monitoring, restic | Postiz is the current default but the Postiz-vs-Mixpost decision remains open. Each project receives a separate organization/workspace and brand connection mapping; the publisher and its state stay isolated from Paperclip. |
 
 These hosts are not a cluster and cannot pool their RAM or disk. The benefit is
 two four-vCPU scheduling envelopes and two failure domains. Public traffic uses
@@ -109,11 +119,19 @@ interfaces and machine-only routes are authoritative in the plan's
 [public namespace and Zero Trust policy](docs/plans/two-vps-infrastructure-as-code.md#public-namespace-and-zero-trust-policy).
 `dholbeat.com` remains the separate product/marketing domain decision in §9.
 
-**Hermes Agent** is a planned, noncritical resident of `core-1`: useful for
-bounded research and drafting batches, but never required for an approval or
-publishing deadline. n8n remains the deterministic workflow authority, with a
-metered API fallback rather than a flat-rate Codex subscription as the
-production cost baseline.
+**Hermes Agent** is a planned, noncritical resident of `core-1`. One pinned
+image/version serves multiple registered projects, but each project runs in its
+own container/service with a unique `/opt/data` mount, local state backend,
+workspace, approved skills, schedules and credentials. Activation fails if the
+resolved state store is shared; Hermes' native session-key namespacing alone is
+not treated as isolation. The initial host-wide Hermes envelope is
+approximately 2 GB with only one active agent job across all containers, so
+this is a reusable capability rather than an unlimited capacity promise. A
+future w3exam profile is a manifest, scoped secret set and reviewed source
+pin—not another Hermes code installation. No Hermes profile is required for an
+approval or publishing deadline; n8n remains the deterministic workflow
+authority, with a metered API fallback rather than a flat-rate Codex
+subscription as the production cost baseline.
 
 ## 6. Costs (platform marginal, verified Aug 2026)
 
@@ -137,7 +155,12 @@ requires a fresh founder cost decision. See the linked IaC plan for thresholds.
 ## 7. Phases
 
 1. **Infrastructure as code:** capture and parity-adopt Paperclip on `core-1`,
-   repair/restore-test backups, then deploy isolated n8n and bounded Hermes.
+   repair/restore-test backups, then deploy central n8n and Hermes with generic
+   project-registration contracts, separate credentials/state and global
+   resource bounds. Register PoriPati Track-1 as the first external n8n
+   consumer and prove a second credential-free project fixture so w3exam or a
+   later project can onboard without another runtime, hard-coded project logic
+   or public administration interface.
    Bootstrap founder-approved `publish-1` from the same repository and deploy
    the selected Postiz or Mixpost stack after the open tool decision closes.
 2. **Pipeline v1 (both brands):** create separate PoriPati and w3exam profiles,
@@ -187,7 +210,17 @@ requires a fresh founder cost decision. See the linked IaC plan for thresholds.
 - [x] ~~Hosting topology~~ → **two $7/month VPSDime Linux6GB services under
       the existing account**, founder-approved 2026-08-13; purchase and manage
       `publish-1` through the detailed IaC plan
-- [ ] Postiz vs Mixpost final call (Postiz default: AGPL, 30+ platforms)
+- [x] ~~Central automation ownership~~ → founder-approved 2026-08-14: the
+      Dholbeat-managed n8n on `core-1` serves PoriPati Track-1 and may serve
+      later registered founder-owned projects such as w3exam; no project gets a
+      duplicate stack by default, and admission remains subject to the IaC
+      plan's access, data, isolation and measured-capacity gates
+- [ ] Postiz vs Mixpost final call. The founder-approved multi-project
+      requirement is now a selection constraint: the exact deployed edition
+      must demonstrate project-scoped organization/workspace authorization
+      within budget. Mixpost documents multiple workspaces under Enterprise;
+      surface an exact-edition test and monthly-cost table rather than silently
+      choosing Postiz or a paid Mixpost tier.
 - [ ] Approval bot: custom Telegram bot vs Hermes gateway
 - [ ] Per-brand X usage (worth $2–3/mo per brand?)
 - [ ] Media archival: purge-only vs B2 push
@@ -201,3 +234,5 @@ requires a fresh founder cost decision. See the linked IaC plan for thresholds.
 | 2026-08-12 | Repo configured for parallel Claude Code + Codex work: `AGENTS.md` (+ `CLAUDE.md` symlink), per-agent worktree lanes (`scripts/new-worktree.sh` / `rm-worktree.sh` / `lanes.sh`), cross-review + handoff protocol (`docs/agents/parallel-work.md`), skeleton `brands/ stack/ n8n/ prompts/` |
 | 2026-08-13 | Founder approved two $7/month Linux6GB VPSDime services in the existing account: `core-1` for Paperclip/n8n/Hermes and `publish-1` for the selected publisher. The [IaC plan](docs/plans/two-vps-infrastructure-as-code.md) supersedes the earlier single-host topology and adopts SOPS+age secrets plus Paperclip configuration-parity convergence. |
 | 2026-08-13 | Reserved `chayan.me` as the two-VPS operations/admin namespace, preserved Paperclip at `team.chayan.me`, and required Cloudflare Tunnel plus default-deny Cloudflare Zero Trust Access for every human-facing interface; `dholbeat.com` remains the product/marketing domain decision. |
+| 2026-08-14 | Founder approved `core-1` n8n as the central trusted workflow runtime for Dholbeat and registered founder-owned external workloads, initially PoriPati Track-1. Dholbeat owns runtime/security/recovery; each consumer repository owns its workflows and product rules. No separate PoriPati n8n stack is planned. |
+| 2026-08-14 | Generalized the two-host plan so shared tools are multi-project-ready from first deployment: manifest-scoped n8n consumers, one same-image Hermes container with a verified data/state boundary per project, and separate publisher organizations/workspaces. This is trusted logical/process separation with measured shared capacity, not universal tenant isolation; product applications, databases and Paperclip remain isolated. |
