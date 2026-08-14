@@ -9,3 +9,6 @@ from git alone.
 - Disk is the binding constraint (root `README.md` §5): no unbounded volumes,
   media is purge-after-publish, keep an alert at 85%.
 - Runtime data (`stack/data/`) is gitignored.
+- Public hostnames, Tunnel/Access controls, origin binding and machine-route
+  exceptions must follow the authoritative
+  [public namespace and Zero Trust policy](../docs/plans/two-vps-infrastructure-as-code.md#public-namespace-and-zero-trust-policy).
