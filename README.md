@@ -15,7 +15,7 @@
 | Field | Value |
 | --- | --- |
 | Owner | Chayan |
-| Last updated | 2026-08-13 |
+| Last updated | 2026-08-14 |
 | Status | Draft — extracted from the PoriPati AI growth engine plan (Track 2) |
 | Brands (initial) | **PoriPati** (salon/beauty marketplace, BD) · **w3exam** (exam-prep) |
 | Hosting | Two VPSDime Linux6GB services in one account — decided 2026-08-13 |
@@ -37,9 +37,13 @@ No per-project rebuild: adding a brand = adding a **brand profile**, not code.
 - **Brand-agnostic core.** All brand knowledge lives in per-brand profile
   config (accounts, language mix, tone, niche, visual tokens, posting
   windows). The pipelines never hard-code a brand.
-- **Isolated from client products.** No dependency on any client project's
-  code, DB, or infra. Clients interact only through their brand profile,
-  their Telegram approval channel, and (optionally) webhooks.
+- **Product boundaries survive shared infrastructure.** Dholbeat's social
+  pipelines have no dependency on a client project's code, DB, or infra.
+  Clients normally interact through their brand profile, Telegram approval
+  channel and optional webhooks. The central n8n may also run explicitly
+  registered, founder-owned external workloads—initially PoriPati Track-1—but
+  their workflow implementations remain canonical in their owning repository
+  and reach products only through narrow authenticated HTTPS APIs.
 - **Free/self-hosted first.** Open-source stack on owned infra; paid APIs
   only where they demonstrably win (image gen, X posting).
 - **Reproducible from git** (founder's laptop-loss rule): compose stack,
@@ -92,7 +96,7 @@ existing customer account**, at $7/month each ($14/month total):
 
 | Host | Workloads | Operating boundary |
 | --- | --- | --- |
-| `core-1` | Paperclip, n8n, bounded Hermes worker, monitoring, restic | Paperclip becomes reproducible from Git under a strict before/after configuration-parity guard. A planned container recreation is allowed; its image digest and effective configuration must not change during adoption. |
+| `core-1` | Paperclip, central n8n, bounded Hermes worker, monitoring, restic | Paperclip becomes reproducible from Git under a strict before/after configuration-parity guard. One central n8n instance serves Dholbeat plus registered external workloads, initially PoriPati Track-1; consumer workflows, credentials, execution bounds and restore provenance remain separated by the detailed IaC contract. |
 | `publish-1` | The selected publisher stack, monitoring, restic | Postiz is the current default but the Postiz-vs-Mixpost decision remains open. The publisher and its state stay isolated from Paperclip. |
 
 These hosts are not a cluster and cannot pool their RAM or disk. The benefit is
@@ -137,7 +141,10 @@ requires a fresh founder cost decision. See the linked IaC plan for thresholds.
 ## 7. Phases
 
 1. **Infrastructure as code:** capture and parity-adopt Paperclip on `core-1`,
-   repair/restore-test backups, then deploy isolated n8n and bounded Hermes.
+   repair/restore-test backups, then deploy central n8n with the generic
+   external-consumer contract and bounded Hermes. Register PoriPati Track-1 as
+   the first external consumer without creating another n8n stack or public
+   administration interface.
    Bootstrap founder-approved `publish-1` from the same repository and deploy
    the selected Postiz or Mixpost stack after the open tool decision closes.
 2. **Pipeline v1 (both brands):** create separate PoriPati and w3exam profiles,
@@ -201,3 +208,4 @@ requires a fresh founder cost decision. See the linked IaC plan for thresholds.
 | 2026-08-12 | Repo configured for parallel Claude Code + Codex work: `AGENTS.md` (+ `CLAUDE.md` symlink), per-agent worktree lanes (`scripts/new-worktree.sh` / `rm-worktree.sh` / `lanes.sh`), cross-review + handoff protocol (`docs/agents/parallel-work.md`), skeleton `brands/ stack/ n8n/ prompts/` |
 | 2026-08-13 | Founder approved two $7/month Linux6GB VPSDime services in the existing account: `core-1` for Paperclip/n8n/Hermes and `publish-1` for the selected publisher. The [IaC plan](docs/plans/two-vps-infrastructure-as-code.md) supersedes the earlier single-host topology and adopts SOPS+age secrets plus Paperclip configuration-parity convergence. |
 | 2026-08-13 | Reserved `chayan.me` as the two-VPS operations/admin namespace, preserved Paperclip at `team.chayan.me`, and required Cloudflare Tunnel plus default-deny Cloudflare Zero Trust Access for every human-facing interface; `dholbeat.com` remains the product/marketing domain decision. |
+| 2026-08-14 | Declared `core-1` n8n the central trusted workflow runtime for Dholbeat and registered founder-owned external workloads, initially PoriPati Track-1. Dholbeat owns runtime/security/recovery; each consumer repository owns its workflows and product rules. No separate PoriPati n8n stack is planned. |
