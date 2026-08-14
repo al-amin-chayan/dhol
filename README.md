@@ -1,9 +1,10 @@
 # Dholbeat — Multi-Brand Social Growth Platform
 
 > **Dholbeat** (ঢোল — the drum; "ঢোল পেটানো" = to publicize — fused with the
-> steady posting beat). Domain **dholbeat.com** and GitHub handle `dholbeat`
-> verified available 2026-08-12 — register both before building anything
-> public.
+> steady posting beat). Product/marketing domain **dholbeat.com** and GitHub
+> handle `dholbeat` verified available 2026-08-12 — register both before
+> establishing the public product identity. Operational interfaces use
+> `chayan.me` subdomains under the policy in §5.
 
 > Living document and founding plan of this repository. Extracted on
 > 2026-08-12 from the PoriPati repo's growth planning (Track 2 of
@@ -102,15 +103,11 @@ recommended 8GB/50GB sizing, with an evidence-based publisher-only upgrade
 path. The detailed and current infrastructure source of truth is the
 [two-VPS infrastructure-as-code plan](docs/plans/two-vps-infrastructure-as-code.md).
 
-`chayan.me` is the public application namespace for both hosts. Paperclip keeps
-its existing `team.chayan.me` hostname. Every human-facing interface must use a
-dedicated `chayan.me` subdomain, be reachable only through that host's
-Cloudflare Tunnel, and sit behind default-deny Cloudflare Zero Trust Access;
-application ports must not be reachable through a VPS public IP or alternate
-DNS name. Provider webhook, OAuth callback, and media routes that cannot
-present an Access credential are non-UI machine endpoints: they still use an
-explicit `chayan.me` hostname through Cloudflare and require a narrowly scoped,
-documented control at the route and application layers.
+`chayan.me` is the operations/admin namespace for both hosts, and Paperclip
+keeps its existing `team.chayan.me` hostname. The detailed rules for human
+interfaces and machine-only routes are authoritative in the plan's
+[public namespace and Zero Trust policy](docs/plans/two-vps-infrastructure-as-code.md#public-namespace-and-zero-trust-policy).
+`dholbeat.com` remains the separate product/marketing domain decision in §9.
 
 **Hermes Agent** is a planned, noncritical resident of `core-1`: useful for
 bounded research and drafting batches, but never required for an approval or
@@ -183,7 +180,9 @@ requires a fresh founder cost decision. See the linked IaC plan for thresholds.
 - [x] ~~Project/package name~~ → **Dholbeat** / dholbeat.com (2026-08-12)
 - [x] ~~Repo location~~ → this repository (`~/Projects/dholbeat`, seeded
       2026-08-12); push to GitHub `dholbeat` when created
-- [ ] Register dholbeat.com (availability confirmed 2026-08-12 — act soon)
+- [ ] Register dholbeat.com for the product/marketing identity (availability
+      confirmed 2026-08-12 — act soon); operational/admin hostnames under
+      `chayan.me` do not close this decision
 - [ ] Create the GitHub repo + remote (handle `dholbeat` free as of 2026-08-12)
 - [x] ~~Hosting topology~~ → **two $7/month VPSDime Linux6GB services under
       the existing account**, founder-approved 2026-08-13; purchase and manage
@@ -201,4 +200,4 @@ requires a fresh founder cost decision. See the linked IaC plan for thresholds.
 | 2026-08-12 | Named **Dholbeat** (dholbeat.com + GitHub handle verified available); seeded as this repository's README/plan; scope removed from the PoriPati repo |
 | 2026-08-12 | Repo configured for parallel Claude Code + Codex work: `AGENTS.md` (+ `CLAUDE.md` symlink), per-agent worktree lanes (`scripts/new-worktree.sh` / `rm-worktree.sh` / `lanes.sh`), cross-review + handoff protocol (`docs/agents/parallel-work.md`), skeleton `brands/ stack/ n8n/ prompts/` |
 | 2026-08-13 | Founder approved two $7/month Linux6GB VPSDime services in the existing account: `core-1` for Paperclip/n8n/Hermes and `publish-1` for the selected publisher. The [IaC plan](docs/plans/two-vps-infrastructure-as-code.md) supersedes the earlier single-host topology and adopts SOPS+age secrets plus Paperclip configuration-parity convergence. |
-| 2026-08-13 | Reserved `chayan.me` as the two-VPS public application namespace, preserved Paperclip at `team.chayan.me`, and required Cloudflare Tunnel plus default-deny Cloudflare Zero Trust Access for every human-facing interface. |
+| 2026-08-13 | Reserved `chayan.me` as the two-VPS operations/admin namespace, preserved Paperclip at `team.chayan.me`, and required Cloudflare Tunnel plus default-deny Cloudflare Zero Trust Access for every human-facing interface; `dholbeat.com` remains the product/marketing domain decision. |

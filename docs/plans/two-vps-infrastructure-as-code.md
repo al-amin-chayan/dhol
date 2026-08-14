@@ -117,7 +117,10 @@ Both hosts receive the same deterministic baseline:
 - Ubuntu 24.04 LTS assertion; fail rather than silently applying to an unknown OS.
 - A named administration user with `sudo`, key-only SSH, disabled password authentication and a separately tested break-glass path through the VPSDime console.
 - Time synchronization, unattended security updates with a declared reboot policy, persistent journald limits, logrotate and a fixed timezone policy (UTC on hosts; business timezone passed to applications).
-- Host firewall with default-deny inbound. Expose SSH only through an explicit allowlist or a documented access path; applications bind to loopback unless an inbound webhook truly requires public access.
+- Host firewall with default-deny inbound. Expose SSH only through an explicit
+  allowlist or a documented access path; applications bind to loopback or a
+  private container network. Inbound webhooks use declared Cloudflare Tunnel
+  routes and never require a publicly exposed origin application port.
 - Docker Engine and Compose plugin from a declared repository, with tested version ranges and bounded Docker JSON logs. Pin application images by digest; Renovate or a scheduled dependency PR may propose digest updates, but production never follows `latest` implicitly.
 - Disk, RAM, OOM, container-health, certificate/tunnel and backup-age monitoring. Alerts go to a dedicated operational channel, not a publishing-approval callback.
 - Restic client and one locked systemd timer per host. Backup jobs must not overlap Hermes browser work, publisher upgrades or each other.
@@ -162,8 +165,8 @@ The services integrate at application boundaries:
 
 ```text
 Founder -> Cloudflare Access -> team.chayan.me -> Paperclip
-Founder -> Cloudflare Access -> n8n / selected publisher UIs
-Telegram -> HTTPS webhook -> n8n -> approval state/database
+Founder -> Cloudflare Access -> n8n.chayan.me / publish.chayan.me UIs
+Telegram -> hooks.chayan.me/webhook/* -> verified ingress -> n8n approval state
 n8n -> Cloudflare Access service token + scoped app token -> selected publisher API
 selected publisher -> social-provider APIs
 selected publisher -> public media R2 bucket
@@ -180,17 +183,20 @@ parity adoption. Import compliant resources; if the route or policy does not
 yet meet this section, converge it without renaming Paperclip. A Paperclip
 hostname change is out of scope unless the founder approves it separately.
 
-The initial human-facing hostname map is:
+The initial public hostname and route map is:
 
 | Host | Interface | Hostname | Edge access |
 | --- | --- | --- | --- |
 | `core-1` | Paperclip | `team.chayan.me` (existing) | Cloudflare Access identity policy |
 | `core-1` | n8n administration | `n8n.chayan.me` | Cloudflare Access identity policy |
+| `core-1` | Telegram approval webhook ingress | `hooks.chayan.me` | Machine-only `POST /webhook/*`; path-scoped exception with secret-header verification; no editor or REST UI |
 | `publish-1` | Selected publisher administration and API | `publish.chayan.me` | Cloudflare Access identity policy for people; a separately scoped Access service token for n8n API calls |
 
 Cloudflare documents service tokens specifically for automated callers of an
 Access-protected self-hosted application; each token is independently
-renewable and revocable. [Cloudflare Access service tokens](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/)
+renewable and revocable. A service-token-authenticated route remains
+Access-enforced and is not a machine-route exception under acceptance criterion
+10. [Cloudflare Access service tokens](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/)
 
 Every current or future human-facing interface follows the same contract:
 
@@ -212,16 +218,37 @@ provider-initiated webhook or OAuth callback, a provider-fetchable R2 media
 object, or a minimal external health probe is a machine endpoint, not a public
 administration interface. Such an endpoint must still use an explicit
 `chayan.me` hostname through Cloudflare, and it must be either a separate
-hostname or the narrowest exact path the application supports. Before exposure,
-its committed route manifest must name the caller, purpose, allowed methods,
-application-level verification (for example webhook signature, OAuth `state`,
-signed object URL or monitor secret), Cloudflare WAF/rate limit, data class and
-retention owner. Never create an Access bypass for an entire administration
-hostname. If the provider cannot support a safely scoped route, stop and ask
-the founder rather than exposing it. Cloudflare supports policies scoped to
-specific application paths, but its `Bypass` action disables Access controls
-and Access logging; any required bypass is therefore an explicit machine-route
-exception, not Zero Trust protection. [Cloudflare Access application paths](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/app-paths/), [Cloudflare Access policy actions](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/)
+hostname or the narrowest exact path/prefix the application supports. Before
+exposure, its committed route manifest must name the caller, purpose, allowed
+methods, application-level verification (for example webhook secret, OAuth
+`state`, signed object URL or monitor secret), Cloudflare WAF/rate limit, data
+class and retention owner. Never create an Access bypass for an entire
+administration hostname. If the provider cannot support a safely scoped route,
+stop and ask the founder rather than exposing it. Cloudflare supports policies
+scoped to specific application paths, but its `Bypass` action disables Access
+controls and Access logging; any required bypass is therefore an explicit
+machine-route exception, not Zero Trust protection. [Cloudflare Access application paths](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/app-paths/), [Cloudflare Access policy actions](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/)
+
+The Telegram approval webhook is the first declared machine-route exception:
+
+- Route only `POST https://hooks.chayan.me/webhook/*` through the `core-1`
+  tunnel to a narrow verifying ingress in front of n8n. Deny every other method
+  and path at that hostname; never expose the n8n editor, REST API,
+  `/webhook-test/*` or `/webhook-waiting/*` there without a separate reviewed
+  manifest.
+- Set `N8N_EDITOR_BASE_URL=https://n8n.chayan.me/` and
+  `N8N_WEBHOOK_URL=https://hooks.chayan.me/`; `WEBHOOK_URL` is now only a
+  deprecated alias. Declare the exact `N8N_PROXY_HOPS` value for the implemented
+  proxy chain and forward only the documented proxy headers. [n8n endpoint variables](https://github.com/n8n-io/n8n-docs/blob/main/docs/deploy/host-n8n/configure-n8n/basic-configuration/use-environment-variables/endpoints.md), [n8n reverse-proxy webhook configuration](https://github.com/n8n-io/n8n-docs/blob/main/docs/deploy/host-n8n/configure-n8n/basic-configuration/configuration-examples/configure-webhook-urls-with-reverse-proxy.md)
+- Register a distinct SOPS-managed Telegram `secret_token` for each approval
+  bot and reject any request whose `X-Telegram-Bot-Api-Secret-Token` header is
+  absent or wrong before n8n processes it. Keep n8n's random webhook path as a
+  second control, not as the only authentication mechanism. If the selected n8n
+  trigger cannot preserve and verify the header, the narrow ingress must do so.
+  [Telegram Bot API `setWebhook`](https://core.telegram.org/bots/api#setwebhook)
+- Use a separate non-production Telegram bot for manual trigger testing; one
+  bot can register only one webhook at a time, so a test activation must not
+  replace the production approval webhook. [n8n Telegram Trigger guidance](https://github.com/n8n-io/n8n-docs/blob/main/docs/integrations/builtin/trigger-nodes/n8n-nodes-base.telegramtrigger/common-issues.md)
 
 No cross-host NFS, shared Docker volume, overlay network, database connection or two-node scheduler is permitted. This makes a server loss local: `publish-1` failure pauses scheduling but Paperclip/research/approval remain available; `core-1` failure does not corrupt publisher state, although new approvals pause. Already scheduled publisher jobs must behave according to a documented approval-state contract.
 
@@ -298,6 +325,9 @@ Perform a disposable restore drill quarterly and after any database/topology upg
 - Capture `team.chayan.me` as Paperclip's current stable hostname, audit its
   current DNS/origin route and Access state, and record the complete desired
   public-hostname/Access-policy map without changing live DNS.
+- Commit the `hooks.chayan.me` Telegram route manifest, including its exact
+  method/path boundary, secret owner, verification point, WAF/rate limit, data
+  class, execution retention and negative tests.
 - Define inventory/group-variable schemas, the `.sops.yaml` policy, required age recipients, secret catalog and data classification before writing mutating playbooks.
 - Pin the Ansible execution environment/collection versions so the controller is reproducible and does not depend on the founder laptop's global Python installation.
 
@@ -313,10 +343,15 @@ Perform a disposable restore drill quarterly and after any database/topology upg
   Access, authenticated requests reach Paperclip, and no origin address or
   alternate hostname bypasses the policy.
 - Remove w3exam only through its separately approved migration/change window.
-- Deploy n8n at `n8n.chayan.me` behind its own Access application, measure
-  24–72-hour peaks, then deploy bounded Hermes and measure again.
+- Deploy n8n's editor at `n8n.chayan.me` behind its own Access application and
+  its production webhook base at `hooks.chayan.me` through the restricted
+  machine route above. Verify that non-`POST` methods, non-`/webhook/*` paths,
+  and requests with a missing or wrong Telegram secret are rejected before
+  n8n. A valid canary plus a replay must reach the correct brand/channel
+  workflow while producing one durable approval transition. Then measure
+  24–72-hour peaks, deploy bounded Hermes and measure again.
 
-**Exit:** a second Ansible run reports no unexpected changes; Paperclip's before/after effective-config diff is empty, its image digest is unchanged and it is healthy; backup restore passes; root disk remains below 70%; seven-day peak RAM remains below 4.5 GB with no OOM.
+**Exit:** a second Ansible run reports no unexpected changes; Paperclip's before/after effective-config diff is empty, its image digest is unchanged and it is healthy; backup restore passes; the Telegram route's positive, negative and replay tests pass without exposing an n8n UI/API; root disk remains below 70%; seven-day peak RAM remains below 4.5 GB with no OOM.
 
 ### Phase 2 — provision and configure `publish-1`
 
@@ -404,5 +439,7 @@ The subsequent implementation is ready for production review only when:
    declared `chayan.me` hostname behind the correct host's Cloudflare Tunnel
    and default-deny Access policy, and no application origin is reachable by
    public IP or alternate DNS.
-10. Every non-human public route has a committed least-privilege manifest and
-    verification test; no whole administration hostname has an Access bypass.
+10. Every machine route that cannot enforce Access has a committed
+    least-privilege exception manifest and positive/negative verification
+    tests; no whole administration hostname has an Access bypass. Routes using
+    a valid Access service token remain normal Access-enforced routes.
