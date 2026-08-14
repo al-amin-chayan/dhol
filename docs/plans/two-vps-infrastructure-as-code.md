@@ -2,36 +2,60 @@
 
 **Decision date:** 2026-08-13
 
-**Amended:** 2026-08-14 — the central n8n also serves PoriPati Track-1
+**Amended:** 2026-08-14 — shared services are multi-project-ready; PoriPati Track-1 is the first external n8n consumer
 
-**Status:** Founder-approved topology; central-n8n consumer amendment pending cross-review; implementation is a separate lane
+**Status:** Founder-approved topology; multi-project shared-service amendment pending cross-review; implementation is a separate lane
 
 **Hosting budget:** two VPSDime Linux6GB services under the existing customer account, $7/month each ($14/month total), before tax or optional add-ons
 
 ## Decision
 
 Use two independent VPSDime servers whose host/runtime desired state is managed
-from this Git repository. Registered external n8n consumers supply their own
-workflow implementations from exact reviewed commits in their owning
-repositories:
+from this Git repository. Shared tools accept only explicitly registered
+founder-owned projects, whose implementations remain at exact reviewed commits
+in their owning repositories:
 
 | Host | Workloads | Resources | Reason for boundary |
 | --- | --- | ---: | --- |
-| `core-1` | Paperclip under configuration-parity IaC, central n8n for Dholbeat and registered external workloads (initially PoriPati Track-1), bounded Hermes worker, host monitoring, restic | 4 shared vCPU, 6 GB RAM, 30 GB SSD | Protect the existing application and keep trusted founder-owned approval/research/growth automation together. |
-| `publish-1` | Selected publisher stack, its databases/caches/workflow engine, host monitoring, restic | 4 shared vCPU, 6 GB RAM, 30 GB SSD | Isolate the newer publisher and its update/resource risks from Paperclip. |
+| `core-1` | Paperclip under configuration-parity IaC, central multi-project n8n, separately managed per-project Hermes profiles under one global resource envelope, host monitoring, restic | 4 shared vCPU, 6 GB RAM, 30 GB SSD | Protect the existing application and keep trusted founder-owned approval/research/growth automation together without sharing product databases or container networks. |
+| `publish-1` | Selected multi-project publisher stack, its databases/caches/workflow engine, host monitoring, restic | 4 shared vCPU, 6 GB RAM, 30 GB SSD | Isolate the newer publisher and its update/resource risks from Paperclip while separating each project by organization/workspace and brand connection mapping. |
 
 Buy the second service through the **existing VPSDime account**, preferably in a different available datacenter from `core-1`. Do not create a second customer identity. VPSDime supports adding another VPS to one account, while a related account does not create another refund entitlement. [VPSDime deployment](https://vpsdime.com/knowledgebase/client-area/deploy/deploying-a-new-vps), [VPSDime terms](https://vpsdime.com/tos)
 
 The two hosts are not a cluster and do not form one 8-vCPU/12-GB computer. Each process remains constrained by its host's 6 GB RAM and 30 GB disk, and VPSDime's Linux CPU is shared. The gain is two scheduling envelopes and two failure domains, not eight dedicated cores. [VPSDime Linux plans](https://vpsdime.com/linux-vps)
 
-### Central n8n is shared infrastructure from day one
+### Shared services are multi-project-ready from day one
+
+The two hosts provide a reusable platform for trusted founder-owned projects;
+they do not turn every resident application into a tenant service. Adding a
+project should be a reviewed manifest, scoped secret set, exact source pin and
+capacity admission—not a new VPS or a hard-coded branch in shared runtime
+code—when the selected tool provides an adequate separation primitive.
+
+| Service | Day-one project contract | Deliberate boundary |
+| --- | --- | --- |
+| Central n8n | One Community instance; registered consumer manifests, workflow namespaces, separate credentials, source pins and deployment receipts | Logical organization only: consumers share a process, database, encryption key, queue, backup and upgrade window. |
+| Hermes Agent | One pinned installation/image; one managed profile/process and data volume, workspace, approved tool set, schedule and credential set per registered project | Process/state separation on one host, not a hostile-tenant boundary; one global job and memory envelope protects `core-1`. |
+| Selected publisher | One selected stack; separate project organizations/workspaces, brand provider connections, approval state and credential mappings | Application separation must be verified during the Postiz-vs-Mixpost decision; a tool that cannot prevent cross-project writes requires a founder decision to split or replace it. |
+| Monitoring, tunnel and backup automation | Shared code with per-host/per-purpose routes, credentials, repositories, labels and retention | Operational automation is shared, but credentials and backup repositories do not cross host or purpose boundaries. |
+| Paperclip and project applications/databases | Not shared through this contract | They remain separately owned applications. Shared tools reach only declared, authenticated HTTPS APIs—never product databases or container networks. |
+
+This is a capability contract, not an unlimited capacity promise. Every new
+project is admitted only after its resource, data, access and failure impact
+fits the thresholds below. A hard isolation requirement, another operator or
+untrusted workflow/agent code stops onboarding and triggers a founder decision
+about a separate instance or host.
+
+#### n8n: one central runtime with registered consumers
 
 Deploy exactly one production n8n instance on `core-1`. It is the central
 workflow runtime for Dholbeat and explicitly registered, founder-owned external
-workloads. **PoriPati Track-1 is the first external consumer.** Do not deploy a
-PoriPati-specific n8n container, PostgreSQL database, Caddy proxy or public
-origin. PoriPati uses the same `n8n.chayan.me` administration interface and the
-same bounded execution service described by this plan.
+workloads. **PoriPati Track-1 is the first external consumer.** A later w3exam
+automation uses the same generic registration path; it does not require an n8n
+fork or second administration surface. Do not deploy a PoriPati-specific n8n
+container, PostgreSQL database, Caddy proxy or public origin. PoriPati uses the
+same `n8n.chayan.me` administration interface and the same bounded execution
+service described by this plan.
 
 This shares the runtime, not application ownership:
 
@@ -82,7 +106,7 @@ The intentionally manual boundary is small: order/reinstall/resize a VPS in the 
 Rebuilding is a three-source operation, not “one Git checkout contains the
 whole server”:
 
-1. **Reviewed Git repositories store desired state and approved ciphertext:** Dholbeat stores playbooks, roles, Compose files, version/image locks, public configuration templates, Dholbeat-owned n8n workflow exports, external-consumer manifests, systemd definitions, verification scripts, runbooks, the `.sops.yaml` policy and values-only SOPS+age-encrypted `*.sops.yml` files. An external consumer's repository stores its own credential-free workflow exports and tests. Every production import records the exact reviewed source commit and workflow hashes; a moving branch is never a recovery input.
+1. **Reviewed Git repositories store desired state and approved ciphertext:** Dholbeat stores playbooks, roles, Compose files, version/image locks, public configuration templates, Dholbeat-owned n8n workflow exports, n8n-consumer and Hermes-project manifests, systemd definitions, verification scripts, runbooks, the `.sops.yaml` policy and values-only SOPS+age-encrypted `*.sops.yml` files. An external project's repository stores its own credential-free workflow exports, Hermes prompt/skill/schedule configuration and tests where it uses those tools. Every production import records the exact reviewed source commit and content hashes; a moving branch is never a recovery input.
 2. **The password manager is the root-access authority:** it stores the founder and break-glass age private keys, host bootstrap key and provider recovery logins. The `SOPS_AGE_KEY` environment variable supplies an age private key at apply time; no private key or plaintext `.env` enters Git.
 3. **Encrypted off-site backups store mutable state:** fresh database dumps and the small set of non-database application data that cannot be regenerated. Restic is the only backup-retention authority.
 
@@ -102,6 +126,8 @@ infra/
     publisher.sops.yml
     n8n-consumers/
       poripati-track1.sops.yml     # runtime values only; no secret in consumer repo
+    hermes-projects/
+      dholbeat.sops.yml            # one values-only secret set per enabled profile
   inventories/
     production/
       hosts.yml                    # committed stable hostnames/roles; no secrets
@@ -142,6 +168,11 @@ n8n/
     README.md                       # ownership/import/restore contract
     consumer.schema.json            # validates all consumer registrations
     poripati-track1.yml              # non-secret source, limits and data contract
+hermes/
+  projects/
+    README.md                       # profile ownership/import/restore contract
+    project.schema.json             # validates every Hermes project registration
+    dholbeat.yml                    # non-secret profile/source/limits contract
 scripts/
   infra-check
   infra-plan
@@ -151,6 +182,9 @@ scripts/
   n8n-consumer-check
   n8n-consumer-import
   n8n-consumer-verify
+  hermes-project-check
+  hermes-project-import
+  hermes-project-verify
 .sops.yaml                          # path policy + founder/break-glass recipients
 ```
 
@@ -197,7 +231,17 @@ Paperclip need not be an untouchable snowflake. The invariant is that its effect
    concurrency at one; cap execution and binary retention; export Dholbeat
    workflow JSON to this repository and import registered external workflows
    from their owning repositories through the consumer contract below.
-8. Deploy Hermes as a separate, planned noncritical worker with a narrow workspace, approximately 2 GB memory ceiling and one concurrent job. No Docker socket, host root, Paperclip mounts, host network or approval/publishing credentials. n8n remains the deterministic authority, and no deadline, approval or publish path depends on Hermes.
+8. Deploy one pinned Hermes installation/image, but run each enabled project as
+   a separately managed profile process/container with its own data volume,
+   workspace, approved skills, schedules and credentials. Enforce an aggregate
+   approximately 2 GB Hermes memory ceiling and one active agent job globally,
+   not 2 GB per profile. No profile receives the Docker socket, host root,
+   Paperclip or another project's mounts, host network, publishing credentials
+   or authority to mutate durable approval state. A designated profile may
+   receive only its own Telegram gateway token if that open decision selects
+   Hermes for founder input; it forwards verified input to n8n and cannot
+   approve or publish by itself. n8n remains the deterministic authority, and
+   no deadline, approval or publish path depends on Hermes.
 
 Live baseline recorded 2026-08-13 before this plan: 4 vCPU, 6 GiB RAM, approximately 1.0 GiB used/5.0 GiB available, no swap, root disk 17/30 GB used, Paperclip approximately 698 MiB RAM, and all w3exam containers approximately 225 MiB. Re-measure after w3exam migration and backup cleanup; these are point-in-time values, not capacity guarantees.
 
@@ -268,6 +312,72 @@ All workflows share one process, encryption key, database, backup set, upgrade
 window and outage boundary. Only trusted, reviewed founder-owned consumers may
 use this central instance.
 
+The PoriPati rules above are the first concrete registration, not a special
+case in the runtime. A future w3exam or other founder-owned consumer gets a new
+manifest, its own SOPS file, namespace, credential references, allowlists,
+source-commit pin and deployment receipt. Its product-specific workflows stay
+in that product repository. Onboarding must not require a change to the n8n
+Compose project, Ansible role or generic import code. The implementation first
+proves this by validating and round-tripping a second credential-free fixture;
+that test does not activate unfinished w3exam business automation.
+
+### Central Hermes project contract
+
+Install one pinned Hermes Agent distribution on `core-1`, but never put all
+projects into one Hermes profile. Hermes supports multiple profiles with
+separate configuration, sessions and memory; the production mapping is one
+managed process/container per registered profile so each can restart and fail
+independently. Each profile receives its own data directory/volume, SOUL and
+prompt configuration, approved skills, memory/session database, cron
+definitions, bot tokens and other credentials, project workspace and bounded
+logs. [Hermes multi-profile gateways](https://github.com/nousresearch/hermes-agent/blob/main/website/docs/user-guide/multi-profile-gateways.md), [Hermes Docker profiles](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/docker.md)
+
+Every project is registered by a non-secret manifest under
+`hermes/projects/`. The schema requires:
+
+- a stable project/profile ID, owner, owning repository, configuration path and
+  immutable desired `source_commit` pin;
+- exact credential names and purposes, an isolated data volume and workspace,
+  and explicit tool, filesystem, command and outbound-network allowlists;
+- allowed trigger types and caller/chat identities, schedules, maximum runtime,
+  expected job rate, operational alert destination and incident contact;
+- memory/CPU limits, global scheduling priority, data classification,
+  session/memory/log retention and explicit backup/deletion handling; and
+- import, inactive smoke-test, rollback and restore commands plus activation
+  conditions.
+
+Dholbeat's own profile is canonical in this repository. An external project's
+Hermes prompts, skills and cron definitions remain canonical at an exact
+cross-reviewed commit in its owning repository, with hashes recorded in a
+root-owned deployment receipt. Runtime values come only from that project's
+`infra/secrets/hermes-projects/<project>.sops.yml`; no profile may read another
+profile's directory, credential file, memory/session database or workspace.
+Adding w3exam later is therefore a manifest, project-specific SOPS file,
+reviewed source pin, inactive smoke test and capacity check—not another Hermes
+installation or a branch in shared runtime code.
+
+The initial host-wide Hermes envelope is approximately 2 GB and one active
+agent job across all profiles. Enforce per-profile cgroup limits plus a global
+scheduler/lock; leave profiles inactive or schedule them apart when necessary.
+Measure duration, errors, RAM, disk and queue delay by project. A noisy profile
+is paused before it can delay Paperclip or deterministic n8n work. This shared
+installation is a process/state boundary for trusted founder-owned projects,
+not hostile-tenant isolation or independent capacity.
+
+Hermes is noncritical and has no public API or gateway by default. Any later
+founder interface must be separately declared under the Zero Trust policy;
+bot/gateway callers are allowlisted per profile. Use a sandbox/container,
+non-root execution, resource limits and narrow credentials, and do not forward
+secrets into an agent sandbox unless the declared task requires them. No
+profile receives the Docker socket, host root, Paperclip/product mounts,
+another project's state or Postiz/Mixpost credentials. If the founder selects
+Hermes as a Telegram gateway, only the designated profile receives its own bot
+token and forwards verified founder input to n8n; it cannot mutate durable
+approval state or publish by itself. n8n owns deterministic triggers, retries,
+approval state and publishing, and a metered API fallback remains available
+when Hermes is unavailable. [Hermes
+security guide](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/security.md), [Hermes security policy](https://github.com/NousResearch/hermes-agent/blob/main/SECURITY.md)
+
 ### `publish-1`: keep the selected publisher stack together
 
 Deploy the maintained official Postiz Compose topology as one host-local unit: Postiz application, PostgreSQL, Redis, Temporal and its required state services. Do not stretch its database, Redis or Temporal across `core-1`, and do not expose their ports publicly. Postiz documents a 2-vCPU/2-GB/20-GB supported floor for light all-in-one use, with 4 vCPU/8 GB/50 GB recommended; therefore Linux6GB is a measured canary, not guaranteed headroom. [Postiz requirements](https://docs.postiz.com/installation/system-requirements)
@@ -281,9 +391,23 @@ Required controls:
 - Add health checks and startup ordering, but do not confuse Compose `depends_on` with disaster recovery.
 - Bound container logs, PostgreSQL logs, Temporal history/visibility retention and temporary uploads. Disk growth without a declared retention owner fails CI/review.
 - Give n8n only the Postiz HTTPS API URL and scoped API credential. Do not join Docker networks across servers and do not expose a private control port merely to imitate a LAN.
+- Require a stable project organization/workspace and brand-account mapping
+  before connecting a social account. Provider connections, media, approval records and API credentials
+  must not be silently reused across projects. Adding a project/brand is a
+  workspace plus configuration/secret change, not shared integration code.
+  Verify the selected tool's workspace and API authorization behavior during
+  the canary; if it cannot prevent an integration from writing to another
+  project's workspace, stop for a founder decision to split the instance or
+  select a different publisher.
 - Enforce the repository's human-approval rule at the integration boundary: n8n may create or schedule a Postiz job only when the current content hash has a recorded founder approval in the correct brand channel. Editing invalidates approval. Hermes never receives the Postiz credential, and neither Postiz nor a retry worker may turn an unapproved draft into a scheduled post.
 
-Postiz remains a default, not a closed decision. If the founder selects Mixpost, the host boundary, inventory, baseline, tunnel, R2/restic, monitoring, approval contract and replacement-host workflow remain unchanged; only the publisher role, Compose project and application-aware dump/restore adapter change. Mixpost's documented stack uses PHP, MySQL, Redis, queue workers and FFmpeg and does not list Temporal, so it must be re-benchmarked rather than assumed to share Postiz's resource profile. Do not deploy both publishers simultaneously. [Mixpost server requirements](https://docs.mixpost.app/server/)
+For Postiz, use one organization and its own API/OAuth credential per project;
+map each brand only to integration IDs owned by that organization. Postiz's
+public API documents organization-scoped resources and rejects access to a
+resource owned by another organization, but the canary must still verify this
+on the pinned self-hosted version. [Postiz API authorization](https://docs.postiz.com/public-api/introduction)
+
+Postiz remains a default, not a closed decision. If the founder selects Mixpost, the host boundary, inventory, baseline, tunnel, R2/restic, monitoring, approval contract and replacement-host workflow remain unchanged; only the publisher role, Compose project and application-aware dump/restore adapter change. Mixpost documents configurable multiple workspaces under its Enterprise edition and says a user otherwise owns one workspace, so the comparison may not treat multi-workspace support as a free-edition guarantee. Under the current cost constraint, select Mixpost only if the exact $0 edition passes the same project isolation and API tests; otherwise retain Postiz rather than introduce a paid tier. Mixpost's documented stack uses PHP, MySQL, Redis, queue workers and FFmpeg and does not list Temporal, so it must be re-benchmarked rather than assumed to share Postiz's resource profile. Do not deploy both publishers simultaneously. [Mixpost multiple workspaces](https://docs.mixpost.app/enterprise/configuration/multiple-workspaces/), [Mixpost server requirements](https://docs.mixpost.app/server/)
 
 ## Network and failure model
 
@@ -293,8 +417,9 @@ The services integrate at application boundaries:
 Founder -> Cloudflare Access -> team.chayan.me -> Paperclip
 Founder -> Cloudflare Access -> n8n.chayan.me / publish.chayan.me UIs
 Telegram -> hooks.chayan.me/webhook/* -> verified ingress -> n8n approval state
-n8n -> scoped service principal over HTTPS -> PoriPati typed lead/care APIs
-n8n -> official provider APIs -> PoriPati consented follow-up and ops alerts
+n8n -> per-project scoped service principal over HTTPS -> registered product APIs
+n8n -> official provider APIs -> project-scoped consented actions and ops alerts
+Hermes project profile -> declared project workspace/APIs only
 n8n -> Cloudflare Access service token + scoped app token -> selected publisher API
 selected publisher -> social-provider APIs
 selected publisher -> public media R2 bucket
@@ -326,6 +451,9 @@ scheduled/outbound and add no public route. If a later provider callback is
 required, add the narrowest consumer-specific path below `hooks.chayan.me` only
 after its route manifest, application-level verification and negative tests are
 reviewed. Never make an Access exception on `n8n.chayan.me` for a consumer.
+Future w3exam or other project registrations follow the same rule. Hermes has
+no public interface by default; a project profile does not receive a hostname
+merely because it exists.
 
 Cloudflare documents service tokens specifically for automated callers of an
 Access-protected self-hosted application; each token is independently
@@ -397,11 +525,15 @@ Required flow:
 
 1. Commit `.sops.yaml` with a `creation_rules` path expression limited to `infra/secrets/.*\.sops\.yml` and both the founder and break-glass **public** age recipients. Keep the corresponding private keys only in the password manager.
 2. Encrypt only YAML values with SOPS. Each encrypted file must retain SOPS metadata, its integrity MAC and both approved recipients; adding a plain file under `infra/secrets/` is a CI failure. The repository secret catalog records each name, owner, consumer and rotation trigger without duplicating its value.
-3. Keep each external n8n consumer in its own SOPS file and render only that
-   consumer's required values into the central n8n credential/bootstrap
-   operation. Consumer repositories contain credential names, schemas and
-   setup instructions only. Removing a consumer must revoke its provider/API
-   credentials and remove its workflows without rotating unrelated consumers.
+3. Keep each external n8n consumer and each Hermes project profile in its own
+   SOPS file. Render only the selected consumer/profile values into its
+   credential bootstrap or root-owned service file; owning repositories contain
+   credential names, schemas and setup instructions only. Publisher provider
+   connections and application tokens are likewise catalogued by project/brand
+   even if the selected application stores them in one database. Removing a
+   project must revoke its provider/API credentials, deactivate its workflows
+   and profile, and remove its workspace access without rotating or exposing
+   unrelated projects.
 4. At apply time, export the selected private key from the password manager to `SOPS_AGE_KEY` in controller memory. Pinned `community.sops` integration decrypts variables for Ansible; tasks render root-owned `0600` host environment files with `no_log: true` and `diff: false`. Do not write a decrypted workspace copy. [SOPS age configuration](https://github.com/getsops/sops#encrypting-using-age), [Ansible `community.sops`](https://docs.ansible.com/projects/ansible/latest/collections/community/sops/)
 5. Unset `SOPS_AGE_KEY` after the run and verify logs/artifacts contain neither plaintext nor decrypted diffs. Rotate any value ever printed. The password manager remains authoritative for private age keys, bootstrap SSH keys and provider recovery logins.
 6. If an age private key leaks, remove its recipient and add a replacement, but also rotate **every underlying secret it could decrypt**. Re-encryption alone is insufficient because old ciphertext remains recoverable from Git history with the leaked key.
@@ -421,6 +553,14 @@ Every infrastructure pull request should run read-only checks:
   names, outbound allowlists, schedules/timeouts, data retention and route
   declarations. Inspect imported workflow JSON for secret literals,
   cross-consumer/duplicate IDs, forbidden nodes and undeclared network targets.
+- Hermes-project schema tests for stable profile IDs, immutable source pins,
+  distinct data/workspace mounts and credential sets, declared tools/network
+  targets, caller allowlists, schedules/timeouts, global concurrency, resource
+  limits and retention. A two-project fixture must prove that generic tooling
+  creates no cross-profile path or secret reference.
+- Publisher configuration tests require a unique project-to-
+  organization/workspace and brand-to-social-account mapping, and reject
+  duplicate account ownership or cross-project credential references.
 - Molecule/container tests for roles that can be tested locally; a disposable Ubuntu VM test for Docker/firewall roles before production use.
 - `tofu fmt -check`, `tofu validate`, provider lockfile verification and a saved, reviewed plan only when the optional Cloudflare layer exists.
 
@@ -445,6 +585,14 @@ consumer deployment receipt only after smoke tests pass, and drift checks
 compare that receipt with the Git pin. The host never receives a personal
 GitHub token or follows a moving consumer branch.
 
+Hermes project deployment follows the same reviewed-source rule.
+`hermes-project-import` renders one profile from the exact commit pinned by its
+merged manifest, leaves it inactive, and shows a redacted create/update plan.
+Only after isolation, resource, tool/network and smoke checks pass may
+`hermes-project-verify` record hashes and activate its declared schedules. A
+failed or unverifiable profile stays inactive without changing another
+profile.
+
 ## Migration and disaster-recovery procedure
 
 The design passes the portability goal only if this runbook succeeds on a blank compatible host:
@@ -457,7 +605,10 @@ The design passes the portability goal only if this runbook succeeds on a blank 
    deployed Dholbeat commit and each external consumer from the exact commit in
    its deployment receipt. Recreate credential references from SOPS-managed
    values, run retention pruning and consumer-specific deletion reconciliation,
-   then run offline consumer smoke tests.
+   then run offline consumer smoke tests. Reconcile each Hermes profile from
+   its recorded source commit into a separate data/workspace boundary; restore
+   mutable memory/session state only when its manifest classifies and retains
+   it, then keep every profile inactive until isolation and smoke checks pass.
 6. Run offline host verification, then use a temporary hostname or hosts-file entry for an end-to-end test.
 7. Quiesce writes/scheduling on the old host, take a final dump/snapshot, restore the delta, and rerun verification.
 8. Change Cloudflare tunnel/DNS routing. Keep OAuth callback hostnames stable so provider registrations do not change merely because the IP changed.
@@ -468,7 +619,8 @@ Recovery objectives for the initial plan:
 | Workload | Target RPO | Target hands-on rebuild objective | Notes |
 | --- | ---: | ---: | --- |
 | Paperclip | 24 hours initially | 2 hours | Tighten only if business data changes justify more frequent dumps. |
-| n8n/Hermes configuration | Recorded Dholbeat + consumer Git commits | 1 hour | n8n runtime/approval database follows the core backup schedule; external workflows reconcile from deployment receipts before activation. |
+| n8n configuration/state | Recorded Dholbeat + consumer Git commits; mutable DB follows backup schedule | 1 hour | External workflows reconcile from deployment receipts before activation. |
+| Hermes profiles | Recorded project Git commits; only explicitly retained mutable state follows backup schedule | 1 hour aggregate initial target | Recreate separate profiles inactive, restore scoped state where declared, then verify isolation before activation. |
 | Publisher database/config | 24 hours initially | 2 hours | Use the selected application's dump adapter; increase frequency after observing scheduled-post risk. |
 | Public media | Lifecycle-dependent | Re-upload/regenerate or restore selected source | Published assets should not make the root disk authoritative. |
 
@@ -492,6 +644,14 @@ Perform a disposable restore drill quarterly and after any database/topology upg
   route, its owning repository/export path and immutable source-commit pin,
   credential names, outbound hosts, execution bounds, 14-day maximum failure
   retention and restore checks.
+- Define and test the generic Hermes project schema, profile
+  import/verification receipt, per-project SOPS layout, separate data/workspace
+  mounts, global scheduler/resource contract and inactive-by-default lifecycle.
+  Include a second credential-free fixture so the tooling cannot hard-code
+  Dholbeat, PoriPati or w3exam.
+- Define the selected publisher's project organization/workspace and brand-mapping schema and acceptance
+  test before provisioning it; do not assume a UI folder is an authorization
+  boundary.
 - Pin the Ansible execution environment/collection versions so the controller is reproducible and does not depend on the founder laptop's global Python installation.
 
 **Exit:** CI validates an empty skeleton and rejects a non-SOPS file in the secrets path; the Paperclip guard can capture and compare redacted effective manifests without changing the host.
@@ -506,6 +666,8 @@ Perform a disposable restore drill quarterly and after any database/topology upg
   Access, authenticated requests reach Paperclip, and no origin address or
   alternate hostname bypasses the policy.
 - Remove w3exam only through its separately approved migration/change window.
+  That product-host migration does not prevent w3exam from later consuming the
+  central tools through its registered HTTPS/API contracts.
 - Deploy n8n's editor at `n8n.chayan.me` behind its own Access application and
   its production webhook base at `hooks.chayan.me` through the restricted
   machine route above. Verify that non-`POST` methods, non-`/webhook/*` paths,
@@ -516,9 +678,13 @@ Perform a disposable restore drill quarterly and after any database/topology upg
   credential-free PoriPati canary from an exact reviewed commit: validation,
   redacted import plan, isolated workflow identifiers, inactive-by-default
   import, smoke test, deployment receipt, rollback and restore. Do not activate
-  unfinished PoriPati business flows. Deploy bounded Hermes and measure again.
+  unfinished PoriPati business flows. Round-trip a second credential-free n8n
+  fixture to prove the importer is project-neutral. Deploy the Dholbeat Hermes
+  profile plus a harmless second project fixture as separate managed
+  processes/data/workspace boundaries, verify that neither can read the
+  other's state or credentials, then measure the aggregate one-job envelope.
 
-**Exit:** a second Ansible run reports no unexpected changes; Paperclip's before/after effective-config diff is empty, its image digest is unchanged and it is healthy; backup restore passes; the Telegram route's positive, negative and replay tests pass without exposing an n8n UI/API; the PoriPati canary round-trips from its owning Git commit without gaining another public route or credential access; root disk remains below 70%; seven-day peak RAM remains below 4.5 GB with no OOM.
+**Exit:** a second Ansible run reports no unexpected changes; Paperclip's before/after effective-config diff is empty, its image digest is unchanged and it is healthy; backup restore passes; the Telegram route's positive, negative and replay tests pass without exposing an n8n UI/API; the PoriPati canary and second generic fixture round-trip without another public route or cross-project credential access; separate Hermes fixtures cannot read each other's state/workspace/credentials and obey one global active-job limit; root disk remains below 70%; seven-day peak RAM remains below 4.5 GB with no OOM.
 
 ### Phase 2 — provision and configure `publish-1`
 
@@ -526,10 +692,13 @@ Perform a disposable restore drill quarterly and after any database/topology upg
 - Run the full Ansible bootstrap; configure a distinct tunnel and R2 credentials.
 - Close the existing Postiz-vs-Mixpost decision, then deploy only the selected complete publisher stack with R2 media, automatic registration disabled after founder creation and no public state-service ports.
 - Expose the publisher at `publish.chayan.me` behind Access, then connect both
-  brand workspaces and n8n through its public HTTPS API using both a scoped
-  Cloudflare Access service token and a scoped application credential.
+  project spaces/brand mappings and n8n through its public HTTPS API using both
+  a scoped Cloudflare Access service token and a scoped application credential.
+- Prove the generic organization/workspace mapper can add another project/brand through
+  configuration and scoped secrets without code changes or access to existing
+  provider connections. Do not connect a real account merely for this fixture.
 
-**Exit:** immediate/scheduled/cancel/delete/token-refresh tests pass for both brands; duplicate-post kill switch works; backup/restore passes; seven-day peak RAM is below 4.5 GB; steady disk is below 18 GB and an image update leaves at least 8 GB free.
+**Exit:** immediate/scheduled/cancel/delete/token-refresh tests pass for both brands; cross-workspace negative tests and the generic workspace fixture pass; duplicate-post kill switch works; backup/restore passes; seven-day peak RAM is below 4.5 GB; steady disk is below 18 GB and an image update leaves at least 8 GB free.
 
 ### Phase 3 — optional supported-provider OpenTofu
 
@@ -542,10 +711,10 @@ Perform a disposable restore drill quarterly and after any database/topology upg
 ### Phase 4 — prove portability
 
 - Rebuild each role in a disposable compatible VPS/VM from Git/SOPS ciphertext plus a password-manager age key and restic data.
-- For `core-1`, include external-consumer reconciliation from the recorded
-  PoriPati commit and prove that a missing consumer repository, workflow hash
-  mismatch or missing credential leaves that consumer inactive and fails the
-  drill visibly without breaking Dholbeat workflows.
+- For `core-1`, reconcile every n8n consumer and Hermes profile from recorded
+  source commits. Prove that a missing repository, content-hash mismatch or
+  missing credential leaves only that consumer/profile inactive and fails the
+  drill visibly without breaking Dholbeat or another registered project.
 - Time the exercise, close all undocumented steps and record the tested Git tag and snapshot IDs.
 
 **Exit:** both host roles can be rebuilt without copying an old root filesystem or consulting shell history.
@@ -555,16 +724,19 @@ Perform a disposable restore drill quarterly and after any database/topology upg
 Two Linux6GB hosts remain the $14 target only while each host independently meets its guardrails. Aggregate free memory on the other machine cannot rescue a constrained process.
 
 For `core-1`, attribute n8n execution counts, duration, errors and retained data
-to the declared consumer namespace. Start the central instance at global
-concurrency one and admit PoriPati within that envelope; do not pretend the free
-edition provides per-project queues or quotas. Before changing capacity, prune
-retained data, bound/schedule long workflows and pause the consumer responsible
+to the declared consumer namespace, and attribute Hermes jobs, queue delay,
+memory/session/log growth, RAM and errors to the declared project profile.
+Start n8n at global concurrency one and Hermes at one active agent job globally;
+admit PoriPati and any later w3exam workload only within those shared envelopes.
+Do not pretend free n8n provides per-project queues/quotas or that separate
+Hermes profiles create independent host capacity. Before changing capacity,
+prune retained data, bound/stagger long work and pause the project responsible
 for pressure. If seven-day peak RAM exceeds 4.5 GB, any OOM occurs, steady disk
 exceeds 18 GB, warning reaches 21 GB, an update cannot preserve 8 GB free, or
-Dholbeat approval/publishing latency repeatedly correlates with PoriPati work,
-stop and present measured options to the founder: workflow correction, a
-separate same-host instance for isolation, or a `core-1` upgrade/move. No option
-is automatic.
+Dholbeat approval/publishing latency repeatedly correlates with another
+project's work, stop and present measured options to the founder: workflow or
+agent correction, a separate same-host instance/profile envelope for
+isolation, or a `core-1` upgrade/move. No option is automatic.
 
 Upgrade **only `publish-1` to Linux12GB** if any of these persist after log/media pruning and scheduling adjustments:
 
@@ -580,7 +752,7 @@ That yields a $21/month topology (`core-1` $7 + `publish-1` $14), 18 GB aggregat
 | --- | ---: | --- |
 | Existing Linux6GB `core-1` | $7 | Already committed. |
 | New Linux6GB `publish-1` | $7 | Same existing customer account; start monthly. |
-| PoriPati Track-1 on central n8n | $0 incremental | One shared Community instance; no second Compose stack, database, proxy, hostname or VPS. Provider usage remains in the PoriPati budget. |
+| Registered projects on central n8n, Hermes and the selected publisher | $0 incremental initially | Reuse the bounded shared services; PoriPati is the first external n8n consumer and w3exam can register later. Provider/API usage remains in each project's budget, and measured capacity or isolation can still require a founder-approved split/upgrade. |
 | Ansible Core, Docker Compose, OpenTofu | $0 | Open-source software; maintenance time is real but not a license fee. |
 | R2 media and encrypted backups | $0–1 expected initially | Separate public media and private backup buckets; set usage alerts. |
 | Optional VPSDime nightly backup add-ons | $0 initially | Two add-ons would add $10/month and provide only three-night retention; restic remains authoritative. |
@@ -606,10 +778,10 @@ The initial additional $14–24 remains inside the repository's $10–25 margina
 - **No secret completeness claim.** Recovery depends on Git/SOPS ciphertext, a password-manager age key and restic access, tested separately from GitHub access.
 - **No two-node orchestration or distributed database.** Cross-host integration remains HTTPS/R2 only.
 - **No routine manual configuration.** Emergency changes are temporary drift and must be reconciled into Git.
-- **Central n8n is a shared-fate boundary.** Dholbeat and PoriPati share one
-  process, database, encryption key, execution queue, backup set and upgrade
-  window. Namespaces and separate credentials reduce mistakes but do not create
-  tenant isolation.
+- **Central n8n is a shared-fate boundary.** Dholbeat, PoriPati and any later
+  registered project share one process, database, encryption key, execution
+  queue, backup set and upgrade window. Namespaces and separate credentials
+  reduce mistakes but do not create tenant isolation.
 - **External workflows are privileged code.** A workflow can consume CPU/disk,
   call networks and expose data. Only reviewed, schema-compliant workflows from
   a recorded commit may be imported; risky nodes and undeclared targets fail
@@ -617,13 +789,25 @@ The initial additional $14–24 remains inside the repository's $10–25 margina
 - **Cross-repository drift can make recovery false.** The deployment receipt,
   exact source commit, workflow hashes and restore drill are mandatory. Neither
   a moving PoriPati branch nor a copied JSON file in Dholbeat is authoritative.
+- **Hermes profiles are not hostile-tenant isolation.** Separate processes,
+  data volumes, workspaces and credentials contain ordinary mistakes and
+  independent restarts, but profiles still share one host, installation/image,
+  upgrade window and global resource envelope. Agent tools are privileged code;
+  only trusted reviewed profiles with narrow allowlists may run, and one
+  project's profile must never receive another project's state or credentials.
+- **Publisher workspaces may be an application boundary, not a hard security
+  boundary.** Verify API authorization and cross-workspace negative tests for
+  the selected tool. If it cannot prevent cross-project writes, do not describe
+  the deployment as separated; split or replace it only after a founder
+  decision.
 - **PoriPati execution data may contain personal data.** Minimize it before n8n,
   disable successful-execution storage, prune failures within 14 days and run
   deletion/retention reconciliation after restore. Backups are not permission
   to retain a replayable lead registry in n8n.
-- **No second PoriPati n8n by default.** A split requires a documented founder
-  decision based on access, isolation or measured capacity; it is not an
-  implementation shortcut for the PoriPati repository.
+- **No per-project duplicate shared stack by default.** PoriPati, w3exam or a
+  later trusted project should use the generic n8n/Hermes/publisher contracts
+  while they meet the access, isolation and capacity gates. A split requires a
+  documented founder decision; it is not an implementation shortcut.
 
 ## Acceptance criteria for the implementation PR
 
@@ -647,7 +831,9 @@ The subsequent implementation is ready for production review only when:
     a valid Access service token remain normal Access-enforced routes.
 11. One central n8n instance serves Dholbeat and the registered PoriPati
     Track-1 consumer; no PoriPati-specific n8n/PostgreSQL/Caddy stack or second
-    administration hostname exists.
+    administration hostname exists. A second credential-free project fixture
+    round-trips through the same tooling without hard-coded project logic,
+    proving that w3exam can later register without changing the runtime.
 12. The generic consumer schema and tooling reject secret literals, duplicate
     or cross-consumer workflow identifiers, forbidden nodes, undeclared network
     targets, missing execution/retention bounds and unreviewed source commits.
@@ -655,14 +841,31 @@ The subsequent implementation is ready for production review only when:
     its declared credential references, reaches only its typed HTTPS test API,
     passes smoke/rollback tests and produces a deployment receipt containing
     source commit and workflow hashes.
-14. PoriPati workflows have no direct database/network access, no public route
-    by default, no successful PII-bearing execution storage, at most 14 days of
-    minimized failure data and no persistent binary/generated-media data.
-15. The `core-1` restore drill reconciles Dholbeat and PoriPati workflows from
-    their recorded commits, restores credential references from SOPS, performs
-    retention/deletion reconciliation and leaves any unverifiable consumer
-    inactive without breaking Dholbeat workflows.
-16. Monitoring distinguishes PoriPati execution pressure from Dholbeat work;
-    the seven-day central-n8n canary has no OOM, disk warning or repeated
-    PoriPati-correlated delay in approval/publishing workflows, or the plan
-    records the founder-approved remediation.
+14. PoriPati workflows have no direct product-database or container-network
+    access, no public route by default, no successful PII-bearing execution
+    storage, at most 14 days of minimized failure data and no persistent
+    binary/generated-media data.
+15. One pinned Hermes installation runs each enabled project as a separate
+    managed profile process/container with distinct data and workspace mounts,
+    memory/session state, approved skills/schedules and credential set. Cross-
+    profile path, state and secret negative tests pass; no profile exposes a
+    public API or receives Docker, host, Paperclip, publisher or another
+    project's credentials. A selected Telegram gateway profile has only its
+    own bot token and cannot mutate durable approval state or publish.
+16. Hermes tooling validates a second credential-free project fixture without
+    runtime-code changes, keeps imports inactive until verified, enforces the
+    aggregate approximately 2 GB/one-active-job envelope and records an exact
+    source commit plus content hashes for every activated profile.
+17. The selected publisher maintains unique project organization/workspace and
+    brand social-account mappings. Both initial brands plus a no-account
+    generic fixture pass cross-project authorization tests; no integration can
+    schedule into another project's space or reuse its provider credentials.
+18. The `core-1` restore drill reconciles Dholbeat and every registered n8n
+    consumer/Hermes profile from recorded commits, restores only its SOPS-
+    scoped credentials and declared retained state, performs retention/deletion
+    reconciliation and leaves an unverifiable unit inactive without breaking
+    another project.
+19. Monitoring distinguishes n8n and Hermes pressure by consumer/project; the
+    seven-day canary has no OOM, disk warning or repeated cross-project delay in
+    Dholbeat approval/publishing work, or the plan records the founder-approved
+    remediation.
