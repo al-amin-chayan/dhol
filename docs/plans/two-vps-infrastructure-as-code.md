@@ -122,7 +122,7 @@ infra/
   ansible.cfg
   requirements.yml                 # exact tested collection versions
   secrets/
-    core.sops.yml                  # values encrypted by SOPS; metadata required
+    core.sops.yml                  # platform secrets, including n8n drift API key
     publisher.sops.yml
     n8n-consumers/
       poripati-track1.sops.yml     # runtime values only; no secret in consumer repo
@@ -231,11 +231,13 @@ Paperclip need not be an untouchable snowflake. The invariant is that its effect
    concurrency at one; cap execution and binary retention; export Dholbeat
    workflow JSON to this repository and import registered external workflows
    from their owning repositories through the consumer contract below.
-8. Reuse one pinned Hermes image/version, but follow the upstream Docker pattern
-   of one container/service per enabled project profile, each with a unique host
-   directory mounted at `/opt/data`, its own project workspace, approved skills,
-   schedules and credentials. Do not use the in-container profile multiplexer
-   or mount one data directory into two gateways. Enforce an aggregate
+8. Reuse one pinned Hermes image/version, but deliberately take upstream's
+   documented separate-container exception for resource isolation and blast-
+   radius control: one container/service per enabled project profile, each with
+   a unique host directory mounted at `/opt/data`, its own project workspace,
+   approved skills, schedules and credentials. Do not use the default in-
+   container profile multiplexer or mount one data directory into two gateways.
+   Enforce an aggregate
    approximately 2 GB Hermes memory ceiling and one active agent job globally,
    not 2 GB per profile. No profile receives the Docker socket, host root,
    Paperclip or another project's mounts, host network, publishing credentials
@@ -349,10 +351,13 @@ Maintain one pinned Hermes Agent image/version on `core-1`, but do not run all
 projects inside one Docker profile multiplexer. Upstream documents two distinct
 facts: native profiles have per-profile configuration and credentials while
 their gateway session keys can be namespaced inside a **shared** session store;
-for Docker, upstream recommends one container per profile, each bind-mounting a
-different host directory at `/opt/data`, and warns against two gateways writing
-one data directory. This plan chooses the Docker pattern. Each project gets its
-own container/service, resolved `/opt/data` mount, SOUL/prompt configuration,
+its Docker default is one s6-supervised container hosting multiple profiles,
+while separate containers are documented for needs such as resource isolation
+and blast-radius control. This plan deliberately takes that documented
+exception. Each project gets its own container/service and a distinct host
+directory mounted at `/opt/data`; the upstream warning against pointing two
+containers at the same data directory still applies. Each project also gets a
+resolved state backend, SOUL/prompt configuration,
 approved skills, intended local memory/session state, cron definitions, bot
 tokens and other credentials, project workspace and bounded logs. [Hermes
 multi-profile gateways](https://github.com/nousresearch/hermes-agent/blob/main/website/docs/user-guide/multi-profile-gateways.md), [Hermes profiles](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/profiles.md), [Hermes Docker profiles](https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/docker.md#multi-profile-support)
@@ -635,7 +640,16 @@ it. `n8n-consumer-verify` writes the source commit, workflow hashes and resolved
 allowed credential IDs to the consumer deployment receipt only after smoke
 tests pass. A locked drift timer must re-export every live external-consumer
 workflow at least every five minutes and revalidate its content hash and
-resolved credential references against that receipt and the Git pin. A new,
+resolved credential references against that receipt and the Git pin. Its
+dedicated owner-generated n8n API key is instance-wide because non-Enterprise
+keys cannot be scope-limited. Store it as SOPS ciphertext in
+`infra/secrets/core.sops.yml` and render it only to the host as root-owned mode
+`0600` `/etc/dholbeat/n8n-consumer-drift.env`. Never inject it into the n8n
+service, import it as a workflow credential or mount it into a Hermes container;
+both manifest validators and credential allowlists must reject any reference to
+it. [n8n API
+authentication](https://github.com/n8n-io/n8n-docs/blob/main/docs/connect/n8n-api/authentication.md)
+A new,
 undeclared or cross-consumer credential reference is a critical fail-closed
 event: deactivate only the affected workflow through the owner API, alert the
 operational channel and require a clean reviewed re-import before reactivation.
@@ -883,10 +897,10 @@ The initial additional $14–24 remains inside the repository's $10–25 margina
   exact source commit, workflow hashes and restore drill are mandatory. Neither
   a moving PoriPati branch nor a copied JSON file in Dholbeat is authoritative.
 - **Hermes profiles are not hostile-tenant isolation.** This plan deliberately
-  uses one container plus unique `/opt/data`, workspace, credential set and
-  verified local state backend per project; upstream's shared-store namespace
-  alone would not qualify. Those boundaries contain ordinary mistakes and
-  independent restarts, but profiles still share one host, image/version,
+  uses one container per project plus unique `/opt/data`, workspace, credential
+  set and verified local state backend per project; upstream's shared-store
+  namespace alone would not qualify. Those boundaries contain ordinary mistakes
+  and independent restarts, but profiles still share one host, image/version,
   upgrade window and global resource envelope. Agent tools are privileged code;
   only trusted reviewed profiles with narrow allowlists may run.
 - **Publisher workspaces may be an application boundary, not a hard security
