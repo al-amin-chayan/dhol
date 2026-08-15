@@ -5,7 +5,7 @@
 #   scripts/rm-worktree.sh <slug> [--delete-branch] [--force]
 #
 # Refuses to remove a worktree with uncommitted changes or with commits not
-# reachable from main, unless --force is given. Losing another agent's
+# reachable from develop or main, unless --force is given. Losing another agent's
 # unmerged work is the failure mode this guards against.
 set -euo pipefail
 
@@ -45,10 +45,17 @@ if [ "$FORCE" -eq 0 ]; then
     git -C "$WT_PATH" status --short >&2
     exit 1
   fi
-  UNMERGED="$(git -C "$WT_PATH" rev-list --count "main..$BRANCH" 2>/dev/null || echo 0)"
-  if [ "$UNMERGED" != "0" ]; then
-    echo "error: '$BRANCH' has $UNMERGED commit(s) not in main — merge first or pass --force" >&2
-    git -C "$WT_PATH" log --oneline "main..$BRANCH" >&2
+  MERGED_BASE=""
+  for base_ref in develop main; do
+    if git -C "$WT_PATH" show-ref --verify --quiet "refs/heads/$base_ref" &&
+      git -C "$WT_PATH" merge-base --is-ancestor "$BRANCH" "$base_ref"; then
+      MERGED_BASE="$base_ref"
+      break
+    fi
+  done
+  if [ -z "$MERGED_BASE" ]; then
+    echo "error: '$BRANCH' is not merged into develop or main — merge first or pass --force" >&2
+    git -C "$WT_PATH" log --oneline "develop..$BRANCH" >&2
     exit 1
   fi
 fi

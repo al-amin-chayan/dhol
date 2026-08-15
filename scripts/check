@@ -43,6 +43,7 @@ run_step() {
 
 run_step "verify installed tool versions" python /opt/dholbeat/runtime_versions.py --verify-only
 run_step "repository policy" python infra/controller/repo_policy.py --root "$REPO_ROOT"
+run_step "branch route policy" python infra/controller/branch_policy.py
 
 yaml_files=()
 while IFS= read -r -d '' yaml_file; do

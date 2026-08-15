@@ -24,14 +24,13 @@ cd .worktrees/brand-profile-schema
 # 3. Work. Commit small and complete. Conventional Commits.
 git add brands/ && git commit        # commit.template adds the Agent: trailer
 
-# 4. Rebase on main before asking for review
-git rebase main
+# 4. Rebase on develop before asking for review
+git rebase develop
 
 # 5. Cross-review: the OTHER model reviews this branch (see below)
 
-# 6. Merge from the primary checkout
-cd ~/Projects/dholbeat
-git merge --no-ff codex/brand-profile-schema
+# 6. Merge the approved PR into develop with GitHub's squash method.
+#    Do not merge or push directly from the primary checkout.
 
 # 7. Remove the lane
 scripts/rm-worktree.sh brand-profile-schema --delete-branch
@@ -39,8 +38,8 @@ scripts/rm-worktree.sh brand-profile-schema --delete-branch
 
 `new-worktree.sh` refuses to reuse an existing branch or path, and warns when
 the other agent has open lanes. `rm-worktree.sh` refuses to delete a lane with
-uncommitted changes or with commits not yet in `main` unless you pass
-`--force` — that guard exists specifically so one agent cannot delete the
+uncommitted changes or with commits not yet in `develop` or `main` unless you
+pass `--force` — that guard exists specifically so one agent cannot delete the
 other's unmerged work.
 
 ## Avoiding collisions
@@ -62,7 +61,7 @@ Ranked, cheapest first:
 
 ## Conflict recovery
 
-- Conflict during `git rebase main`: resolve in your lane, never in the
+- Conflict during `git rebase develop`: resolve in your lane, never in the
   primary checkout, and never `git checkout --ours/--theirs` wholesale on a
   shared doc — read both sides and merge the intent.
 - If the other agent has already merged an equivalent change, drop your commit
@@ -76,7 +75,7 @@ Ranked, cheapest first:
 Every tracked implementation task requires review by the other model at the
 exact head that may merge. Review is never author-triggered or automated:
 
-1. The author finishes the lane, rebases on `main`, runs the required checks,
+1. The author finishes the lane, rebases on `develop`, runs the required checks,
    and publishes a PR or local handoff containing the exact head SHA, what
    changed, what to check, and what was deliberately left out. Then it stops
    and returns control to the founder. The author must not invoke the other

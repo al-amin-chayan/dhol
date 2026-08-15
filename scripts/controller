@@ -207,6 +207,9 @@ run_controller() {
     --label "${CACHE_LABEL}=${CACHE_VALUE}" \
     --env DHOLBEAT_IN_CONTROLLER=1 \
     --env REPO_ROOT=/workspace \
+    --env GITHUB_EVENT_NAME \
+    --env GITHUB_BASE_REF \
+    --env GITHUB_HEAD_REF \
     --tmpfs /tmp:rw,nosuid,nodev,size=536870912 \
     --volume "$REPO_ROOT:/workspace:ro" \
     --workdir /workspace \

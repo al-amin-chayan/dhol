@@ -366,6 +366,7 @@ def check_executable_entrypoints(root: Path) -> list[str]:
     findings: list[str] = []
     for rel in (
         "scripts/check",
+        "scripts/configure-github-rulesets.py",
         "scripts/controller",
         "scripts/github-app-gh",
         "scripts/github-app-git",

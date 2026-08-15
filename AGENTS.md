@@ -55,19 +55,24 @@ cannot see.
 - **`README.md` and `AGENTS.md` are shared, high-contention files.** Append to
   the change log / open decisions; do not restructure them while another lane
   is open. Announce restructures before starting.
+- **Develop-first branch flow.** Routine lanes branch from local `develop` and
+  PR into `develop`. `main` is promotion-only: the only valid PR source for
+  `main` is `develop`. Never push directly to either protected branch.
 - **Rebase before merging, never force-push a branch the other agent may have
-  based work on.** `git fetch` is a no-op here until a remote exists; rebase on
-  local `main`.
-- **Small, complete commits.** Conventional Commits. Merge into `main` only
-  when the lane is complete and cross-reviewed.
+  based work on.** Fetch with the acting agent's App identity and rebase
+  routine work on local `develop`.
+- **Small, complete commits.** Conventional Commits. Merge into a protected
+  branch only when the lane is complete and cross-reviewed.
 
 Detail — worktree lifecycle, conflict recovery, handoff notes:
-`docs/agents/parallel-work.md`.
+`docs/agents/parallel-work.md`. Protected-branch topology and reproducible
+GitHub rulesets: `docs/agents/branch-workflow.md`.
 
 ## Cross-review rule
 
 - Work authored by **Claude Code** is reviewed by **Codex**, and work authored
-  by **Codex** is reviewed by **Claude Code**, before it merges into `main`.
+  by **Codex** is reviewed by **Claude Code**, before it merges into `develop`
+  or `main`.
   A fresh session of the *same* model does not count — correlated failure
   modes are the whole reason the rule exists.
 - **Cross-review is human-triggered only.** The author stops after publishing
