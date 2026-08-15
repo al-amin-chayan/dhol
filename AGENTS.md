@@ -81,6 +81,11 @@ GitHub rulesets: `docs/agents/branch-workflow.md`.
   The founder starts every review round in a separate session of the other
   model. Any author fix changes the head and needs a new founder-triggered
   cross-review before merge.
+- **Completed PRs are ready for review, not drafts.** Open or convert a PR as
+  ready once implementation and author verification are complete. Pending CI
+  or founder-triggered cross-review is not a reason to leave it draft. Use a
+  draft only while the task is genuinely incomplete or blocked, and state the
+  unfinished work in the PR body.
 - Cheap-tier subagents inherit their parent's brain: a Sonnet subagent under
   Claude is still Claude and does not satisfy cross-review.
 - Reviewer mindset is adversarial: verify claims against files and against

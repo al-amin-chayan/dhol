@@ -76,10 +76,12 @@ Every tracked implementation task requires review by the other model at the
 exact head that may merge. Review is never author-triggered or automated:
 
 1. The author finishes the lane, rebases on `develop`, runs the required checks,
-   and publishes a PR or local handoff containing the exact head SHA, what
-   changed, what to check, and what was deliberately left out. Then it stops
-   and returns control to the founder. The author must not invoke the other
-   model, spawn a reviewer, or enqueue review automation.
+   and publishes a ready-for-review PR or local handoff containing the exact
+   head SHA, what changed, what to check, and what was deliberately left out.
+   Draft status is reserved for genuinely incomplete or blocked work; pending
+   CI or cross-review does not justify it. Then the author stops and returns
+   control to the founder. The author must not invoke the other model, spawn a
+   reviewer, or enqueue review automation.
 2. The founder explicitly starts a separate session of the **other** model and
    asks it to review that SHA. For a local lane, point it at
    `.worktrees/<slug>`; for a PR, provide the PR number and head SHA.

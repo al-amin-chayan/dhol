@@ -10,7 +10,9 @@ source for `main`.
 1. Update local `develop` using the acting agent's GitHub App identity.
 2. Create an isolated lane with `scripts/new-worktree.sh`; its default base is
    `develop`.
-3. Push the agent-owned branch and open a PR targeting `develop`.
+3. Push the agent-owned branch and open a ready-for-review PR targeting
+   `develop`. Use draft status only if implementation is genuinely incomplete
+   or blocked—not merely because CI or cross-review is pending.
 4. The founder starts the other model to review the exact head.
 5. After approval and green checks, squash-merge routine work into `develop`.
 
