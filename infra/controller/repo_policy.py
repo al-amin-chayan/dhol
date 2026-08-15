@@ -244,6 +244,44 @@ def check_action_pins(root: Path, files: Iterable[Path], lock: dict | None = Non
     return findings
 
 
+def permissions_are_read_only(value: object) -> bool:
+    if value == "read-all":
+        return True
+    if not isinstance(value, dict):
+        return False
+    return all(
+        isinstance(permission, str) and permission in {"read", "none"}
+        for permission in value.values()
+    )
+
+
+def check_workflow_permissions(root: Path, files: Iterable[Path]) -> list[str]:
+    findings: list[str] = []
+    for path in workflow_files(root, files):
+        rel = relative(path, root)
+        try:
+            document = yaml.safe_load(read_text(path) or "")
+        except yaml.YAMLError:
+            continue
+        if not isinstance(document, dict):
+            findings.append(f"{rel}: workflow must be a YAML mapping")
+            continue
+        if "permissions" not in document:
+            findings.append(f"{rel}: workflow must declare explicit read-only top-level permissions")
+        elif not permissions_are_read_only(document["permissions"]):
+            findings.append(f"{rel}: top-level permissions must be read-only")
+
+        jobs = document.get("jobs", {})
+        if not isinstance(jobs, dict):
+            continue
+        for job_name, job in jobs.items():
+            if not isinstance(job, dict) or "permissions" not in job:
+                continue
+            if not permissions_are_read_only(job["permissions"]):
+                findings.append(f"{rel}: job {job_name} permissions must be read-only")
+    return findings
+
+
 def check_ci_entrypoint(root: Path) -> list[str]:
     path = root / ".github/workflows/validate.yml"
     if not path.is_file():
@@ -287,18 +325,19 @@ def check_toolchain_lock(root: Path) -> tuple[list[str], dict | None]:
         findings.append("toolchain.lock.yml: supported platforms must be linux/amd64 and linux/arm64")
     if controller.get("source_inputs") != EXPECTED_SOURCE_INPUTS:
         findings.append("toolchain.lock.yml: controller.source_inputs does not match the controller source contract")
-    for source_input in controller.get("source_inputs", []):
+    for source_input in EXPECTED_SOURCE_INPUTS:
         if not (root / source_input).is_file():
             findings.append(f"toolchain.lock.yml: missing controller source input: {source_input}")
 
     python_spec = lock.get("python", {})
     requirement_versions: dict[str, str] = {}
     requirements_path = root / "infra/controller/requirements.txt"
-    for record in requirement_records(requirements_path.read_text(encoding="utf-8")):
-        package = record.split()[0]
-        if "==" in package:
-            name, version = package.split("==", 1)
-            requirement_versions[name.lower().replace("_", "-")] = version
+    if requirements_path.is_file():
+        for record in requirement_records(requirements_path.read_text(encoding="utf-8")):
+            package = record.split()[0]
+            if "==" in package:
+                name, version = package.split("==", 1)
+                requirement_versions[name.lower().replace("_", "-")] = version
     for package, version in python_spec.get("direct_packages", {}).items():
         if EXACT_VERSION_RE.fullmatch(str(version)) is None:
             findings.append(f"toolchain.lock.yml: Python package {package} is not exactly pinned")
@@ -336,23 +375,37 @@ def check_toolchain_lock(root: Path) -> tuple[list[str], dict | None]:
             findings.append(f"toolchain.lock.yml: action {name} has no recorded license")
 
     containerfile = root / "infra/controller/Containerfile"
-    first_from = next(
-        (line.split()[1] for line in containerfile.read_text(encoding="utf-8").splitlines() if line.startswith("FROM ")),
-        "",
-    )
-    if first_from != controller.get("base_image"):
-        findings.append("infra/controller/Containerfile: FROM does not match controller.base_image")
+    if containerfile.is_file():
+        first_from = next(
+            (
+                line.split()[1]
+                for line in containerfile.read_text(encoding="utf-8").splitlines()
+                if line.startswith("FROM ")
+            ),
+            "",
+        )
+        if first_from != controller.get("base_image"):
+            findings.append("infra/controller/Containerfile: FROM does not match controller.base_image")
 
-    collection_requirements = load_yaml(root / "infra/controller/requirements.yml").get("collections", [])
-    required_versions = {item["name"]: str(item["version"]) for item in collection_requirements}
-    locked_versions = {name: str(spec["version"]) for name, spec in lock.get("ansible_collections", {}).items()}
-    if required_versions != locked_versions:
-        findings.append("infra/controller/requirements.yml: collection versions do not match toolchain.lock.yml")
+    collection_path = root / "infra/controller/requirements.yml"
+    if collection_path.is_file():
+        try:
+            collection_requirements = load_yaml(collection_path).get("collections", [])
+            required_versions = {item["name"]: str(item["version"]) for item in collection_requirements}
+            locked_versions = {
+                name: str(spec["version"]) for name, spec in lock.get("ansible_collections", {}).items()
+            }
+            if required_versions != locked_versions:
+                findings.append("infra/controller/requirements.yml: collection versions do not match toolchain.lock.yml")
+        except (KeyError, OSError, TypeError, ValueError, yaml.YAMLError) as error:
+            findings.append(f"infra/controller/requirements.yml: cannot load collection requirements: {error}")
     return findings, lock
 
 
 def check_gitignore(root: Path) -> list[str]:
     path = root / ".gitignore"
+    if not path.is_file():
+        return [".gitignore: required file is missing"]
     patterns = {
         line.strip()
         for line in path.read_text(encoding="utf-8").splitlines()
@@ -373,7 +426,11 @@ def check_executable_entrypoints(root: Path) -> list[str]:
         "scripts/github-app-token.sh",
         "infra/controller/entrypoint.sh",
     ):
-        mode = (root / rel).stat().st_mode
+        path = root / rel
+        if not path.is_file():
+            findings.append(f"{rel}: entry point is missing")
+            continue
+        mode = path.stat().st_mode
         if mode & stat.S_IXUSR == 0:
             findings.append(f"{rel}: entry point is not executable")
     return findings
@@ -389,6 +446,7 @@ def run_policy(root: Path) -> list[str]:
     lock_findings, lock = check_toolchain_lock(root)
     findings.extend(lock_findings)
     findings.extend(check_action_pins(root, files, lock))
+    findings.extend(check_workflow_permissions(root, files))
     findings.extend(check_ci_entrypoint(root))
     findings.extend(check_gitignore(root))
     findings.extend(check_executable_entrypoints(root))

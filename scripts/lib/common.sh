@@ -18,16 +18,40 @@ dholbeat_require_command() {
 
 dholbeat_yaml_scalar() {
   local path="$1"
-  local key="$2"
-  awk -v wanted="${key}:" '
-    $1 == wanted {
-      $1 = ""
-      sub(/^[[:space:]]+/, "")
-      gsub(/^"|"$/, "")
-      print
+  local qualified_key="$2"
+  local section="${qualified_key%%.*}"
+  local key="${qualified_key#*.}"
+  [ "$section" != "$key" ] || dholbeat_die "YAML scalar key must be section-qualified: $qualified_key"
+  local value
+  if ! value="$(awk -v section="${section}:" -v wanted="  ${key}:" '
+    $0 == section {
+      in_section = 1
+      next
+    }
+    in_section && /^[^[:space:]]/ {
       exit
     }
-  ' "$path"
+    in_section && substr($0, 1, length(wanted)) == wanted {
+      value = substr($0, length(wanted) + 1)
+      sub(/^[[:space:]]+/, "", value)
+      gsub(/^"|"$/, "", value)
+      if (value == "") {
+        status = 2
+        exit
+      }
+      print value
+      status = 0
+      found = 1
+      exit
+    }
+    END {
+      if (status == 2) exit 2
+      if (!found) exit 1
+    }
+  ' "$path")"; then
+    dholbeat_die "missing or empty YAML scalar '$qualified_key' in $path"
+  fi
+  printf '%s\n' "$value"
 }
 
 dholbeat_sha256_files() {

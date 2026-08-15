@@ -9,6 +9,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 CONTROLLER = REPO_ROOT / "scripts/controller"
 GITHUB_APP_TOKEN = REPO_ROOT / "scripts/github-app-token.sh"
 GITHUB_APP_GIT = REPO_ROOT / "scripts/github-app-git"
+COMMON = REPO_ROOT / "scripts/lib/common.sh"
 
 
 def fake_docker(tmp_path: Path) -> tuple[Path, Path]:
@@ -21,6 +22,48 @@ def test_help_resolves_root_from_any_directory(tmp_path: Path) -> None:
     result = subprocess.run([CONTROLLER, "--help"], cwd=tmp_path, text=True, capture_output=True)
     assert result.returncode == 0
     assert "scripts/controller" in result.stdout
+
+
+def test_controller_propagates_complete_github_event_context() -> None:
+    source = CONTROLLER.read_text(encoding="utf-8")
+    for variable in ("GITHUB_ACTIONS", "GITHUB_EVENT_NAME", "GITHUB_BASE_REF", "GITHUB_HEAD_REF"):
+        assert f"--env {variable}" in source
+
+
+def yaml_scalar(path: Path, key: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            "bash",
+            "-c",
+            'source "$1"; dholbeat_yaml_scalar "$2" "$3"',
+            "bash",
+            str(COMMON),
+            str(path),
+            key,
+        ],
+        text=True,
+        capture_output=True,
+    )
+
+
+def test_yaml_scalar_reads_only_the_exact_section_and_key(tmp_path: Path) -> None:
+    fixture = tmp_path / "fixture.yml"
+    fixture.write_text(
+        "nested:\n  local_image: wrong\ncontroller:\n  local_image: right\n",
+        encoding="utf-8",
+    )
+    result = yaml_scalar(fixture, "controller.local_image")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "right\n"
+
+
+def test_yaml_scalar_rejects_missing_or_empty_qualified_key(tmp_path: Path) -> None:
+    for content in ("nested:\n  local_image: wrong\n", "controller:\n  local_image:\n"):
+        fixture = tmp_path / "fixture.yml"
+        fixture.write_text(content, encoding="utf-8")
+        result = yaml_scalar(fixture, "controller.local_image")
+        assert result.returncode != 0
+        assert "missing or empty YAML scalar" in result.stderr
 
 
 def test_cache_cleanup_requires_exact_confirmation(tmp_path: Path) -> None:

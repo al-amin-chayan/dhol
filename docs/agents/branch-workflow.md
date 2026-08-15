@@ -20,9 +20,14 @@ source for `main`.
 
 Open a PR whose base is `main` and whose head is exactly `develop`. Run the
 same founder-triggered cross-review and required checks, then use a merge
-commit. Main's ruleset allows only merge commits so `develop` remains an
-ancestor of `main`. Direct pushes, force pushes, deletion, feature-to-main PRs,
-and unresolved review threads are blocked.
+commit. The founder starts one agent App to open or update the promotion PR and
+the other agent App to review it: the latest pusher/PR author and approving App
+must be different identities. This satisfies the last-push approval gate
+without a personal-account bypass. Approval is valid only for the exact head;
+the author never triggers the reviewer. Main's ruleset allows only merge
+commits so `develop` remains an ancestor of `main`. Direct pushes, force
+pushes, deletion, feature-to-main PRs, and unresolved review threads are
+blocked.
 
 ## Reproduce GitHub settings
 
@@ -44,7 +49,8 @@ Apply it from a Codex or Claude Code session:
 scripts/configure-github-rulesets.py --apply
 ```
 
-The installer detects the running agent, mints a fresh token for each API
-request, creates `develop` from `main` only when missing, updates repository
-merge defaults, and creates or updates the two named rulesets. It never reads
-the other agent's profile and never falls back to personal authentication.
+The installer detects the running agent, mints one fresh token for the
+installer invocation, creates `develop` from `main` only when missing,
+converges repository merge defaults and the two named rulesets, and reports
+whether each item changed. It never reads the other agent's profile and never
+falls back to personal authentication.

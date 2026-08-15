@@ -14,6 +14,11 @@ def test_non_pull_request_event_is_not_routed() -> None:
     assert validate_pull_request_route("push", "", "") == []
 
 
+def test_github_actions_requires_event_propagation() -> None:
+    findings = validate_pull_request_route("", "", "", github_actions=True)
+    assert findings == ["GitHub Actions did not propagate GITHUB_EVENT_NAME into the controller"]
+
+
 def test_feature_pull_request_targets_develop() -> None:
     assert validate_pull_request_route("pull_request", "develop", "codex/wp00") == []
 

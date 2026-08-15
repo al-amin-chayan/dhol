@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import importlib.util
 from pathlib import Path
 
@@ -61,3 +62,53 @@ def test_merge_methods_preserve_develop_to_main_ancestry() -> None:
     ]
     assert develop_methods == ["squash", "merge"]
     assert main_methods == ["merge"]
+
+
+def test_live_empty_required_reviewers_normalizes_to_desired() -> None:
+    desired = MODULE.desired_configuration()["rulesets"][0]
+    live = copy.deepcopy(desired)
+    rule(live, "pull_request")["parameters"]["required_reviewers"] = []
+    live["id"] = 123
+    assert MODULE.normalized_ruleset(live) == MODULE.normalized_ruleset(desired)
+
+
+def test_unchanged_ruleset_does_not_issue_a_write(monkeypatch, capsys) -> None:
+    desired = MODULE.desired_configuration()["rulesets"][0]
+    live = copy.deepcopy(desired)
+    rule(live, "pull_request")["parameters"]["required_reviewers"] = []
+    calls: list[tuple[str, str]] = []
+
+    def request(token, repository, method, path, payload=None):
+        calls.append((method, path))
+        if path == "rulesets":
+            return [{"name": desired["name"], "id": 123}]
+        if path == "rulesets/123":
+            return live
+        raise AssertionError(f"unexpected request: {method} {path} {payload}")
+
+    monkeypatch.setattr(MODULE, "github_request", request)
+    MODULE.upsert_rulesets("token", "owner/repository", [desired])
+    assert calls == [("GET", "rulesets"), ("GET", "rulesets/123")]
+    assert capsys.readouterr().out == f"unchanged: {desired['name']}\n"
+
+
+def test_apply_mints_one_token_for_the_whole_invocation(monkeypatch) -> None:
+    configuration = MODULE.desired_configuration()
+    tokens: list[str] = []
+
+    def mint():
+        tokens.append("token")
+        return "token"
+
+    def repository_request(token, repository, method, path, payload=None):
+        assert token == "token"
+        assert method == "GET"
+        assert path == ""
+        return configuration["repository_settings"]
+
+    monkeypatch.setattr(MODULE, "mint_token", mint)
+    monkeypatch.setattr(MODULE, "ensure_develop", lambda token, repository: None)
+    monkeypatch.setattr(MODULE, "github_request", repository_request)
+    monkeypatch.setattr(MODULE, "upsert_rulesets", lambda token, repository, rulesets: None)
+    MODULE.apply("owner/repository", configuration)
+    assert tokens == ["token"]

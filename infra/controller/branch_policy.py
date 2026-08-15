@@ -6,7 +6,14 @@ from __future__ import annotations
 import os
 
 
-def validate_pull_request_route(event_name: str, base_ref: str, head_ref: str) -> list[str]:
+def validate_pull_request_route(
+    event_name: str,
+    base_ref: str,
+    head_ref: str,
+    github_actions: bool = False,
+) -> list[str]:
+    if github_actions and not event_name:
+        return ["GitHub Actions did not propagate GITHUB_EVENT_NAME into the controller"]
     if event_name not in {"pull_request", "pull_request_target"}:
         return []
     if not base_ref or not head_ref:
@@ -25,6 +32,7 @@ def main() -> None:
         os.environ.get("GITHUB_EVENT_NAME", ""),
         os.environ.get("GITHUB_BASE_REF", ""),
         os.environ.get("GITHUB_HEAD_REF", ""),
+        os.environ.get("GITHUB_ACTIONS", "").lower() == "true",
     )
     if findings:
         for finding in findings:

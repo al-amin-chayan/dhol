@@ -57,6 +57,7 @@ def mint_token() -> str:
 
 
 def github_request(
+    token: str,
     repository: str,
     method: str,
     path: str,
@@ -71,7 +72,7 @@ def github_request(
         data=body,
         headers={
             "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {mint_token()}",
+            "Authorization": f"Bearer {token}",
             "X-GitHub-Api-Version": "2022-11-28",
         },
         method=method,
@@ -87,16 +88,17 @@ def github_request(
     return json.loads(response_body)
 
 
-def ensure_develop(repository: str) -> None:
+def ensure_develop(token: str, repository: str) -> None:
     try:
-        github_request(repository, "GET", "git/ref/heads/develop")
+        github_request(token, repository, "GET", "git/ref/heads/develop")
         print("unchanged: refs/heads/develop")
         return
     except GitHubApiError as error:
         if error.status != 404:
             raise
-    main_ref = github_request(repository, "GET", "git/ref/heads/main")
+    main_ref = github_request(token, repository, "GET", "git/ref/heads/main")
     github_request(
+        token,
         repository,
         "POST",
         "git/refs",
@@ -105,8 +107,26 @@ def ensure_develop(repository: str) -> None:
     print("created: refs/heads/develop from main")
 
 
-def upsert_rulesets(repository: str, rulesets: list[dict[str, Any]]) -> None:
-    existing_payload = github_request(repository, "GET", "rulesets")
+def normalized_ruleset(value: dict[str, Any]) -> dict[str, Any]:
+    normalized: dict[str, Any] = {
+        key: value.get(key)
+        for key in ("name", "target", "enforcement", "bypass_actors", "conditions")
+    }
+    normalized_rules: list[dict[str, Any]] = []
+    for rule in value.get("rules", []):
+        normalized_rule = {"type": rule.get("type")}
+        if "parameters" in rule:
+            parameters = dict(rule["parameters"])
+            if parameters.get("required_reviewers") == []:
+                parameters.pop("required_reviewers")
+            normalized_rule["parameters"] = parameters
+        normalized_rules.append(normalized_rule)
+    normalized["rules"] = normalized_rules
+    return normalized
+
+
+def upsert_rulesets(token: str, repository: str, rulesets: list[dict[str, Any]]) -> None:
+    existing_payload = github_request(token, repository, "GET", "rulesets")
     existing: dict[str, list[int]] = {}
     for ruleset in existing_payload:
         existing.setdefault(ruleset["name"], []).append(ruleset["id"])
@@ -115,18 +135,28 @@ def upsert_rulesets(repository: str, rulesets: list[dict[str, Any]]) -> None:
         if len(matches) > 1:
             raise RuntimeError(f"multiple live rulesets named {desired['name']!r}")
         if matches:
-            github_request(repository, "PUT", f"rulesets/{matches[0]}", desired)
+            live = github_request(token, repository, "GET", f"rulesets/{matches[0]}")
+            if normalized_ruleset(live) == normalized_ruleset(desired):
+                print(f"unchanged: {desired['name']}")
+                continue
+            github_request(token, repository, "PUT", f"rulesets/{matches[0]}", desired)
             print(f"updated: {desired['name']}")
         else:
-            github_request(repository, "POST", "rulesets", desired)
+            github_request(token, repository, "POST", "rulesets", desired)
             print(f"created: {desired['name']}")
 
 
 def apply(repository: str, configuration: dict[str, Any]) -> None:
-    ensure_develop(repository)
-    github_request(repository, "PATCH", "", configuration["repository_settings"])
-    print("updated: repository settings")
-    upsert_rulesets(repository, configuration["rulesets"])
+    token = mint_token()
+    ensure_develop(token, repository)
+    repository_settings = configuration["repository_settings"]
+    live_repository = github_request(token, repository, "GET", "")
+    if all(live_repository.get(key) == value for key, value in repository_settings.items()):
+        print("unchanged: repository settings")
+    else:
+        github_request(token, repository, "PATCH", "", repository_settings)
+        print("updated: repository settings")
+    upsert_rulesets(token, repository, configuration["rulesets"])
 
 
 def main() -> None:

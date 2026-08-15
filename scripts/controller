@@ -19,11 +19,11 @@ SOURCE_INPUTS=(
   infra/controller/runtime_versions.py
 )
 
-LOCAL_IMAGE="$(dholbeat_yaml_scalar "$LOCK_FILE" local_image)"
-BUILDKIT_IMAGE="$(dholbeat_yaml_scalar "$LOCK_FILE" buildkit_image)"
-CACHE_LABEL="$(dholbeat_yaml_scalar "$LOCK_FILE" cache_label)"
-CACHE_VALUE="$(dholbeat_yaml_scalar "$LOCK_FILE" cache_value)"
-MAX_CACHE_BYTES="$(dholbeat_yaml_scalar "$LOCK_FILE" max_cache_bytes)"
+LOCAL_IMAGE="$(dholbeat_yaml_scalar "$LOCK_FILE" controller.local_image)"
+BUILDKIT_IMAGE="$(dholbeat_yaml_scalar "$LOCK_FILE" controller.buildkit_image)"
+CACHE_LABEL="$(dholbeat_yaml_scalar "$LOCK_FILE" controller.cache_label)"
+CACHE_VALUE="$(dholbeat_yaml_scalar "$LOCK_FILE" controller.cache_value)"
+MAX_CACHE_BYTES="$(dholbeat_yaml_scalar "$LOCK_FILE" controller.max_cache_bytes)"
 LOCK_DIGEST="$(dholbeat_sha256_files "$REPO_ROOT" "${SOURCE_INPUTS[@]}")"
 IMAGE_TAG="${LOCAL_IMAGE}:lock-${LOCK_DIGEST:0:16}"
 ACTIVE_BUILDER=""
@@ -207,6 +207,7 @@ run_controller() {
     --label "${CACHE_LABEL}=${CACHE_VALUE}" \
     --env DHOLBEAT_IN_CONTROLLER=1 \
     --env REPO_ROOT=/workspace \
+    --env GITHUB_ACTIONS \
     --env GITHUB_EVENT_NAME \
     --env GITHUB_BASE_REF \
     --env GITHUB_HEAD_REF \
