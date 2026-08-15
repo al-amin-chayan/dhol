@@ -85,6 +85,7 @@ Detail — worktree lifecycle, conflict recovery, handoff notes:
 
 | Path | Contents | Typical lane |
 |---|---|---|
+| `.github/` | Read-only CI workflows and repository automation | tooling lane |
 | `README.md` | Founding plan, decisions, change log | shared — append only |
 | `brands/` | Per-brand profile YAML (the extension point, §4) | brand lane |
 | `infra/` | Ansible/OpenTofu desired state, inventory, SOPS policy/ciphertext | infra lane |
