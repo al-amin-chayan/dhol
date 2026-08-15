@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
+if [ "${1:-} ${2:-}" = "image ls" ]; then
+  printf '%s\n' project-controller-image
+elif [ "${1:-} ${2:-}" = "ps -a" ] || \
+     [ "${1:-} ${2:-}" = "ps -aq" ] || \
+     [ "${1:-} ${2:-}" = "ps -q" ]; then
+  exit 0
+elif [ "${1:-} ${2:-}" = "image rm" ]; then
+  exit 0
+else
+  printf 'unexpected fake Docker command: %s\n' "$*" >&2
+  exit 9
+fi

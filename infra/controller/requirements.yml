@@ -1,0 +1,11 @@
+---
+collections:
+  - name: community.library_inventory_filtering_v1
+    version: 1.1.5
+    source: https://galaxy.ansible.com
+  - name: community.docker
+    version: 5.2.2
+    source: https://galaxy.ansible.com
+  - name: community.sops
+    version: 2.4.0
+    source: https://galaxy.ansible.com

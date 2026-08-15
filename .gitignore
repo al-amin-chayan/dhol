@@ -6,8 +6,7 @@
 .dholbeat-agent
 .git-commit-template
 
-# Secrets — real values live in the password manager and on the host.
-# Only *.example templates are committed.
+# Secrets — .env is always forbidden. Public templates contain names only.
 .env
 .env.*
 !.env.example
@@ -15,6 +14,18 @@
 *.key
 *.pem
 credentials*.json
+
+# Only values-only SOPS ciphertext plus non-secret catalog/docs may be tracked
+# below infra/secrets/. Private age keys stay in the password manager.
+infra/secrets/**
+!infra/secrets/**/
+!infra/secrets/README.md
+!infra/secrets/catalog.yml
+!infra/secrets/**/*.sops.yml
+
+# Read-only check output and bounded controller-local caches.
+.artifacts/
+.controller-cache/
 
 # Generated / ephemeral media: purge after publish, never committed.
 media/
@@ -29,6 +40,21 @@ out/
 # n8n runtime data (only exported flow JSON under n8n/ is committed)
 stack/data/
 n8n/.cache/
+
+# OpenTofu working state and generated plans are never repository inputs.
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.plan
+
+# Restored databases and recovery scratch data.
+restores/
+backups/
+*.db
+*.dump
+*.sqlite
+*.sqlite3
 
 # Tooling noise
 node_modules/

@@ -1,0 +1,256 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)"
+# shellcheck source=scripts/lib/common.sh
+source "$SCRIPT_DIR/lib/common.sh"
+
+REPO_ROOT="$(dholbeat_repo_root "$SCRIPT_PATH")"
+LOCK_FILE="$REPO_ROOT/toolchain.lock.yml"
+SOURCE_INPUTS=(
+  toolchain.lock.yml
+  infra/controller/Containerfile
+  infra/controller/entrypoint.sh
+  infra/controller/install_tools.py
+  infra/controller/requirements.in
+  infra/controller/requirements.txt
+  infra/controller/requirements.yml
+  infra/controller/runtime_versions.py
+)
+
+LOCAL_IMAGE="$(dholbeat_yaml_scalar "$LOCK_FILE" local_image)"
+BUILDKIT_IMAGE="$(dholbeat_yaml_scalar "$LOCK_FILE" buildkit_image)"
+CACHE_LABEL="$(dholbeat_yaml_scalar "$LOCK_FILE" cache_label)"
+CACHE_VALUE="$(dholbeat_yaml_scalar "$LOCK_FILE" cache_value)"
+MAX_CACHE_BYTES="$(dholbeat_yaml_scalar "$LOCK_FILE" max_cache_bytes)"
+LOCK_DIGEST="$(dholbeat_sha256_files "$REPO_ROOT" "${SOURCE_INPUTS[@]}")"
+IMAGE_TAG="${LOCAL_IMAGE}:lock-${LOCK_DIGEST:0:16}"
+ACTIVE_BUILDER=""
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/controller <command> [arguments]
+
+Commands:
+  build                              build the locked native-architecture image
+  versions                           verify and print normalized tool versions
+  exec <command> [arguments]         run a command in the read-only controller
+  digest                             print the source lock and local OCI image ID
+  cache size                         report labelled controller image usage
+  cache cleanup --confirm dholbeat-controller
+                                     remove only unused labelled controller images
+  help                               show this help
+
+The command resolves the repository root from its own path, so it is safe to
+invoke from any current directory. Host Docker/buildx is only the bootstrap;
+all repository tools run from the checksum-locked controller image.
+EOF
+}
+
+cleanup_builder() {
+  if [ -n "$ACTIVE_BUILDER" ]; then
+    docker buildx rm "$ACTIVE_BUILDER" >/dev/null 2>&1 || true
+    ACTIVE_BUILDER=""
+  fi
+}
+trap cleanup_builder EXIT INT TERM
+
+finish_builder() {
+  local builder="$ACTIVE_BUILDER"
+  [ -n "$builder" ] || dholbeat_die "no active controller builder to finish"
+  docker buildx rm "$builder" >/dev/null || dholbeat_die "failed to remove dedicated builder: $builder"
+  ACTIVE_BUILDER=""
+}
+
+host_platform() {
+  case "$(uname -m)" in
+    x86_64|amd64) printf '%s\n' linux/amd64 ;;
+    arm64|aarch64) printf '%s\n' linux/arm64 ;;
+    *) dholbeat_die "unsupported controller architecture: $(uname -m)" ;;
+  esac
+}
+
+image_ids() {
+  docker image ls \
+    --filter "label=${CACHE_LABEL}=${CACHE_VALUE}" \
+    --format '{{.ID}}' | sort -u
+}
+
+project_builder_names() {
+  docker ps -a \
+    --filter 'label=com.docker.buildx.builder' \
+    --format '{{.Label "com.docker.buildx.builder"}}' | \
+    awk '/^dholbeat-controller-[0-9a-f]+-[0-9]+$/'
+}
+
+cache_size_bytes() {
+  local total=0
+  local image_id
+  while IFS= read -r image_id; do
+    [ -n "$image_id" ] || continue
+    total=$((total + $(docker image inspect --format '{{.Size}}' "$image_id")))
+  done <<EOF
+$(image_ids)
+EOF
+  printf '%s\n' "$total"
+}
+
+cache_size() {
+  dholbeat_require_command docker
+  local total
+  local builders
+  total="$(cache_size_bytes)"
+  builders="$(project_builder_names)"
+  printf 'controller images: %s bytes (%s)\n' "$total" "$(dholbeat_human_bytes "$total")"
+  printf 'configured bound: %s bytes (%s)\n' "$MAX_CACHE_BYTES" "$(dholbeat_human_bytes "$MAX_CACHE_BYTES")"
+  if [ -n "$builders" ]; then
+    printf 'build cache: leftover dedicated builder(s):\n%s\n' "$builders" >&2
+    return 1
+  fi
+  printf 'build cache: no dedicated builders remain\n'
+  if [ "$total" -gt "$MAX_CACHE_BYTES" ]; then
+    printf 'status: over bound; run guarded cleanup\n' >&2
+    return 1
+  fi
+  printf 'status: within bound\n'
+}
+
+cache_cleanup() {
+  [ "${1:-}" = "--confirm" ] || dholbeat_die "cache cleanup requires --confirm dholbeat-controller"
+  [ "${2:-}" = "dholbeat-controller" ] || dholbeat_die "confirmation must be exactly: dholbeat-controller"
+  [ "$#" -eq 2 ] || dholbeat_die "unexpected cache cleanup arguments"
+  dholbeat_require_command docker
+
+  local builder
+  while IFS= read -r builder; do
+    [ -n "$builder" ] || continue
+    if [ -n "$(docker ps -q --filter "label=com.docker.buildx.builder=$builder")" ]; then
+      dholbeat_die "refusing to remove a running controller builder: $builder"
+    fi
+    docker buildx rm "$builder" >/dev/null
+    printf 'removed stopped dedicated builder %s\n' "$builder"
+  done <<EOF
+$(project_builder_names)
+EOF
+
+  local image_id
+  local removed=0
+  while IFS= read -r image_id; do
+    [ -n "$image_id" ] || continue
+    if [ -n "$(docker ps -aq --filter "ancestor=$image_id")" ]; then
+      dholbeat_die "refusing to remove controller image used by a container: $image_id"
+    fi
+    docker image rm "$image_id" >/dev/null
+    printf 'removed labelled controller image %s\n' "$image_id"
+    removed=$((removed + 1))
+  done <<EOF
+$(image_ids)
+EOF
+  printf 'removed %s image(s); unrelated Docker images and builder caches were not touched\n' "$removed"
+}
+
+verify_image_label() {
+  local actual
+  actual="$(docker image inspect --format "{{ index .Config.Labels \"io.dholbeat.controller.lock\" }}" "$IMAGE_TAG")"
+  [ "$actual" = "$LOCK_DIGEST" ] || dholbeat_die "controller image label does not match source lock"
+}
+
+build_image() {
+  dholbeat_require_command docker
+  docker buildx version >/dev/null 2>&1 || dholbeat_die "Docker buildx is required to build the controller"
+
+  local platform
+  platform="$(host_platform)"
+  ACTIVE_BUILDER="dholbeat-controller-${LOCK_DIGEST:0:10}-$$"
+  docker buildx create \
+    --name "$ACTIVE_BUILDER" \
+    --driver docker-container \
+    --driver-opt "image=$BUILDKIT_IMAGE" >/dev/null
+  docker buildx inspect --bootstrap "$ACTIVE_BUILDER" >/dev/null
+  docker buildx build \
+    --builder "$ACTIVE_BUILDER" \
+    --platform "$platform" \
+    --load \
+    --no-cache \
+    --build-arg "CONTROLLER_LOCK_DIGEST=$LOCK_DIGEST" \
+    --file "$REPO_ROOT/infra/controller/Containerfile" \
+    --tag "$IMAGE_TAG" \
+    "$REPO_ROOT"
+  finish_builder
+  verify_image_label
+  cache_size
+}
+
+ensure_image() {
+  dholbeat_require_command docker
+  if docker image inspect "$IMAGE_TAG" >/dev/null 2>&1; then
+    verify_image_label
+  else
+    build_image
+  fi
+}
+
+controller_image_id() {
+  docker image inspect --format '{{.Id}}' "$IMAGE_TAG"
+}
+
+run_controller() {
+  ensure_image
+  local image_id
+  image_id="$(controller_image_id)"
+  docker run --rm \
+    --read-only \
+    --network none \
+    --cap-drop ALL \
+    --security-opt no-new-privileges \
+    --label "${CACHE_LABEL}=${CACHE_VALUE}" \
+    --env DHOLBEAT_IN_CONTROLLER=1 \
+    --env REPO_ROOT=/workspace \
+    --tmpfs /tmp:rw,nosuid,nodev,size=536870912 \
+    --volume "$REPO_ROOT:/workspace:ro" \
+    --workdir /workspace \
+    "$image_id" "$@"
+}
+
+case "${1:-help}" in
+  -h|--help|help)
+    usage
+    ;;
+  build)
+    [ "$#" -eq 1 ] || dholbeat_die "build accepts no arguments"
+    build_image
+    ;;
+  versions)
+    [ "$#" -eq 1 ] || dholbeat_die "versions accepts no arguments"
+    run_controller versions
+    ;;
+  exec)
+    shift
+    [ "$#" -gt 0 ] || dholbeat_die "exec requires a command"
+    run_controller "$@"
+    ;;
+  digest)
+    [ "$#" -eq 1 ] || dholbeat_die "digest accepts no arguments"
+    ensure_image
+    printf 'source_lock_sha256=%s\n' "$LOCK_DIGEST"
+    printf 'image_id=%s\n' "$(controller_image_id)"
+    printf 'platform=%s\n' "$(host_platform)"
+    ;;
+  cache)
+    case "${2:-}" in
+      size)
+        [ "$#" -eq 2 ] || dholbeat_die "cache size accepts no arguments"
+        cache_size
+        ;;
+      cleanup)
+        shift 2
+        cache_cleanup "$@"
+        ;;
+      *) dholbeat_die "cache requires size or cleanup" ;;
+    esac
+    ;;
+  *)
+    dholbeat_die "unknown controller command: $1"
+    ;;
+esac
