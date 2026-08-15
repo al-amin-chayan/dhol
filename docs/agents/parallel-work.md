@@ -71,24 +71,28 @@ Ranked, cheapest first:
   With no remote configured, the risk is local: check `scripts/lanes.sh` for
   a lane branched off yours before any history rewrite.
 
-## Cross-review in practice (no GitHub remote yet)
+## Cross-review in practice
 
-Until the GitHub repo exists (`README.md` §9), review happens locally against
-the branch:
+Every tracked implementation task requires review by the other model at the
+exact head that may merge. Review is never author-triggered or automated:
 
-1. Author finishes the lane, rebases on `main`, and writes a handoff note at
-   `docs/agents/handoffs/<branch-slug>.md` — what changed, why, what to check,
-   what was deliberately left out.
-2. The founder starts a session of the **other** model, pointed at the lane:
-   `cd .worktrees/<slug>` and ask it to review `git diff main...HEAD` against
-   the handoff note, `README.md` constraints, and the hard rules in
-   `AGENTS.md`.
-3. The reviewer posts findings as `blocker` / `required` / `suggestion`, each
+1. The author finishes the lane, rebases on `main`, runs the required checks,
+   and publishes a PR or local handoff containing the exact head SHA, what
+   changed, what to check, and what was deliberately left out. Then it stops
+   and returns control to the founder. The author must not invoke the other
+   model, spawn a reviewer, or enqueue review automation.
+2. The founder explicitly starts a separate session of the **other** model and
+   asks it to review that SHA. For a local lane, point it at
+   `.worktrees/<slug>`; for a PR, provide the PR number and head SHA.
+3. The reviewer first verifies that the checked-out or remote head equals the
+   founder-requested SHA, then posts findings as `blocker` / `required` /
+   `suggestion`, each
    with a citation (a rule in `AGENTS.md` / `README.md`, or a concrete failure
    scenario). No citation → it is a `suggestion` and does not gate the merge.
 4. The author adjudicates every finding (`accept` / `already-done` / `reject`
    with evidence / `out-of-scope`), fixes the whole class, and re-checks its
-   own diff before replying.
+   own diff before replying. A fix changes the head, so the author hands the
+   new SHA back to the founder; only the founder may trigger the next review.
 5. Merge commit body records:
    ```
    Reviewer: Codex
@@ -97,8 +101,9 @@ the branch:
 6. Two rounds max. Still contested → both stop, write a
    `Needs founder decision` block, and ask.
 
-When the GitHub repo lands, this moves to PRs and the handoff note becomes the
-PR body; the rules are unchanged.
+The reviewer uses its own personal GitHub App identity for any GitHub read or
+write. Codex never uses Claude Code's App profile, and Claude Code never uses
+Codex's.
 
 ## Handoff notes
 

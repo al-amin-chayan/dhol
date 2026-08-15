@@ -364,7 +364,14 @@ def check_gitignore(root: Path) -> list[str]:
 
 def check_executable_entrypoints(root: Path) -> list[str]:
     findings: list[str] = []
-    for rel in ("scripts/check", "scripts/controller", "infra/controller/entrypoint.sh"):
+    for rel in (
+        "scripts/check",
+        "scripts/controller",
+        "scripts/github-app-gh",
+        "scripts/github-app-git",
+        "scripts/github-app-token.sh",
+        "infra/controller/entrypoint.sh",
+    ):
         mode = (root / rel).stat().st_mode
         if mode & stat.S_IXUSR == 0:
             findings.append(f"{rel}: entry point is not executable")

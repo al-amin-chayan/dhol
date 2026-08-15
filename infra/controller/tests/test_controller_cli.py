@@ -7,6 +7,8 @@ import subprocess
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CONTROLLER = REPO_ROOT / "scripts/controller"
+GITHUB_APP_TOKEN = REPO_ROOT / "scripts/github-app-token.sh"
+GITHUB_APP_GIT = REPO_ROOT / "scripts/github-app-git"
 
 
 def fake_docker(tmp_path: Path) -> tuple[Path, Path]:
@@ -59,3 +61,92 @@ def test_cache_cleanup_targets_only_labelled_image(tmp_path: Path) -> None:
     assert "image ls --filter label=io.dholbeat.controller.cache=wp00-v1" in calls
     assert "image rm project-controller-image" in calls
     assert "unrelated" not in calls
+
+
+def agent_environment(**updates: str) -> dict[str, str]:
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key
+        not in {
+            "CLAUDECODE",
+            "CLAUDE_CODE_ENTRYPOINT",
+            "CODEX_CI",
+            "CODEX_THREAD_ID",
+            "GITHUB_AGENT_IDENTITY",
+        }
+    }
+    environment.update(updates)
+    return environment
+
+
+def test_github_app_helper_infers_codex_runtime(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [GITHUB_APP_TOKEN, "--whoami"],
+        cwd=tmp_path,
+        env=agent_environment(CODEX_THREAD_ID="test-thread"),
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "codex\n"
+
+
+def test_github_app_helper_uses_reviewer_runtime_not_lane_owner(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [GITHUB_APP_TOKEN, "--whoami"],
+        cwd=tmp_path,
+        env=agent_environment(CLAUDECODE="1"),
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "claude\n"
+
+
+def test_github_app_helper_rejects_ambiguous_runtime(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [GITHUB_APP_TOKEN, "--whoami"],
+        cwd=tmp_path,
+        env=agent_environment(CODEX_THREAD_ID="test-thread", CLAUDECODE="1"),
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode != 0
+    assert "both Codex and Claude runtime markers are set" in result.stderr
+
+
+def test_github_app_helper_does_not_accept_an_agent_argument(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [GITHUB_APP_TOKEN, "claude"],
+        cwd=tmp_path,
+        env=agent_environment(CODEX_THREAD_ID="test-thread"),
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode != 0
+    assert "usage:" in result.stderr
+
+
+def test_github_app_git_rejects_ssh_before_authentication(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [GITHUB_APP_GIT, "push", "git@github.com:owner/repository.git", "branch"],
+        cwd=tmp_path,
+        env=agent_environment(CODEX_THREAD_ID="test-thread"),
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode != 0
+    assert "SSH GitHub remotes" in result.stderr
+
+
+def test_github_app_git_requires_explicit_https_remote(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [GITHUB_APP_GIT, "push", "origin", "branch"],
+        cwd=tmp_path,
+        env=agent_environment(CODEX_THREAD_ID="test-thread"),
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode != 0
+    assert "explicit https://github.com" in result.stderr

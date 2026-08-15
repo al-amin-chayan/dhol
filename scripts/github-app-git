@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# Run authenticated git only against an explicit HTTPS github.com remote.
+set -euo pipefail
+
+script_dir="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)"
+[ "$#" -gt 0 ] || {
+  printf 'error: usage: scripts/github-app-git <git arguments with explicit https://github.com remote>\n' >&2
+  exit 2
+}
+
+has_https_remote=0
+for argument in "$@"; do
+  case "$argument" in
+    https://github.com/*) has_https_remote=1 ;;
+    git@github.com:*|ssh://git@github.com/*)
+      printf 'error: SSH GitHub remotes could use ambient personal credentials\n' >&2
+      exit 2
+      ;;
+  esac
+done
+[ "$has_https_remote" -eq 1 ] || {
+  printf 'error: supply the explicit https://github.com/OWNER/REPOSITORY.git remote\n' >&2
+  exit 2
+}
+
+command -v git >/dev/null 2>&1 || {
+  printf 'error: required command not found: git\n' >&2
+  exit 127
+}
+command -v gh >/dev/null 2>&1 || {
+  printf 'error: required command not found: gh\n' >&2
+  exit 127
+}
+
+token="$("$script_dir/github-app-token.sh")"
+[ -n "$token" ] || {
+  printf 'error: GitHub App token helper returned an empty token\n' >&2
+  exit 1
+}
+
+unset GIT_ASKPASS SSH_ASKPASS
+GH_TOKEN="$token" \
+  GITHUB_TOKEN="$token" \
+  GIT_TERMINAL_PROMPT=0 \
+  exec git \
+    -c credential.helper= \
+    -c credential.helper='!gh auth git-credential' \
+    "$@"

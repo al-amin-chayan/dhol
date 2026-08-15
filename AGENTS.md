@@ -70,6 +70,12 @@ Detail — worktree lifecycle, conflict recovery, handoff notes:
   by **Codex** is reviewed by **Claude Code**, before it merges into `main`.
   A fresh session of the *same* model does not count — correlated failure
   modes are the whole reason the rule exists.
+- **Cross-review is human-triggered only.** The author stops after publishing
+  the exact head SHA and handoff. It must not invoke the other model, spawn a
+  reviewer, enqueue an automated review, or otherwise trigger its own review.
+  The founder starts every review round in a separate session of the other
+  model. Any author fix changes the head and needs a new founder-triggered
+  cross-review before merge.
 - Cheap-tier subagents inherit their parent's brain: a Sonnet subagent under
   Claude is still Claude and does not satisfy cross-review.
 - Reviewer mindset is adversarial: verify claims against files and against
@@ -80,6 +86,23 @@ Detail — worktree lifecycle, conflict recovery, handoff notes:
 - Findings are `blocker` / `required` / `suggestion`. The implementer
   adjudicates each (`accept` / `already-done` / `reject` with evidence) before
   fixing. Two rounds max; still contested → stop and ask the founder.
+
+## GitHub identity
+
+- Every GitHub command must use `scripts/github-app-gh ...`; authenticated Git
+  must use `scripts/github-app-git ...` with an explicit HTTPS GitHub URL.
+  Both wrappers mint a fresh, short-lived token and fail closed before invoking
+  `gh` or `git`; never fall back to ambient authentication, a personal token,
+  SSH credentials, or a connected personal account.
+- The helper infers the running agent and loads only its personal profile from
+  `~/.config/github-agent-apps/`: Codex uses `codex.env` and Claude Code uses
+  `claude.env`. An agent must never request, read, copy, or use the other
+  agent's profile or private key.
+- The personal Apps are repository-agnostic. To authorize another personal
+  repository, enable that repository on each App installation; do not create
+  repository-specific Apps or copy private keys into a repository.
+- After any GitHub write, verify that GitHub recorded the expected App bot
+  identity reported by `scripts/github-app-token.sh --expected-login`.
 
 ## Repo layout & ownership
 
