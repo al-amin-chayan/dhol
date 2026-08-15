@@ -7,8 +7,13 @@
 **Amended:** 2026-08-15 — supported Cloudflare/R2 control-plane resources must
 be reproducible from this repository before their production cutover
 
+**Amended:** 2026-08-15 — cross-review hardening adds keyed Paperclip parity,
+Git source escrow, registrar delegation verification and a runbooked n8n key
+bootstrap fallback
+
 **Status:** Founder-approved topology and multi-project shared-service direction
-(confirmed 2026-08-14); cross-reviewed and merged 2026-08-15; implementation
+(confirmed 2026-08-14); base plan merged 2026-08-15; implementation companion
+and reproducibility hardening cross-reviewed and awaiting merge; implementation
 has not started
 
 **Implementation companion:**
@@ -125,9 +130,14 @@ API/provider, add a reviewed OpenTofu module rather than browser automation.
 Rebuilding is a three-source operation, not “one Git checkout contains the
 whole server”:
 
-1. **Reviewed Git repositories store desired state and approved ciphertext:** Dholbeat stores playbooks, roles, Compose files, version/image locks, public configuration templates, Dholbeat-owned n8n workflow exports, n8n-consumer and Hermes-project manifests, systemd definitions, verification scripts, runbooks, the `.sops.yaml` policy and values-only SOPS+age-encrypted `*.sops.yml` files. An external project's repository stores its own credential-free workflow exports, Hermes prompt/skill/schedule configuration and tests where it uses those tools. Every production import records the exact reviewed source commit and content hashes; a moving branch is never a recovery input.
+1. **Reviewed Git repositories store desired state and approved ciphertext:** Dholbeat stores playbooks, roles, Compose files, version/image locks, public configuration templates, Dholbeat-owned n8n workflow exports, n8n-consumer and Hermes-project manifests, systemd definitions, verification scripts, runbooks, the `.sops.yaml` policy and values-only SOPS+age-encrypted `*.sops.yml` files. An external project's repository stores its own credential-free workflow exports, Hermes prompt/skill/schedule configuration and tests where it uses those tools. Every production import records the exact reviewed source commit and content hashes; a moving branch is never a recovery input. GitHub is not the sole recovery copy: every annotated production release creates a verified bundle of Dholbeat `main` plus production tags in encrypted restic source escrow, then deletes the local temporary bundle.
 2. **The password manager is the root-access authority:** it stores the founder and break-glass age private keys, host bootstrap key and provider recovery logins. The `SOPS_AGE_KEY` environment variable supplies an age private key at apply time; no private key or plaintext `.env` enters Git.
-3. **Encrypted off-site backups store mutable state:** fresh database dumps and the small set of non-database application data that cannot be regenerated. Restic is the only backup-retention authority.
+3. **Encrypted off-site backups store mutable state and source escrow:** fresh
+   database dumps, the small set of non-database application data that cannot be
+   regenerated and the verified Dholbeat release bundle. Restic is the only
+   backup-retention authority; its source-escrow recovery root also lives in the
+   password manager so bundle retrieval does not depend on GitHub or ciphertext
+   inside the missing checkout.
 
 A replacement host is complete only after Ansible converges, encrypted state is restored, external OAuth/tunnel callbacks are verified and the service passes its acceptance test. Git alone cannot reproduce PostgreSQL rows, OAuth grants or media objects; pretending otherwise would be either incomplete or unsafe.
 
@@ -141,7 +151,7 @@ infra/
   ansible.cfg
   requirements.yml                 # exact tested collection versions
   secrets/
-    core.sops.yml                  # platform secrets, including n8n drift API key
+    core.sops.yml                  # platform secrets: n8n drift key, parity HMAC key
     publisher.sops.yml
     n8n-consumers/
       poripati-track1.sops.yml     # runtime values only; no secret in consumer repo
@@ -176,6 +186,8 @@ infra/
     publisher/                      # selected Postiz or Mixpost implementation
   tofu/                             # supported external control-plane state
     cloudflare/
+  services/
+    domains.yml                     # registrar delegation/zone expectations
 stack/
   paperclip/                        # imported desired config; parity is invariant
   n8n/
@@ -192,11 +204,11 @@ n8n/
     consumer.schema.json            # validates all consumer registrations
     poripati-track1.yml             # non-secret source, limits and data contract
 scripts/
-  infra-check
   infra-plan
   infra-apply
   infra-verify
   infra-restore-drill
+  repository-bundle
   n8n-consumer-check
   n8n-consumer-import
   n8n-consumer-verify
@@ -239,11 +251,22 @@ Run baseline changes serially (`serial: 1`) and retain out-of-band console acces
 
 Paperclip need not be an untouchable snowflake. The invariant is that its effective configuration and image digest remain unchanged during IaC adoption and that it returns healthy after convergence. Container recreation is permitted in a planned restart window:
 
-1. Capture a redacted effective manifest: `docker compose config`, environment-variable names plus value hashes, bind mounts/volumes, resolved image digest, restart policy, systemd/cron jobs, tunnel routes, backup inputs and expected health response.
+1. Capture a redacted effective manifest: `docker compose config`, environment-
+   variable names plus domain-separated HMACs, bind mounts/volumes, resolved
+   image digest, restart policy, systemd/cron jobs, tunnel routes, backup inputs
+   and expected health response. Compute live and candidate HMAC-SHA-256 values
+   over `paperclip-env-v1\0<key>\0<value>` with the same dedicated high-entropy
+   parity key decrypted from SOPS only in controller memory; never emit a value,
+   an unkeyed digest or the parity key.
 2. Take a fresh application-consistent database dump, snapshot required state with restic and prove a disposable restore **before** the first mutating convergence.
 3. Express the captured desired state in `stack/paperclip/` and SOPS-encrypted variables. The `paperclip_guard` role compares the rendered candidate with the captured manifest and fails on any unexplained difference before applying it.
 4. Converge in a planned restart window. Ansible may recreate the container, but may not move its data, alter the effective config or change/upgrade the captured image digest during adoption.
-5. Recapture the same manifest after convergence, compare it with the before snapshot and verify application health. Store only redacted manifests and hashes in CI artifacts; rotate a secret if its value is ever exposed.
+5. Recapture the same manifest after convergence, compare it with the before
+   snapshot and verify application health. Store only redacted manifests and
+   keyed parity HMACs in CI artifacts. If the parity key leaks, rotate it and
+   every represented service secret before reviewing a new baseline because Git
+   history retains the old HMACs; rotate a service secret immediately if its
+   value is ever exposed.
 6. Replace the conflicting tar/cleanup jobs only after the restore test. Back up a fresh database dump, Compose/config and required non-database state directly to a private encrypted R2 restic repository. Keep at most one local latest dump; use `forget --keep-daily 7 --keep-weekly 4 --prune`, followed by `check`. Do not apply an R2 object-expiry lifecycle to the restic bucket.
 7. Deploy one central n8n Community instance in its own Compose project,
    network, volume/database credentials and directory. Start production
@@ -508,6 +531,13 @@ parity adoption. Import compliant resources; if the route or policy does not
 yet meet this section, converge it without renaming Paperclip. A Paperclip
 hostname change is out of scope unless the founder approves it separately.
 
+The registrar-side delegation of `chayan.me` is an external root, not a
+Cloudflare/OpenTofu resource. Commit the expected parent-zone nameserver set,
+registrar owner and renewal expectation as non-secret data; keep the registrar
+recovery identity in the password manager. Any delegation change follows a
+founder-confirmed runbook with rollback and a direct parent-zone NS probe, not a
+cached recursive answer or dashboard screenshot.
+
 The initial public hostname and route map is:
 
 | Host | Interface | Hostname | Edge access |
@@ -655,6 +685,14 @@ scripts/infra-verify --limit publish-1
 
 Require a manual Git tag such as `infra-prod-YYYYMMDD-N` after a verified deployment. Store the deployed commit SHA in `/etc/dholbeat-release` on each host and export it to monitoring. Emergency host edits require a follow-up Git commit and convergence run; otherwise the nightly/weekly drift check reports them.
 
+After tagging, `scripts/repository-bundle create --release <tag>` must refuse a
+dirty checkout or non-annotated tag, bundle `main` plus production tags, run
+`git bundle verify`, record the digest into encrypted restic source escrow and
+remove its quota-bound local temporary file. Source-escrow retention preserves
+every release named by a deployed host receipt plus the last two superseded
+releases independently of normal daily/weekly pruning. Its restore mode must
+reconstruct and verify the exact tag while GitHub is deliberately unavailable.
+
 External-consumer deployment is also manual. `n8n-consumer-import` accepts a
 clean local checkout at the exact `source_commit` already pinned by the merged
 Dholbeat consumer manifest, produces a redacted plan of workflow
@@ -670,7 +708,13 @@ keys cannot be scope-limited. Store it as SOPS ciphertext in
 `0600` `/etc/dholbeat/n8n-consumer-drift.env`. Never inject it into the n8n
 service, import it as a workflow credential or mount it into a Hermes container;
 both manifest validators and credential allowlists must reject any reference to
-it. [n8n API
+it. Prefer a supported bootstrap surface for the pinned version. If none exists,
+use a committed one-time founder-only editor runbook whose no-echo controller
+prompt encrypts the value directly into SOPS without logging or a persistent
+plaintext file, verifies a read-only owner API probe, writes a redacted receipt
+and defines create-new/verify/revoke-old rotation. That interactive external-
+root action must never make the editor the desired-state authority.
+[n8n API
 authentication](https://github.com/n8n-io/n8n-docs/blob/main/docs/connect/n8n-api/authentication.md)
 A new,
 undeclared or cross-consumer credential reference is a critical fail-closed
@@ -690,7 +734,10 @@ inactive without changing another profile.
 
 ## Migration and disaster-recovery procedure
 
-The design passes the portability goal only if this runbook succeeds on a blank compatible host:
+The design passes the portability goal only if this runbook succeeds on a blank
+compatible host. Start from the exact annotated release tag. In the GitHub-
+outage drill, restore and verify that tag from encrypted source escrow using
+only its password-manager recovery root, not an existing laptop clone.
 
 1. Order/reinstall an Ubuntu 24.04 VPS and attach the bootstrap public key.
 2. Add its stable hostname/role to the committed production inventory and use a temporary local override only while both old and replacement hosts coexist; keep the old host live.
@@ -715,6 +762,7 @@ Recovery objectives for the initial plan:
 
 | Workload | Target RPO | Target hands-on rebuild objective | Notes |
 | --- | ---: | ---: | --- |
+| Dholbeat desired state | Every annotated production release | 30 minutes | Restore and verify `main` plus production tags from the encrypted Git bundle without GitHub. |
 | Paperclip | 24 hours initially | 2 hours | Tighten only if business data changes justify more frequent dumps. |
 | n8n configuration/state | Recorded Dholbeat + consumer Git commits; mutable DB follows backup schedule | 1 hour | External workflows reconcile from deployment receipts before activation. |
 | Hermes profiles | Recorded project Git commits; only explicitly retained mutable state follows backup schedule | 1 hour aggregate initial target | Recreate separate profiles inactive, restore scoped state where declared, then verify isolation before activation. |
@@ -738,6 +786,9 @@ Perform a disposable restore drill quarterly and after any database/topology upg
   method/path boundary, secret owner, verification point, WAF/rate limit, data
   class, execution retention and negative tests.
 - Define inventory/group-variable schemas, the `.sops.yaml` policy, required age recipients, secret catalog and data classification before writing mutating playbooks.
+- Implement release-time repository bundling into encrypted source escrow and
+  prove an exact-tag restore with GitHub unavailable before relying on GitHub as
+  the normal checkout path.
 - Define and test the generic n8n consumer schema, import/verification receipt
   format (including resolved allowed credential IDs), five-minute fail-closed
   drift timer and per-consumer SOPS layout. Register PoriPati Track-1 with no
@@ -823,7 +874,9 @@ Perform a disposable restore drill quarterly and after any database/topology upg
 
 ### Phase 4 — prove portability
 
-- Rebuild each role in a disposable compatible VPS/VM from Git/SOPS ciphertext plus a password-manager age key and restic data.
+- Rebuild each role in a disposable compatible VPS/VM twice: once from the
+  normal Git checkout and once from the verified source-escrow bundle, plus
+  SOPS ciphertext, password-manager roots and restic data.
 - For `core-1`, reconcile every n8n consumer and Hermes profile from recorded
   source commits. Prove that a missing repository, content-hash mismatch or
   missing credential leaves only that consumer/profile inactive and fails the
@@ -909,7 +962,10 @@ The initial additional $14–24 remains inside the repository's $10–25 margina
 - **This is isolation, not provider HA.** Two VPSDime services still share one vendor/account and may share regional infrastructure. Different datacenters reduce correlated host/location failure but not account, billing or provider failure.
 - **Paperclip parity adoption is the riskiest IaC step.** Capture, back up, restore-test and diff before convergence; recreate only in a planned window; then prove the effective config and image digest are unchanged and health has returned.
 - **No automatic production apply.** A malicious or mistaken Git change must not immediately reconfigure both hosts.
-- **No secret completeness claim.** Recovery depends on Git/SOPS ciphertext, a password-manager age key and restic access, tested separately from GitHub access.
+- **No Git-hosting or secret completeness claim.** Recovery depends on the
+  reviewed Git/SOPS content, password-manager roots and restic access, but the
+  release bundle is restored and verified separately so GitHub and an existing
+  laptop clone are not recovery prerequisites.
 - **No two-node orchestration or distributed database.** Cross-host integration remains HTTPS/R2 only.
 - **No routine manual configuration.** Emergency changes are temporary drift and must be reconciled into Git.
 - **Central n8n is a shared-fate boundary.** Dholbeat, PoriPati and any later
@@ -958,7 +1014,10 @@ The subsequent implementation is ready for production review only when:
 5. No plaintext secret, private key, `.env`, state file, plan file, database or generated media is tracked; every tracked file under the secrets path is values-only SOPS+age ciphertext with policy-required metadata and recipients.
 6. Both hosts remain independently operable when the other is unreachable.
 7. The selected publisher passes the two-brand seven-day canary within the 6 GB/30 GB thresholds, including its application-specific publish/restore tests, or the plan records a measured upgrade to `publish-1`.
-8. A full replacement-host drill succeeds from Git/SOPS ciphertext + a password-manager age key + restic, and the exact manual VPSDime bootstrap boundary is documented.
+8. A full replacement-host drill succeeds from both the normal Git checkout and
+   a GitHub-independent verified release bundle, plus SOPS ciphertext,
+   password-manager roots and restic; the exact manual VPSDime/registrar
+   bootstrap boundary is documented.
 9. Paperclip remains at `team.chayan.me`; every human-facing interface is a
    declared `chayan.me` hostname behind the correct host's Cloudflare Tunnel
    and default-deny Access policy, and no application origin is reachable by

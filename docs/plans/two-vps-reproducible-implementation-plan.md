@@ -1,6 +1,6 @@
 # Two-VPS reproducible implementation plan
 
-**Status:** Draft for cross-review and later GitHub issue breakdown
+**Status:** Cross-reviewed draft; required findings addressed; awaiting merge
 
 **Prepared:** 2026-08-15
 
@@ -19,12 +19,12 @@ files, run the named checks and know exactly when it is safe to proceed.
 
 The target outcome is not merely “the services are running.” The target is:
 
-> A reviewed Git commit plus approved SOPS ciphertext, password-manager root
-> credentials and encrypted off-site backups can converge replacement hosts,
-> restore retained state, reconcile every registered project from immutable
-> source commits and prove the same security, approval, capacity and recovery
-> properties without consulting laptop files, shell history or dashboard-only
-> configuration.
+> A reviewed Git commit—or its verified source-escrow bundle—plus approved SOPS
+> ciphertext, password-manager root credentials and encrypted off-site backups
+> can converge replacement hosts, restore retained state, reconcile every
+> registered project from immutable source commits and prove the same security,
+> approval, capacity and recovery properties without consulting laptop files,
+> shell history or dashboard-only configuration.
 
 This plan does **not** authorize a production apply, a VPS purchase, a DNS
 cutover, a destructive cleanup, a provider connection or a social post. Each
@@ -68,15 +68,16 @@ history.
 ### 2.2 The unavoidable external roots
 
 "Reproducible from this repository" cannot safely mean "put every byte in
-Git." Exactly five classes of external input are permitted:
+Git." Exactly six classes of external input are permitted:
 
 | External root | Why it cannot live as plaintext code | Repository obligation |
 | --- | --- | --- |
-| VPS/provider account actions | Ordering, reinstalling, billing and emergency console access have no supported VPSDime provider | Commit the exact bootstrap runbook, stable host role/inventory, expected OS, public-key fingerprint and postcondition checks. No manual **host** configuration is allowed after first SSH; separately catalogued provider/OAuth grants follow their own runbooks. |
+| VPS/registrar/provider account actions | Ordering, reinstalling, billing, registrar-side nameserver delegation and emergency console access do not all have reviewed providers | Commit exact runbooks, stable host/domain inventory, expected OS/nameservers, recovery identities and postcondition checks. No manual **host** configuration is allowed after first SSH; separately catalogued registrar/provider/OAuth actions follow their own five-point contracts. |
 | Private root credentials | Age private keys, bootstrap SSH private keys and provider recovery logins would defeat encryption if committed | Commit public recipients/fingerprints, secret names, owners, rotation triggers and test procedures. Store private material only in the password manager. |
 | Mutable production state | Database rows, provider OAuth grants and retained application state change after every deployment | Commit migrations, dump/restore adapters, retention policy and verification. Store allowed mutable bytes only in encrypted, restore-tested backups or the provider account. |
 | External project source | A registered consumer/profile remains owned by its product repository | Commit repository coordinates, exact reviewed commit, source path, content hashes and the import contract. Never follow a moving branch and never give the host a personal GitHub token. |
 | Pinned upstream artifacts | Ubuntu packages, container images, fonts, actions and controller tools are too large or externally licensed to vendor blindly into Git | Commit the exact source, version, digest/checksum, license and verification/build procedure. A production-critical artifact needs a tested upstream-or-mirror recovery path and may never depend only on a laptop cache. |
+| Canonical Git hosting | GitHub stores the reviewed repository and refs but is still an account/provider dependency | At every release, create and verify a bounded Git bundle containing `main` plus annotated production tags, write it directly to encrypted restic source escrow, record its digest and delete the local copy. A recovery drill must restore the exact tag without GitHub or a laptop clone. |
 
 Every unavoidable manual action must have all of the following:
 
@@ -121,6 +122,7 @@ The following fail review or CI:
 
 | Concern | Desired state | Secret/value source | Mutable state | Recovery proof |
 | --- | --- | --- | --- | --- |
+| Repository desired state | Protected `main`, annotated production tags and exact external source pins | Password-manager source-escrow recovery root; SOPS may supply routine access only | Verified release Git bundles under deployed-release retention | Restore exact release tag from bundle with GitHub unavailable |
 | Host baseline | `infra/` Ansible roles and inventory | Password-manager SSH key | Current OS packages | Clean Ubuntu convergence + second-run idempotence |
 | Cloudflare/R2 control plane | `infra/tofu/cloudflare/` plus committed imports/locks | SOPS/provider recovery login | Remote encrypted/locked OpenTofu state | No-change plan + state recovery drill |
 | Paperclip | `stack/paperclip/` and parity manifest | `infra/secrets/core.sops.yml` | App DB and declared volumes | Before/after parity + application restore |
@@ -183,6 +185,7 @@ infra/
     inventory.schema.json
     service.schema.json
     secret-catalog.schema.json
+    domain.schema.json
     route.schema.json
     volume.schema.json
     release.schema.json
@@ -195,6 +198,7 @@ infra/
   services/
     registry.yml                    # every service, host, data and health owner
     images.lock.yml                 # tag, digest, source and verified date
+    domains.yml                     # registrar delegation and zone expectations
     routes.yml                      # hostname/path/Access/machine-route contract
     volumes.yml                     # persistence, backup, retention and owner
   secrets/
@@ -262,8 +266,9 @@ prompts/
 scripts/
   lib/                             # shared strict-shell/Python helpers
   check controller
-  infra-capture infra-check infra-plan infra-apply infra-verify
+  infra-capture infra-plan infra-apply infra-verify
   infra-backup infra-restore-drill release-record
+  repository-bundle
   n8n-export-normalize n8n-consumer-check n8n-consumer-import
   n8n-consumer-verify n8n-consumer-drift
   hermes-project-check hermes-project-import hermes-project-verify
@@ -311,6 +316,7 @@ Git commit they intend to apply.
 | `scripts/hermes-project-*` | Validate/render/import inactive/verify one project and prove unique mounts/state/credentials before activation. |
 | `scripts/publisher-*` | Validate project/workspace/account ownership, test authorization boundaries and exercise publish lifecycle only with fixture or founder-approved accounts. |
 | `scripts/media-*` | Render Bangla-safe overlays from committed templates, enforce quotas/TTL and prove purge or selected archive behavior. |
+| `scripts/repository-bundle` | Create, verify, escrow and restore a bundle of `main` plus annotated production tags; write through a temporary quota-bound path, refuse dirty/unreviewed refs and prove recovery without GitHub. |
 | `scripts/release-record` | Compare the deployed commit/digests/receipts with the release tag and write only a redacted operational summary. |
 
 All shell entry points use strict mode, quote variables, avoid unresolved
@@ -370,7 +376,11 @@ Ansible renders only selected values into root-owned `0600` files with
 `no_log: true` and `diff: false`. No full decrypted secret file is copied to a
 host or workspace. The n8n drift-watchdog owner key is a platform secret in
 `core.sops.yml`, host-only, and is rejected by every workflow/Hermes credential
-allowlist.
+allowlist. The Paperclip parity HMAC key is a separate high-entropy controller-
+only value in `core.sops.yml`; neither it nor an unkeyed secret-value digest may
+enter a baseline, host file, log or artifact. If that key leaks, Git history
+retains the old HMACs: rotate every represented service secret as well as the
+parity key before committing a new baseline.
 
 ### 6.5 Persistence and retention catalog
 
@@ -416,9 +426,10 @@ gates.
 If a gate changes monthly cash, its decision packet includes the complete
 founder wallet, not merely the incremental software line. This plan adds no new
 paid tooling: Ansible, Docker Compose, SOPS/age, restic, OpenTofu and the test
-toolchain are $0 software. GitHub CI must stay within the repository's existing
-allowance or the same controller runs locally; it must not introduce a paid CI
-tier without founder approval.
+toolchain are $0 software. Bounded repository bundles use the already budgeted
+private R2 backup allowance. GitHub CI must stay within the repository's
+existing allowance or the same controller runs locally; it must not introduce a
+paid CI tier without founder approval.
 
 ## 8. Work-package dependency map
 
@@ -431,7 +442,7 @@ tier without founder approval.
 | `WP-04` | Read-only `core-1` discovery and approved Paperclip baseline | `WP-00`, `WP-03` | Read-only only |
 | `WP-05` | Shared Ubuntu/Docker/firewall baseline roles | `WP-00`, `WP-01`, `WP-03`, `WP-04` | Disposable host first; production only after review |
 | `WP-06` | Cloudflare/R2 OpenTofu imports and host tunnel config | `WP-01`, `WP-03`, `WP-04` | Import/read first; apply only after reviewed no-change plan |
-| `WP-07` | Application-aware backup and disposable restore foundation | `WP-03`, `WP-05`, `WP-06` | Backup installation; no app replacement |
+| `WP-07` | Application-aware backup, source escrow and disposable restore foundation | `WP-03`, `WP-05`, `WP-06` | Backup/escrow installation; no app replacement |
 | `WP-08` | Paperclip parity adoption | `WP-04`–`WP-07` | Planned restart window only |
 | `WP-09` | w3exam migration evidence, safe cleanup and `B_core` admission gate | `WP-08` plus separately approved w3exam migration | Explicit destructive approval required |
 | `WP-10` | Central n8n runtime and durable control database | `WP-05`–`WP-07`, `WP-09` | `core-1`, inactive workflows first |
@@ -499,9 +510,9 @@ directories.
 
 **Implement:**
 
-1. Add versioned JSON Schemas for inventory, services, routes, volumes, secret
-   catalog entries, releases, brands, prompts, workflows, n8n consumers, Hermes
-   projects and publisher mappings.
+1. Add versioned JSON Schemas for inventory, services, domains, routes, volumes,
+   secret catalog entries, releases, brands, prompts, workflows, n8n consumers,
+   Hermes projects and publisher mappings.
 2. Add generic positive fixtures plus one invalid fixture per security or
    durability rule: duplicate ID, cross-project credential, public origin port,
    missing Access policy, unbounded log/volume, floating source ref, shared
@@ -600,9 +611,13 @@ committed or emitted.
    listening ports, Docker/Compose versions, images/digests, projects,
    containers, networks, volumes/mounts, resource use, systemd units, timers,
    cron, tunnel routes, backup jobs and disk ownership without changing them.
-2. Capture Paperclip's normalized effective Compose config, environment **key
-   names plus value hashes**, image digest, volume map, health contract and
-   current public-route behavior. Never capture a plaintext value.
+2. Capture Paperclip's normalized effective Compose config, environment key
+   names plus domain-separated HMACs, image digest, volume map, health contract
+   and current public-route behavior. Compute HMAC-SHA-256 over the unambiguous
+   byte sequence `paperclip-env-v1\0<key>\0<value>` with a dedicated high-entropy
+   parity key decrypted from SOPS only in controller memory. The same code
+   computes candidate HMACs; no raw value, unkeyed digest or parity key enters
+   output or the host filesystem.
 3. Discover all w3exam resources but classify them as externally owned. This
    package neither migrates nor deletes them.
 4. Produce a human-reviewed diff between observed state and the intended
@@ -613,11 +628,14 @@ committed or emitted.
 
 **Verify:** run the capture twice with no live changes and obtain identical
 normalized output. Seed a secret-shaped fixture and prove redaction/scanning
-prevents it entering the baseline.
+prevents it entering the baseline. An unkeyed/constant-key digest fixture,
+missing parity key, changed secret and leaked HMAC key each fail; key rotation
+rotates every represented service secret and recomputes the baseline through an
+explicitly reviewed change because old HMACs remain in Git history.
 
 **Exit evidence:** founder-approved baseline commit, disk ownership report,
-Paperclip parity hash and a list of separately owned/migration-blocked assets.
-Production access is read-only.
+Paperclip keyed-parity report and a list of separately owned/migration-blocked
+assets. Production access is read-only.
 
 ### WP-05 — Shared host baseline
 
@@ -650,8 +668,9 @@ idempotence report. Production bootstrap is a separate founder-confirmed run.
 
 ### WP-06 — Supported external control plane as code
 
-**Owns:** `infra/tofu/cloudflare/`, route generation/verification and host
-`cloudflared` config. It does not own VPSDime lifecycle.
+**Owns:** `infra/tofu/cloudflare/`, `infra/services/domains.yml`, route/domain
+verification and host `cloudflared` config. It does not own VPSDime or registrar
+lifecycle.
 
 **Implement:**
 
@@ -661,34 +680,42 @@ idempotence report. Production bootstrap is a separate founder-confirmed run.
    that root only through the committed controller command/runbook, record its
    immutable identifiers and postconditions, then manage every supported child
    resource from remote state. Do not proceed with local-only production state.
-2. Import existing `team.chayan.me`, its tunnel/DNS/Access objects and private
+2. Catalog the registrar recovery identity in the password manager/secret
+   catalog and declare the expected `chayan.me` parent-zone nameserver set,
+   registrar owner and renewal evidence as non-secret domain data. Registrar
+   delegation changes use the §2.2 five-point manual-action contract. Verify
+   delegation at the parent zone with an independent DNS probe; a Cloudflare
+   dashboard view or cached recursive answer is insufficient.
+3. Import existing `team.chayan.me`, its tunnel/DNS/Access objects and private
    R2 resources before any create/update. Record provider/resource IDs as
    non-secret variables and commit the provider lock.
-3. Declare one tunnel/credential boundary per host, `team.chayan.me`,
+4. Declare one tunnel/credential boundary per host, `team.chayan.me`,
    `n8n.chayan.me`, `hooks.chayan.me`, `publish.chayan.me`, default-deny human
    Access applications, the scoped publisher service-token policy, machine
    route rules and separate private-backup/public-media buckets.
-4. Render/validate host ingress config from the same route manifest. No route
+5. Render/validate host ingress config from the same route manifest. No route
    may cross host boundaries or expose an origin port.
-5. Implement route probes for unauthenticated, founder identity, valid/invalid
+6. Implement route probes for unauthenticated, founder identity, valid/invalid
    service token, allowed/forbidden method/path, direct IP and alternate DNS.
-6. Keep production application secrets out of OpenTofu. Backend/provider
+7. Keep production application secrets out of OpenTofu. Backend/provider
    credentials enter only through the controller environment and SOPS/password
    manager workflow.
 
 **Verify:** imported state yields a reviewed no-change plan before convergence;
-fixture plans reject whole-host bypass, missing Access, shared tunnel tokens,
-public private-bucket access and origin exposure. Starting from a clean clone,
-prove backend discovery/recovery and lock contention on a disposable state
-object without copying a local state file or shell history.
+fixture plans reject wrong/missing parent-zone nameservers, unknown registrar
+owner, whole-host bypass, missing Access, shared tunnel tokens, public private-
+bucket access and origin exposure. Starting from a clean clone, prove backend
+discovery/recovery and lock contention on a disposable state object without
+copying a local state file or shell history.
 
-**Exit evidence:** no-change import plan, state-recovery drill and route-test
-matrix. Any live change requires a separately reviewed plan and founder apply.
+**Exit evidence:** no-change import plan, parent-zone delegation/recovery
+receipt, state-recovery drill and route-test matrix. Any live change requires a
+separately reviewed plan and founder apply.
 
 ### WP-07 — Backup and restore foundation
 
-**Owns:** restic role, per-application dump adapters, timers, retention, backup
-monitoring and disposable restore harness.
+**Owns:** restic role, per-application dump adapters, repository source-escrow
+adapter, timers, retention, backup monitoring and disposable restore harness.
 
 **Implement:**
 
@@ -702,18 +729,31 @@ monitoring and disposable restore harness.
 4. Enforce `keep-daily 7`, `keep-weekly 4`, prune/check sequencing and no
    overlapping host backups, Hermes browser work or publisher upgrades. Keep at
    most one local latest dump.
-5. Add backup-age/size alerts and a quarterly plus post-upgrade restore timer or
+5. Add `scripts/repository-bundle`. From a clean reviewed controller checkout,
+   it bundles `main` plus annotated production tags, verifies the bundle and
+   digest, writes it directly into encrypted restic source escrow and removes
+   the quota-bound local temporary file. Run it at every release and when the
+   protected history changes; never clone from a host or place a Git credential
+   there. Store the source-escrow recovery root in the password manager so
+   retrieving the bundle does not depend on Git/SOPS ciphertext inside it. Tag
+   escrow snapshots separately and retain every release named by a deployed
+   host receipt plus the last two superseded releases; generic daily/weekly
+   pruning must not remove the only current desired-state source.
+6. Add backup-age/size alerts and a quarterly plus post-upgrade restore timer or
    runbook. A repository check alone is not a restore test.
-6. Implement disposable restore targets with explicit names and guarded
+7. Implement disposable restore targets with explicit names and guarded
    cleanup; never restore over production during a drill.
 
 **Verify:** corrupt/missing snapshot, wrong host credential, overlapping lock,
 failed dump and full disk all fail safely and alert. Restore a fixture database
 and retained file, then prove excluded data is regenerated rather than restored.
+With GitHub deliberately unavailable, restore the bundle, verify it and check
+out the recorded release tag; a dirty checkout, unsigned/unannotated tag, bundle
+digest mismatch or missing source-escrow root fails closed.
 
-**Exit evidence:** first successful encrypted snapshot, disposable restore
-report, measured duration and RPO/RTO comparison. No existing legacy backup is
-removed yet.
+**Exit evidence:** first successful encrypted snapshot, GitHub-independent
+source-bundle restore, disposable application restore report, measured duration
+and RPO/RTO comparison. No existing legacy backup is removed yet.
 
 ### WP-08 — Paperclip parity adoption
 
@@ -724,8 +764,9 @@ adapter and its runbook.
 
 1. Express the approved `WP-04` baseline as Compose/config/SOPS desired state
    without changing image digest, effective environment, mounts or hostname.
-2. Normalize rendered candidate and captured baseline using the same code.
-   Unexplained differences fail before Compose is invoked.
+2. Normalize rendered candidate and captured baseline using the same code and
+   controller-only SOPS parity HMAC key. Unexplained differences fail before
+   Compose is invoked; neither side emits raw values or unkeyed digests.
 3. Require a fresh `WP-07` dump, successful disposable restore, healthy current
    instance, founder-approved restart window and rollback snapshot.
 4. Converge with exact image digest and data paths. Container recreation is
@@ -735,9 +776,9 @@ adapter and its runbook.
 6. Disable an old backup/cleanup job only after its replacement and restore
    evidence pass, one job at a time.
 
-**Verify:** candidate drift in a secret hash, mount, image, route, restart policy
-or health contract blocks apply. A disposable clone restores and reaches the
-expected health endpoint.
+**Verify:** candidate drift in a keyed secret parity HMAC, mount, image, route,
+restart policy or health contract blocks apply. An unkeyed digest is rejected.
+A disposable clone restores and reaches the expected health endpoint.
 
 **Exit evidence:** zero unexplained before/after diff, unchanged image digest,
 health/Access probes, restore report and rollback sign-off.
@@ -793,22 +834,34 @@ harness, n8n health/backup adapter and admin-route configuration.
    catalogue the recovery account/license in the password-manager/SOPS model and
    restore-test activation. If unavailable, names/tags remain the only namespace
    and tests must not assume folders.
-6. Create the drift-watchdog API key through a supported pinned-version API/CLI
-   bootstrap path. Render it only to root-owned mode `0600`
+6. Prefer creating the drift-watchdog API key through a supported path for the
+   pinned n8n version. If no supported headless API/CLI bootstrap exists, stop
+   and use a committed one-time editor runbook behind founder-only Access. That
+   runbook requires founder confirmation, captures the new high-entropy value
+   through a committed no-echo controller prompt directly into SOPS encryption
+   without logging or a persistent plaintext file, verifies a read-only owner
+   API probe, writes a redacted bootstrap receipt and defines create-new/verify/
+   revoke-old rotation. The interactive action is an external root, never the
+   desired-state authority. Render the key only to root-owned mode `0600`
    `/etc/dholbeat/n8n-consumer-drift.env`; do not put it in n8n or Hermes
    environments or in the n8n credential store.
 7. Add application-aware PostgreSQL dump/restore and inactive workflow
    reconciliation. An empty fresh database plus Git/SOPS must reach the same
-   configuration without using the editor.
+   declarative configuration; catalogued owner/license/watchdog bootstrap roots
+   may require their committed one-time runbooks, but no other editor state is
+   allowed.
 
 **Verify:** Compose render, migration up/down or forward-restore test, second
 Ansible run, backup/restore, Access/direct-origin probes, bounded execution
-retention and an empty-instance reconcile all pass on a disposable host. A
-workflow cannot access the owner watchdog key.
+retention and an empty-instance reconcile all pass on a disposable host. Test
+both the supported headless path when present and the interactive-runbook
+fallback contract with a disposable key. A workflow cannot access the owner
+watchdog key.
 
 **Exit evidence:** pinned versions/digests, rendered-config hash, inactive fresh
-restore, Registered Community recovery result and 24–72-hour idle/fixture
-resource baseline. No business workflow is active.
+restore, Registered Community recovery result, watchdog bootstrap/rotation
+receipt and 24–72-hour idle/fixture resource baseline. No business workflow is
+active.
 
 ### WP-11 — Generic n8n consumer lifecycle and first external canary
 
@@ -1163,8 +1216,9 @@ quarterly drill schedule and final evidence mapping.
    update, route cutover and provider connection. Never treat a Git revert as a
    database rollback.
 4. On clean disposable Ubuntu hosts, execute the complete sequence in §11 using
-   only the reviewed Git tag, SOPS ciphertext plus password-manager age key,
-   bootstrap access, exact external source commits and restic data.
+   only the reviewed Git tag restored from GitHub **and**, in a separate drill,
+   from source escrow, SOPS ciphertext plus password-manager age key, bootstrap
+   access, exact external source commits and restic data.
 5. Reconcile all n8n workflows and Hermes profiles inactive; an unavailable or
    mismatched external source leaves only that unit inactive. Restore retained
    state, run retention/deletion reconciliation and activate only after its
@@ -1176,7 +1230,8 @@ quarterly drill schedule and final evidence mapping.
    close every step that required shell history or undocumented knowledge.
 
 **Verify:** destroy disposable hosts and rebuild both roles again from the same
-inputs; second convergence is clean, both hosts operate independently, direct
+inputs; repeat with GitHub unavailable and the release restored from its verified
+bundle. Second convergence is clean, both hosts operate independently, direct
 origins remain closed, application restores pass and the exact deployed release
 is observable.
 
@@ -1193,14 +1248,14 @@ No issue label, deadline or partially working service overrides these gates.
 | `G0 repository` | `WP-00`–`WP-03` checks pass from a clean clone; fixtures prove policy failures; no production secret enters CI | Tool/version depends on laptop globals, schema gaps, plaintext/unscoped secret or CI/apply coupling |
 | `G1 discovery` | `WP-04` baseline is stable, redacted and founder-reviewed; every live listener/job/volume has an owner | Unknown state, suspected secret leak, or Paperclip baseline cannot be normalized |
 | `G2 disposable baseline` | `WP-05` converges twice on disposable Ubuntu and firewall/SSH recovery tests pass | Wrong OS/resources, non-idempotence, public app port or loss of second access path |
-| `G3 recoverability` | `WP-07` completes an application-aware disposable restore before replacing any live backup/adopting Paperclip | Missing/failed dump, untested restore, shared credentials, unbounded staging or no rollback snapshot |
+| `G3 recoverability` | `WP-07` completes application-aware and GitHub-independent source-bundle restores before replacing any live backup/adopting Paperclip | Missing/failed dump, unverified source bundle, untested restore, shared credentials, unbounded staging or no rollback snapshot |
 | `G4 Paperclip parity` | `WP-08` has zero unexplained before/after diff, unchanged digest, health, Access and rollback evidence | Any config/data/image mismatch or failed restore/health/Access probe |
 | `G5 core capacity` | Separately approved w3exam migration is evidenced; reviewed cleanup yields `B_core ≤ 14 GB` and ≥8 GB update headroom | Unknown deletion target, migration rollback still open, baseline too high or capacity option lacks founder decision |
 | `G6 shared-runtime fixtures` | n8n and Hermes generic two-project fixtures pass isolation, drift, restore, inactivity and global-capacity tests | Cross-project access, moving source, shared state, watchdog >5 minutes, OOM or hidden second runtime |
 | `G7 publisher` | `DG-01` is closed; selected exact edition passes authorization, backup/update and seven-day host thresholds | Decision still open, paid tier not approved, cross-project write, restore failure or 6-GB canary breach |
 | `G8 approval/pipeline` | Current-hash idea and final approvals gate fixture publishing; Bangla overlay, disclosure, purge and idempotency tests pass | Any autonomous publish path, stale approval, AI-avatar testimonial, image-model Bangla text or unbounded media |
 | `G9 live canary` | Founder-approved accounts run seven days within resource/SLO/retention gates with alerts and kill switch verified | OOM, capacity/disk gate, p95 >60 seconds, >5-minute cross-project wait, duplicate/unapproved post or missing backup |
-| `G10 portability` | `WP-20` rebuilds both roles from declared inputs with no shell-history/old-root copy and meets recorded RPO/RTO | Undocumented manual config, unrecoverable grant/state, source mismatch activating a unit, or host interdependence |
+| `G10 portability` | `WP-20` rebuilds both roles from declared inputs, including a GitHub-outage run from source escrow, with no shell-history/old-root copy and meets recorded RPO/RTO | Undocumented manual config, unavailable desired-state source, unrecoverable grant/state, source mismatch activating a unit, or host interdependence |
 
 Production activation is incremental. A service that passes its own gate may
 remain active while a later independent package is blocked, but no blocked
@@ -1271,21 +1326,25 @@ operator confirmations must remain.
 
 1. Run `scripts/infra-verify` independently for both hosts and all active
    registrations.
-2. Run `scripts/release-record`; compare deployed commits/image digests/receipts to the
-   tag and commit only the redacted operational summary if policy permits.
-3. Take a second off-site snapshot, verify backup age and perform any required
+2. Run `scripts/release-record`; compare deployed commits/image digests/receipts
+   to the tag and commit only the redacted operational summary if policy permits.
+3. Run `scripts/repository-bundle create --release <tag>` from the clean
+   controller checkout, verify its digest in encrypted source escrow and remove
+   the local temporary bundle.
+4. Take a second off-site snapshot, verify backup age and perform any required
    post-migration restore drill.
-4. Unset `SOPS_AGE_KEY`, remove temporary checkouts/plans/media and scan the
+5. Unset `SOPS_AGE_KEY`, remove temporary checkouts/plans/media and scan the
    workspace/logs for secret leakage.
-5. Leave drift, monitoring and scheduled restore reminders active. Any failed
+6. Leave drift, monitoring and scheduled restore reminders active. Any failed
    acceptance item keeps the release open or rolls back the affected unit.
 
 ### 11.6 Replacement-host sequence
 
 1. Order/reinstall a compatible Ubuntu 24.04 host and attach the recorded public
    key; keep the old host live.
-2. Checkout the exact deployed tag and recover only the age/SSH/provider roots
-   from the password manager.
+2. Checkout the exact deployed tag. During the GitHub-outage drill, recover and
+   verify it from encrypted source escrow using only its password-manager
+   recovery root; do not consult an existing laptop clone.
 3. Bootstrap and converge the replacement role; restore the latest valid
    application dumps and catalogued retained state.
 4. Reconcile n8n consumers and Hermes projects inactive from receipts/exact
@@ -1330,7 +1389,7 @@ A work-package PR is complete only when:
 | No plaintext secrets/state/media | `WP-00`, `WP-03`, CI and every PR |
 | Independent host operation | `WP-05`, `WP-13`, `WP-20` |
 | Publisher sizing/canary | `DG-01`, `WP-13`, `WP-19` |
-| Full replacement-host drill | `WP-20` |
+| Full replacement-host drill, including GitHub outage | `WP-07`, `WP-20` |
 | `chayan.me`, Tunnel, Access and closed origin | `WP-06`, service packages, `WP-20` |
 | Machine-route least privilege | `WP-01`, `WP-06`, `WP-14` |
 | One central n8n plus generic second fixture | `WP-10`, `WP-11` |
