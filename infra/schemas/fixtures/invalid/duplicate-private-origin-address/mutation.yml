@@ -1,0 +1,5 @@
+target: registry.yml
+operation: set
+path: [services, 0, private_origin_addresses]
+value: [172.18.0.3]
+expected_error: "service-beta: private origin address 172.18.0.3 is already declared by service-alpha on fixture-core"

@@ -130,6 +130,52 @@ def test_explicit_rfc1918_route_origin_is_valid(tmp_path: Path) -> None:
     assert findings == []
 
 
+def test_equivalent_ipv6_private_origin_spellings_are_valid(tmp_path: Path) -> None:
+    bundle_path = tmp_path / "bundle"
+    shutil.copytree(POSITIVE, bundle_path)
+    registry = load_yaml(bundle_path / "registry.yml")
+    registry["services"][0]["private_origin_addresses"] = ["fc00::1"]
+    (bundle_path / "registry.yml").write_text(
+        yaml.safe_dump(registry, sort_keys=False), encoding="utf-8"
+    )
+    routes = load_yaml(bundle_path / "routes.yml")
+    routes["routes"][0]["origin"] = {
+        "kind": "private-address",
+        "scheme": "http",
+        "host": "fc00:0:0:0:0:0:0:1",
+        "port": 18081,
+    }
+    (bundle_path / "routes.yml").write_text(
+        yaml.safe_dump(routes, sort_keys=False), encoding="utf-8"
+    )
+    _, findings = validate_bundle(REPO_ROOT, bundle_path)
+    assert findings == []
+
+
+def test_private_origin_address_ownership_is_scoped_per_host(tmp_path: Path) -> None:
+    bundle_path = tmp_path / "bundle"
+    shutil.copytree(POSITIVE, bundle_path)
+    inventory = load_yaml(bundle_path / "inventory.yml")
+    inventory["hosts"][0]["service_ids"] = ["service-alpha"]
+    inventory["hosts"][1]["service_ids"] = ["service-beta"]
+    (bundle_path / "inventory.yml").write_text(
+        yaml.safe_dump(inventory, sort_keys=False), encoding="utf-8"
+    )
+    registry = load_yaml(bundle_path / "registry.yml")
+    registry["services"][1]["host_id"] = "fixture-publisher"
+    registry["services"][1]["private_origin_addresses"] = ["172.18.0.2"]
+    (bundle_path / "registry.yml").write_text(
+        yaml.safe_dump(registry, sort_keys=False), encoding="utf-8"
+    )
+    routes = load_yaml(bundle_path / "routes.yml")
+    routes["routes"][1]["host_id"] = "fixture-publisher"
+    (bundle_path / "routes.yml").write_text(
+        yaml.safe_dump(routes, sort_keys=False), encoding="utf-8"
+    )
+    _, findings = validate_bundle(REPO_ROOT, bundle_path)
+    assert findings == []
+
+
 INVALID_CASES = sorted(path for path in INVALID.iterdir() if path.is_dir())
 
 

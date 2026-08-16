@@ -16,6 +16,7 @@ import yaml
 
 
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
 PRIVATE_ORIGIN_NETWORKS = tuple(
     ipaddress.ip_network(network)
     for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7")
@@ -228,19 +229,21 @@ def credential_scope_errors(
             )
 
 
-def private_origin_address(host: str) -> bool:
+def private_origin_address(host: str) -> IPAddress | None:
     try:
         address = ipaddress.ip_address(host)
     except ValueError:
-        return False
-    return any(address in network for network in PRIVATE_ORIGIN_NETWORKS)
+        return None
+    if any(address in network for network in PRIVATE_ORIGIN_NETWORKS):
+        return address
+    return None
 
 
 def origin_policy_errors(
     route_id: str,
     origin: dict[str, Any],
     service_id: str,
-    allowed_private_addresses: set[str],
+    allowed_private_addresses: set[IPAddress],
 ) -> list[str]:
     host = origin["host"]
     kind = origin["kind"]
@@ -259,11 +262,12 @@ def origin_policy_errors(
             return []
         return [f"{route_id}: loopback origin {host} is forbidden"]
     if kind == "private-address":
-        if not private_origin_address(host):
+        private_address = private_origin_address(host)
+        if private_address is None:
             return [
                 f"{route_id}: private-address origin {host} is outside declared private networks"
             ]
-        if host not in allowed_private_addresses:
+        if private_address not in allowed_private_addresses:
             return [f"{route_id}: private-address origin {host} is not declared by {service_id}"]
         return []
     return [f"{route_id}: unsupported origin kind {kind}"]
@@ -316,6 +320,8 @@ def validate_cross_file(bundle: Bundle) -> list[str]:
             if service is not None and service["host_id"] != host_id:
                 findings.append(f"{host_id}: service {service_id} belongs to host {service['host_id']}")
 
+    seen_private_origin_addresses: dict[tuple[str, IPAddress], str] = {}
+    service_private_origin_addresses: dict[str, set[IPAddress]] = {}
     for service_id, service in services.items():
         host = require_reference(service_id, "host_id", service["host_id"], hosts, "host", findings)
         if host is not None and service_id not in host["service_ids"]:
@@ -333,11 +339,25 @@ def validate_cross_file(bundle: Bundle) -> list[str]:
             findings.append(
                 f"{service_id}: backup adapter {backup['id']} is owned by {backup['owner']}"
             )
-        for address in service["private_origin_addresses"]:
-            if not private_origin_address(address):
+        parsed_private_addresses: set[IPAddress] = set()
+        for address_text in service["private_origin_addresses"]:
+            address = private_origin_address(address_text)
+            if address is None:
                 findings.append(
-                    f"{service_id}: private origin address {address} is outside declared private networks"
+                    f"{service_id}: private origin address {address_text} is outside declared private networks"
                 )
+                continue
+            ownership_key = (service["host_id"], address)
+            existing_service_id = seen_private_origin_addresses.get(ownership_key)
+            if existing_service_id is not None:
+                findings.append(
+                    f"{service_id}: private origin address {address} is already declared by "
+                    f"{existing_service_id} on {service['host_id']}"
+                )
+            else:
+                seen_private_origin_addresses[ownership_key] = service_id
+            parsed_private_addresses.add(address)
+        service_private_origin_addresses[service_id] = parsed_private_addresses
 
         service_routes: list[dict[str, Any]] = []
         for route_id in service["route_ids"]:
@@ -393,7 +413,9 @@ def validate_cross_file(bundle: Bundle) -> list[str]:
         if service is not None and route["retention_owner"] != service["project_id"]:
             findings.append(f"{route_id}: route retention and service have different owners")
         allowed_private_addresses = (
-            set(service["private_origin_addresses"]) if service is not None else set()
+            service_private_origin_addresses[service["id"]]
+            if service is not None
+            else set()
         )
         findings.extend(
             origin_policy_errors(

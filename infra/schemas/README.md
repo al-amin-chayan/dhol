@@ -78,6 +78,7 @@ a YAML parse error cannot accidentally satisfy a negative test.
 | `public-origin` | loopback route origin binds publicly |
 | `cross-project-origin` | route targets another project's service |
 | `cross-project-private-origin` | route uses another service's declared private address |
+| `duplicate-private-origin-address` | two services on one host claim the same private address |
 | `unknown-origin-host` | route targets an undeclared single-label host |
 | `service-public-private-address` | service labels a public address as private |
 | `missing-access` | human route uses a machine exception instead of enforced Access |
