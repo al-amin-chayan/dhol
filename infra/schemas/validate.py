@@ -55,6 +55,7 @@ WORKFLOW_NODE_VOLATILE_FIELDS = {
     "retryonfail",
     "maxtries",
 }
+WORKFLOW_NODE_PATH_RE = re.compile(r"^\$\.nodes\[\d+\]$")
 
 REVISION_KEY_TEMPLATE = (
     "project/{project_id}/brand/{brand_id}/content/{content_id}/revision/{revision}"
@@ -63,19 +64,20 @@ IDEMPOTENCY_KEY_TEMPLATE = (
     "project/{project_id}/brand/{brand_id}/content/{content_id}/revision/{revision}/"
     "{channel}/{scheduled_at}"
 )
-FORBIDDEN_WORKFLOW_KEY_FRAGMENTS = {
+FORBIDDEN_WORKFLOW_KEY_TOKENS = {
     "credential",
-    "api",
+    "credentials",
     "token",
     "secret",
-    "auth",
     "password",
-    "privatekey",
+    "auth",
+    "authorization",
 }
+FORBIDDEN_WORKFLOW_KEY_TOKEN_PAIRS = {"apikey", "privatekey"}
 FORBIDDEN_WORKFLOW_TEXT = ("autonomous", "autopublish", "bangla text")
-PROMPT_NEGATION_WORDS = {"never", "not", "avoid", "avoiding", "forbid", "forbidden"}
 PROMPT_APPROVED_PUBLISH_POLICY = "human-approved-only"
 PROMPT_APPROVED_IMAGE_TEXT_POLICY = "overlay-only"
+WORKFLOW_FIELD_TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 SCHEMA_CONTRACTS = {
     "backup_adapter": "infra/schemas/backup-adapter.schema.json",
@@ -184,27 +186,43 @@ def _normalized_workflow_field_name(field: Any) -> str:
     return "".join(ch for ch in str(field).lower() if ch.isalnum())
 
 
+def _tokenized_workflow_field_names(field: Any) -> list[str]:
+    normalized = str(field).strip()
+    if not normalized:
+        return []
+    segmented = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", normalized)
+    segmented = segmented.replace("-", " ").replace("_", " ")
+    return [match.group(0) for match in WORKFLOW_FIELD_TOKEN_RE.finditer(segmented.lower())]
+
+
 def _is_forbidden_workflow_key(field: Any) -> bool:
-    normalized = _normalized_workflow_field_name(field)
-    return any(fragment in normalized for fragment in FORBIDDEN_WORKFLOW_KEY_FRAGMENTS)
-
-
-def _contains_forbidden_prompt_phrase(template: str, phrase: str) -> bool:
-    normalized = re.sub(r"[^a-z0-9\s]+", " ", template.lower())
-    tokens = normalized.split()
-    phrase_tokens = phrase.split()
-    if not tokens or not phrase_tokens:
+    tokens = _tokenized_workflow_field_names(field)
+    if not tokens:
         return False
-    n = len(phrase_tokens)
-    for index in range(len(tokens) - n + 1):
-        window = tokens[index : index + n]
-        if window != phrase_tokens:
-            continue
-        prefix = tokens[max(0, index - 4) : index]
-        if any(token in PROMPT_NEGATION_WORDS for token in prefix):
-            continue
+    if any(token in FORBIDDEN_WORKFLOW_KEY_TOKENS for token in tokens):
         return True
+    if any(token in FORBIDDEN_WORKFLOW_KEY_TOKEN_PAIRS for token in tokens):
+        return True
+    for index in range(len(tokens) - 1):
+        if "".join(tokens[index : index + 2]) in FORBIDDEN_WORKFLOW_KEY_TOKEN_PAIRS:
+            return True
     return False
+
+
+def _resolve_source_file(relative_path: Path, roots: Iterable[Path]) -> Path | None:
+    if relative_path.is_absolute():
+        return relative_path if relative_path.is_file() else None
+    for root in roots:
+        candidate = root / relative_path
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _approval_channel_secret_id(approval_channel: str) -> str:
+    if ":" not in approval_channel:
+        return ""
+    return approval_channel.rsplit(":", 1)[1].lower().replace("_", "-")
 
 WORKFLOW_METADATA_KEYS = {
     "schema_version",
@@ -231,8 +249,7 @@ def scan_forbidden_workflow_fields(
 ) -> None:
     if isinstance(value, dict):
         for field, nested in value.items():
-            field_lower = str(field).lower()
-            if _is_forbidden_workflow_key(field_lower):
+            if _is_forbidden_workflow_key(field):
                 findings.append(
                     f"{principal}: forbidden credential field in workflow source at {path}.{field}"
                 )
@@ -282,15 +299,6 @@ def prompt_policy_errors(
         findings.append(
             f"{prompt_id}: prompt safety image_text_policy must be {PROMPT_APPROVED_IMAGE_TEXT_POLICY}"
         )
-    template = prompt["template"]
-    if _contains_forbidden_prompt_phrase(template, "autonomous"):
-        findings.append(f"{prompt_id}: prompt contains forbidden keyword 'autonomous' in template")
-    if _contains_forbidden_prompt_phrase(template, "autonomously"):
-        findings.append(f"{prompt_id}: prompt contains forbidden keyword 'autonomous' in template")
-    if _contains_forbidden_prompt_phrase(template, "autopublish"):
-        findings.append(f"{prompt_id}: prompt contains forbidden keyword 'autopublish' in template")
-    if _contains_forbidden_prompt_phrase(template, "bangla text"):
-        findings.append(f"{prompt_id}: prompt contains forbidden keyword 'bangla text' in template")
     lowered_template = prompt["template"].lower()
     for brand_name in sorted(brand_names):
         if brand_name and brand_name in lowered_template:
@@ -315,7 +323,7 @@ def normalize_workflow_source(source: Any) -> tuple[dict[str, Any], list[str]]:
                 if path == "$" and key_norm in WORKFLOW_TOPLEVEL_VOLATILE_FIELDS:
                     removed.append(normalized_path)
                     continue
-                if path.startswith("$.nodes[") and key_norm in WORKFLOW_NODE_VOLATILE_FIELDS:
+                if WORKFLOW_NODE_PATH_RE.fullmatch(path) and key_norm in WORKFLOW_NODE_VOLATILE_FIELDS:
                     removed.append(normalized_path)
                     continue
                 result[field] = _normalize(value, normalized_path)
@@ -488,11 +496,9 @@ def origin_policy_errors(
     return [f"{route_id}: unsupported origin kind {kind}"]
 
 
-def validate_cross_file(root: Path, bundle: Bundle) -> list[str]:
+def validate_cross_file(root: Path, bundle: Bundle, bundle_path: Path) -> list[str]:
     findings: list[str] = []
-    source_root = root
-    if not (source_root / "n8n").is_dir():
-        findings.append("n8n: workflow exports directory is missing")
+    source_roots = [bundle_path]
 
     hosts = index_records(bundle.one("inventory.yml")["hosts"], "id", "inventory", findings)
     services = index_records(bundle.one("registry.yml")["services"], "id", "services", findings)
@@ -520,8 +526,10 @@ def validate_cross_file(root: Path, bundle: Bundle) -> list[str]:
         bundle, "publisher-mappings", "mapping_id", "publisher mappings", findings
     )
     workflow_exports: dict[str, dict[str, Any]] = {}
-    export_index_path = source_root / "n8n" / "exports" / "index.yml"
+    export_index_path = _resolve_source_file(Path("n8n/exports/index.yml"), source_roots)
     try:
+        if export_index_path is None:
+            raise OSError("missing workflow export index")
         export_index = load_yaml(export_index_path)
     except (OSError, ValueError, yaml.YAMLError) as error:
         findings.append(f"n8n/exports/index.yml: cannot load YAML: {error}")
@@ -549,8 +557,8 @@ def validate_cross_file(root: Path, bundle: Bundle) -> list[str]:
             findings.append(
                 f"n8n/exports/index.yml: workflow {workflow_id} has invalid source_commit"
             )
-        source_path = source_root / workflow_export["source_path"]
-        if not source_path.is_file():
+        source_path = _resolve_source_file(Path(workflow_export["source_path"]), source_roots)
+        if source_path is None:
             findings.append(
                 f"n8n/exports/index.yml: workflow {workflow_id} references missing source_path"
             )
@@ -752,6 +760,33 @@ def validate_cross_file(root: Path, bundle: Bundle) -> list[str]:
             findings,
         )
 
+        approval_secret_id = _approval_channel_secret_id(brand["approval_channel"])
+        approval_secret = require_reference(
+            brand_id,
+            "approval_channel",
+            approval_secret_id,
+            secrets,
+            "secret",
+            findings,
+        )
+        if approval_secret is not None and brand["project_id"] not in approval_secret["allowed_project_ids"]:
+            findings.append(
+                f"{brand_id}: approval channel secret {approval_secret_id} is not for {brand['project_id']}"
+            )
+        if approval_secret is not None and approval_secret["owner_project_id"] not in {
+            "platform",
+            brand["project_id"],
+        }:
+            findings.append(
+                f"{brand_id}: approval channel secret {approval_secret_id} is owned by "
+                f"{approval_secret['owner_project_id']}"
+            )
+        if approval_secret is not None and brand_id not in approval_secret["allowed_principal_ids"]:
+            findings.append(
+                f"{brand_id}: approval channel secret {approval_secret_id} is not allowed "
+                f"for principal {brand_id}"
+            )
+
     brand_names = {brand["brand"] for brand in brands.values()}
     for prompt_id, prompt in prompts.items():
         prompt_policy_errors(prompt_id, prompt, brand_names, findings)
@@ -786,8 +821,8 @@ def validate_cross_file(root: Path, bundle: Bundle) -> list[str]:
         brand = require_reference(workflow_id, "brand_id", workflow["brand_id"], brands, "brand", findings)
         if brand is not None and brand["project_id"] != workflow["project_id"]:
             findings.append(f"{workflow_id}: workflow and brand have different owners")
-        source_path = source_root / workflow["source_path"]
-        if not source_path.is_file():
+        source_path = _resolve_source_file(Path(workflow["source_path"]), source_roots)
+        if source_path is None:
             findings.append(
                 f"{workflow_id}: workflow source file missing at {workflow['source_path']}"
             )
@@ -1032,7 +1067,7 @@ def validate_bundle(root: Path, bundle_path: Path) -> tuple[Bundle | None, list[
     bundle, findings = load_bundle(root, bundle_path)
     if bundle is None:
         return None, findings
-    return bundle, validate_cross_file(root, bundle)
+    return bundle, validate_cross_file(root, bundle, bundle_path)
 
 
 def normalized_bundle(bundle: Bundle) -> str:

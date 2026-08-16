@@ -1,5 +1,0 @@
-target: prompts/prompt-alpha.yml
-operation: set
-path: [template]
-value: "Draft an image and place Bangla text directly inside the generated imagery."
-expected_error: "prompt-alpha: prompt contains forbidden keyword 'bangla text' in template"

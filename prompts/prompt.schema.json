@@ -110,7 +110,7 @@
         },
         "image_text_policy": {
           "type": "string",
-          "enum": ["overlay-only", "external-tools-only"]
+          "const": "overlay-only"
         }
       }
     }

@@ -1,0 +1,5 @@
+target: prompts/prompt-alpha.yml
+operation: set
+path: [safety, publish_policy]
+value: autopublish-only
+expected_error: "prompts/prompt-alpha.yml: schema at safety.publish_policy: 'human-approved-only' was expected"

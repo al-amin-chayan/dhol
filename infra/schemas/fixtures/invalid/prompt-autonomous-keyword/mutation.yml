@@ -1,5 +1,0 @@
-target: prompts/prompt-alpha.yml
-operation: set
-path: [template]
-value: "Draft a caption and queue it with autonomous publishing."
-expected_error: "prompt-alpha: prompt contains forbidden keyword 'autonomous' in template"

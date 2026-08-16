@@ -1,0 +1,5 @@
+target: prompts/prompt-alpha.yml
+operation: set
+path: [safety, image_text_policy]
+value: external-tools-only
+expected_error: "prompts/prompt-alpha.yml: schema at safety.image_text_policy: 'overlay-only' was expected"
