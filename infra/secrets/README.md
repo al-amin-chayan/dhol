@@ -2,15 +2,25 @@
 
 Only values-only SOPS+age ciphertext named `*.sops.yml` may live below this
 directory. `.sops.yaml` is the sole production creation rule and must contain
-the founder and break-glass public recipients confirmed out of band. Private
-age keys, SSH keys, provider recovery logins, and the source-escrow recovery
-root remain in the password manager.
+the founder and break-glass public recipients confirmed out of band. The
+password manager is authoritative for private age keys, SSH keys, provider
+recovery logins, and the source-escrow recovery root. A mode `0600` operator
+copy of each age key may live under `~/.config/dholbeat/age/`, matching the
+PoriPati and w3exam layout, but it must never be the only copy.
 
-No production ciphertext is required merely to declare a catalog entry. Create
-one only when the real value and both approved recipients are available; never
-seed a production path with example or throwaway ciphertext. Test ciphertext is
-created from ephemeral in-memory keys under temporary directories and is never
-committed.
+No production ciphertext is required merely to declare a provider-issued
+catalog entry. Create one only when the real value and both approved recipients
+are available; never seed a production path with an invented provider secret.
+`canary.sops.yml` is an intentionally random controller-only proof that both
+recipients and the SOPS MAC work. Test ciphertext is created from ephemeral
+in-memory keys under temporary directories and is never committed.
+
+The committed public-recipient comments in `.sops.yaml` record SHA-256 over the
+exact age recipient string. Reproduce one without exposing its private key:
+
+```sh
+age-keygen -y ~/.config/dholbeat/age/founder.age | tr -d '\n' | shasum -a 256
+```
 
 ## Recovery-account checklist
 
@@ -47,6 +57,15 @@ reviewed creation rule. Then run `scripts/check`. At apply time, the validator
 decrypts one selected file to process memory, checks its MAC/schema/catalog
 keys, and discards the object. It never writes a decrypted workspace copy or
 prints a value.
+
+Validate the committed canary independently with each local operator key:
+
+```sh
+SOPS_AGE_KEY_FILE=~/.config/dholbeat/age/founder.age \
+  python infra/sops/validate.py --root . --decrypt infra/secrets/canary.sops.yml
+SOPS_AGE_KEY_FILE=~/.config/dholbeat/age/break-glass.age \
+  python infra/sops/validate.py --root . --decrypt infra/secrets/canary.sops.yml
+```
 
 Rendering follows the catalog exactly: select only the values for one target
 file/service, render a root-owned mode `0600` file with Ansible `no_log: true`

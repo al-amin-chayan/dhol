@@ -22,7 +22,7 @@ SOPS_PATH_REGEX = (
 AGE_RECIPIENT_RE = re.compile(r"^age1[023456789acdefghjklmnpqrstuvwxyz]{58}$")
 ENCRYPTED_VALUE_RE = re.compile(r"^ENC\[AES256_GCM,")
 ALLOWED_SECRET_METADATA = {"README.md", "catalog.yml"}
-SKIPPED_DIRECTORIES = {".artifacts", ".controller-cache", ".git", ".worktrees"}
+SKIPPED_DIRECTORIES = {".artifacts", ".controller-cache", ".git", ".worktrees", "__pycache__"}
 
 
 def load_yaml(path: Path) -> dict[str, Any]:

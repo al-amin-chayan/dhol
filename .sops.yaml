@@ -1,0 +1,8 @@
+creation_rules:
+  - path_regex: ^infra/secrets/(?:[a-z0-9][a-z0-9-]*/)*[a-z0-9][a-z0-9-]*\.sops\.yml$
+    key_groups:
+      - age:
+          # founder sha256: 32a10a745e289748ad266b05e6589a0dd0dcabf9c6c4005d8890f5eb29d0f849
+          - age1v48lely3n7c9kh7c6l8nwprcvwyk5g05rrv4c2hmxeyng9qmwvksg30esx
+          # break-glass sha256: bed909c0be9e83ff6c22ecc7b819c938adcf269490ac620eb623ddf7162a969b
+          - age1jvtwgqeekr4q64hxe4darpqvff9m66k0wx9mm9nxp2n92tn8vscsla9689
