@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Run gh only after the current agent's fresh App token is minted successfully.
+set -euo pipefail
+
+script_dir="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)"
+command -v gh >/dev/null 2>&1 || {
+  printf 'error: required command not found: gh\n' >&2
+  exit 127
+}
+
+token="$("$script_dir/github-app-token.sh")"
+[ -n "$token" ] || {
+  printf 'error: GitHub App token helper returned an empty token\n' >&2
+  exit 1
+}
+
+GH_TOKEN="$token" GITHUB_TOKEN="$token" exec gh "$@"
