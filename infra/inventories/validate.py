@@ -19,6 +19,12 @@ SENSITIVE_KEY_RE = re.compile(
     re.IGNORECASE,
 )
 CANONICAL_ROLES = {"core": "core-1", "publisher": "publish-1"}
+CANONICAL_ENDPOINTS = {
+    "paperclip-admin": ("core-1", "team.chayan.me", ("human",)),
+    "n8n-admin": ("core-1", "n8n.chayan.me", ("human",)),
+    "approval-webhooks": ("core-1", "hooks.chayan.me", ("machine",)),
+    "publisher-admin-api": ("publish-1", "publish.chayan.me", ("human", "machine")),
+}
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
@@ -131,6 +137,16 @@ def validate_inventory(root: Path) -> list[str]:
                 f"{endpoint_id}: public hostname {endpoint['hostname']} is already owned by {prior}"
             )
         hostnames[endpoint["hostname"]] = endpoint_id
+
+    if set(endpoints) != set(CANONICAL_ENDPOINTS):
+        findings.append("inventory: canonical public endpoint IDs do not match the approved plan")
+    for endpoint_id, (host_id, hostname, audiences) in CANONICAL_ENDPOINTS.items():
+        endpoint = endpoints.get(endpoint_id)
+        if endpoint is None:
+            continue
+        actual = (endpoint["host_id"], endpoint["hostname"], tuple(endpoint["audiences"]))
+        if actual != (host_id, hostname, audiences):
+            findings.append(f"{endpoint_id}: endpoint identity differs from the approved plan")
 
     group_documents: dict[str, dict[str, Any]] = {}
     for scope in ("all", "core", "publisher"):

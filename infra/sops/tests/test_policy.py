@@ -6,9 +6,15 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import sys
 
 import pytest
 import yaml
+
+
+SOPS_DIR = Path(__file__).resolve().parents[1]
+REPO_ROOT = SOPS_DIR.parents[1]
+sys.path.insert(0, str(REPO_ROOT))
 
 from infra.sops.rotation_plan import build_rotation_plan
 from infra.sops.validate import (
@@ -17,9 +23,6 @@ from infra.sops.validate import (
     structural_findings,
 )
 
-
-SOPS_DIR = Path(__file__).resolve().parents[1]
-REPO_ROOT = SOPS_DIR.parents[1]
 RECIPIENT_ONE = "age1" + "q" * 58
 RECIPIENT_TWO = "age1" + "p" * 58
 WRONG_RECIPIENT = "age1" + "z" * 58

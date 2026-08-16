@@ -8,7 +8,7 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
-from typing import Any
+from typing import Any, Callable
 
 from jsonschema import Draft202012Validator, FormatChecker
 import yaml
@@ -44,13 +44,16 @@ def sha256_file(path: Path) -> str:
 
 
 def git_output(git_root: Path, *args: str) -> tuple[int, str]:
-    completed = subprocess.run(
-        ["git", *args],
-        cwd=git_root,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        completed = subprocess.run(
+            ["git", *args],
+            cwd=git_root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return 127, ""
     return completed.returncode, completed.stdout.strip()
 
 
@@ -59,6 +62,7 @@ def validate_release(
     release: dict[str, Any],
     plan_path: Path,
     git_root: Path,
+    git_runner: Callable[..., tuple[int, str]] = git_output,
 ) -> list[str]:
     findings = schema_findings(
         release,
@@ -69,6 +73,8 @@ def validate_release(
         return sorted(set(findings))
     if release["review"]["reviewed_commit"] != release["git_commit"]:
         findings.append("release: cross-review does not cover the release commit")
+    if release["review"]["reviewer"] == release["author"]:
+        findings.append("release: author and reviewer must be different model families")
     try:
         actual_plan_digest = sha256_file(plan_path)
     except OSError:
@@ -78,15 +84,15 @@ def validate_release(
             findings.append("release: approved plan digest does not match the reviewed plan")
 
     tag_ref = f"refs/tags/{release['tag']}"
-    status, object_type = git_output(git_root, "cat-file", "-t", tag_ref)
+    status, object_type = git_runner(git_root, "cat-file", "-t", tag_ref)
     if status != 0 or object_type != "tag":
         findings.append("release: annotated production tag is missing")
     else:
-        status, tagged_commit = git_output(git_root, "rev-parse", f"{tag_ref}^{{commit}}")
+        status, tagged_commit = git_runner(git_root, "rev-parse", f"{tag_ref}^{{commit}}")
         if status != 0 or tagged_commit != release["git_commit"]:
             findings.append("release: annotated tag does not identify the release commit")
 
-    status, _ = git_output(
+    status, _ = git_runner(
         git_root,
         "merge-base",
         "--is-ancestor",

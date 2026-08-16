@@ -4,7 +4,7 @@
   "title": "Release receipt version 1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "receipt_type", "release_id", "git_commit", "tag", "created_at", "review", "toolchain_lock_sha256", "target_roles", "approved_plan_sha256", "required_backup_snapshot_id", "schema_versions", "images"],
+  "required": ["schema_version", "receipt_type", "release_id", "git_commit", "tag", "created_at", "author", "review", "toolchain_lock_sha256", "target_roles", "approved_plan_sha256", "required_backup_snapshot_id", "schema_versions", "images"],
   "properties": {
     "schema_version": {"const": 1},
     "receipt_type": {"const": "release"},
@@ -12,6 +12,7 @@
     "git_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
     "tag": {"type": "string", "pattern": "^infra-prod-[0-9]{8}-[0-9]+$"},
     "created_at": {"type": "string", "format": "date-time"},
+    "author": {"enum": ["codex", "claude-code"]},
     "review": {
       "type": "object",
       "additionalProperties": false,

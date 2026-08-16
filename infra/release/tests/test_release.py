@@ -3,38 +3,32 @@ from __future__ import annotations
 import copy
 import hashlib
 from pathlib import Path
-import subprocess
+import sys
 
 import yaml
-
-from infra.release.validate import validate_release, validate_runtime_receipt
 
 
 RELEASE_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = RELEASE_DIR.parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+from infra.release.validate import validate_release, validate_runtime_receipt
 
 
-def git(root: Path, *args: str) -> str:
-    completed = subprocess.run(
-        ["git", *args],
-        cwd=root,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return completed.stdout.strip()
+class FakeGit:
+    def __init__(self, commit: str, *, annotated: bool = True, on_main: bool = True):
+        self.commit = commit
+        self.annotated = annotated
+        self.on_main = on_main
 
-
-def test_repository(tmp_path: Path) -> tuple[Path, str]:
-    root = tmp_path / "git"
-    root.mkdir()
-    git(root, "init", "-b", "main")
-    git(root, "config", "user.name", "Fixture Reviewer")
-    git(root, "config", "user.email", "fixture@example.test")
-    (root / "desired-state.txt").write_text("reviewed\n", encoding="utf-8")
-    git(root, "add", "desired-state.txt")
-    git(root, "commit", "-m", "feat: reviewed fixture")
-    return root, git(root, "rev-parse", "HEAD")
+    def __call__(self, _root: Path, *args: str) -> tuple[int, str]:
+        if len(args) == 3 and args[:2] == ("cat-file", "-t"):
+            return 0, "tag" if self.annotated else "commit"
+        if len(args) == 2 and args[0] == "rev-parse":
+            return 0, self.commit
+        if args[:2] == ("merge-base", "--is-ancestor"):
+            return (0, "") if self.on_main else (1, "")
+        raise AssertionError(f"unexpected git invocation: {args}")
 
 
 def release_document(commit: str, plan_digest: str, tag: str) -> dict:
@@ -49,70 +43,59 @@ def release_document(commit: str, plan_digest: str, tag: str) -> dict:
     return document
 
 
-def test_reviewed_annotated_release_is_valid_and_idempotent(tmp_path: Path) -> None:
-    git_root, commit = test_repository(tmp_path)
-    tag = "infra-prod-20260817-1"
-    git(git_root, "tag", "-a", tag, "-m", "fixture production release")
+def release_case(tmp_path: Path, sequence: int = 1) -> tuple[dict, Path, str]:
+    commit = "c" * 40
     plan = tmp_path / "redacted-plan.json"
     plan.write_text('{"changes":[]}\n', encoding="utf-8")
     digest = hashlib.sha256(plan.read_bytes()).hexdigest()
-    release = release_document(commit, digest, tag)
-    first = validate_release(REPO_ROOT, release, plan, git_root)
-    second = validate_release(REPO_ROOT, release, plan, git_root)
+    tag = f"infra-prod-20260817-{sequence}"
+    return release_document(commit, digest, tag), plan, commit
+
+
+def test_reviewed_annotated_release_is_valid_and_idempotent(tmp_path: Path) -> None:
+    release, plan, commit = release_case(tmp_path)
+    runner = FakeGit(commit)
+    first = validate_release(REPO_ROOT, release, plan, tmp_path, runner)
+    second = validate_release(REPO_ROOT, release, plan, tmp_path, runner)
     assert first == []
     assert second == first
 
 
 def test_wrong_plan_digest_fails(tmp_path: Path) -> None:
-    git_root, commit = test_repository(tmp_path)
-    tag = "infra-prod-20260817-2"
-    git(git_root, "tag", "-a", tag, "-m", "fixture production release")
-    plan = tmp_path / "redacted-plan.json"
-    plan.write_text('{"changes":["safe"]}\n', encoding="utf-8")
-    release = release_document(commit, "e" * 64, tag)
+    release, plan, commit = release_case(tmp_path, 2)
+    release["approved_plan_sha256"] = "e" * 64
     assert "release: approved plan digest does not match the reviewed plan" in validate_release(
-        REPO_ROOT, release, plan, git_root
+        REPO_ROOT, release, plan, tmp_path, FakeGit(commit)
     )
 
 
 def test_lightweight_tag_fails(tmp_path: Path) -> None:
-    git_root, commit = test_repository(tmp_path)
-    tag = "infra-prod-20260817-3"
-    git(git_root, "tag", tag)
-    plan = tmp_path / "redacted-plan.json"
-    plan.write_text("{}\n", encoding="utf-8")
-    release = release_document(commit, hashlib.sha256(plan.read_bytes()).hexdigest(), tag)
+    release, plan, commit = release_case(tmp_path, 3)
     assert "release: annotated production tag is missing" in validate_release(
-        REPO_ROOT, release, plan, git_root
+        REPO_ROOT, release, plan, tmp_path, FakeGit(commit, annotated=False)
     )
 
 
 def test_unreviewed_branch_commit_fails(tmp_path: Path) -> None:
-    git_root, _ = test_repository(tmp_path)
-    git(git_root, "checkout", "-b", "unreviewed")
-    (git_root / "desired-state.txt").write_text("unreviewed\n", encoding="utf-8")
-    git(git_root, "commit", "-am", "feat: unreviewed fixture")
-    commit = git(git_root, "rev-parse", "HEAD")
-    tag = "infra-prod-20260817-4"
-    git(git_root, "tag", "-a", tag, "-m", "unreviewed release")
-    plan = tmp_path / "redacted-plan.json"
-    plan.write_text("{}\n", encoding="utf-8")
-    release = release_document(commit, hashlib.sha256(plan.read_bytes()).hexdigest(), tag)
+    release, plan, commit = release_case(tmp_path, 4)
     assert "release: commit is not reachable from protected main" in validate_release(
-        REPO_ROOT, release, plan, git_root
+        REPO_ROOT, release, plan, tmp_path, FakeGit(commit, on_main=False)
     )
 
 
 def test_review_record_for_other_commit_fails(tmp_path: Path) -> None:
-    git_root, commit = test_repository(tmp_path)
-    tag = "infra-prod-20260817-5"
-    git(git_root, "tag", "-a", tag, "-m", "fixture production release")
-    plan = tmp_path / "redacted-plan.json"
-    plan.write_text("{}\n", encoding="utf-8")
-    release = release_document(commit, hashlib.sha256(plan.read_bytes()).hexdigest(), tag)
+    release, plan, commit = release_case(tmp_path, 5)
     release["review"]["reviewed_commit"] = "a" * 40
     assert "release: cross-review does not cover the release commit" in validate_release(
-        REPO_ROOT, release, plan, git_root
+        REPO_ROOT, release, plan, tmp_path, FakeGit(commit)
+    )
+
+
+def test_same_model_family_review_fails(tmp_path: Path) -> None:
+    release, plan, commit = release_case(tmp_path, 6)
+    release["review"]["reviewer"] = release["author"]
+    assert "release: author and reviewer must be different model families" in validate_release(
+        REPO_ROOT, release, plan, tmp_path, FakeGit(commit)
     )
 
 

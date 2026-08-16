@@ -19,9 +19,9 @@ public_endpoints:
     host_id: fixture-core
     hostname: alpha.example.test
     interface: fixture alpha administration
-    audience: human
+    audiences: [human]
   - id: beta-admin-endpoint
     host_id: fixture-core
     hostname: beta.example.test
     interface: fixture beta administration
-    audience: human
+    audiences: [human]

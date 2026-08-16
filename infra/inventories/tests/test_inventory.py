@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 import shutil
+import sys
 
 import yaml
 
 
 INVENTORY_DIR = Path(__file__).resolve().parents[1]
 REPO_ROOT = INVENTORY_DIR.parents[1]
+sys.path.insert(0, str(REPO_ROOT))
 
 from infra.inventories.validate import validate_inventory
 
