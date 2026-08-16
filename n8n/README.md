@@ -26,3 +26,11 @@ Each workflow manifest (`workflows/*.yml`) references a normalized export under
 - omit UI-volatility fields and secrets,
 - avoid any direct autonomous publish action,
 - be plain JSON that can be replayed in offline review procedures.
+
+Canonical edits should follow this sequence:
+
+1. Export workflow JSON from the editor.
+2. Normalize it to remove editor/runtime volatile fields (positioning, disabled state,
+   node metadata) before committing.
+3. Update `n8n/exports/index.yml` and keep workflow manifest metadata (`workflow_id`,
+   `project_id`, `source_path`, `source_commit`) in sync.

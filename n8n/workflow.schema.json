@@ -78,7 +78,7 @@
         "owner": {"type": "string", "minLength": 1}
       }
     },
-    "revision_key_template": {"type": "string", "minLength": 1},
-    "idempotency_key_template": {"type": "string", "minLength": 1}
+    "revision_key_template": {"const": "project/{project_id}/brand/{brand_id}/content/{content_id}/revision/{revision}"},
+    "idempotency_key_template": {"const": "project/{project_id}/brand/{brand_id}/content/{content_id}/revision/{revision}/{channel}/{scheduled_at}"}
   }
 }

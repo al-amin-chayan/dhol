@@ -2,7 +2,9 @@
 # Adding a brand must require no code changes. If something about a brand
 # cannot be expressed here, the abstraction is wrong — fix it, don't hard-code.
 
+schema_version: 1
 brand: example                 # slug, lowercase; matches the filename
+project_id: project-example     # project owning the profile
 languages: [bn, en]            # first entry is the primary language
 niche: "what this brand sells, and where"
 tone: "three or four adjectives"

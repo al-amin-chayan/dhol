@@ -18,6 +18,8 @@ sys.path.insert(0, str(SCHEMA_DIR))
 
 from validate import (  # noqa: E402
     SCHEMA_CONTRACTS,
+    normalize_workflow_source,
+    schema_errors,
     normalized_bundle,
     validate_bundle,
     validate_registries,
@@ -111,6 +113,38 @@ def test_two_project_positive_bundle_is_valid_and_round_trips_deterministically(
         for directory in ("n8n-consumers", "hermes-projects")
         for _, manifest in first_bundle.many(directory)
     )
+
+
+def test_brand_profiles_validate_against_schema() -> None:
+    schema = REPO_ROOT / SCHEMA_CONTRACTS["brand"]
+    for brand_path in sorted((REPO_ROOT / "brands").glob("*.yaml")):
+        brand = load_yaml(brand_path)
+        findings = schema_errors(
+            brand, schema, brand_path.relative_to(REPO_ROOT).as_posix()
+        )
+        assert not findings, f"{brand_path.name}: {findings}"
+
+
+def test_workflow_source_normalization_is_stable_and_removes_volatiles() -> None:
+    source = json.loads(
+        (REPO_ROOT / "n8n/exports/workflows/workflow-alpha.normalized.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    source["updatedAt"] = "2026-01-01T00:00:00Z"
+    source["nodes"][0]["position"] = [100, 200]
+    source["nodes"][0]["webhookId"] = "uuid-placeholder"
+
+    normalized, removed = normalize_workflow_source(source)
+    assert "$.updatedAt" in removed
+    assert "$.nodes[0].position" in removed
+    assert "$.nodes[0].webhookId" in removed
+    assert "$.updatedAt" not in normalized
+    assert "position" not in normalized["nodes"][0]
+    assert "webhookId" not in normalized["nodes"][0]
+
+    repeated, _ = normalize_workflow_source(normalized)
+    assert normalized == repeated
 
 
 def test_explicit_rfc1918_route_origin_is_valid(tmp_path: Path) -> None:

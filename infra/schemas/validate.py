@@ -21,95 +21,39 @@ PRIVATE_ORIGIN_NETWORKS = tuple(
     ipaddress.ip_network(network)
     for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7")
 )
-
-WORKFLOW_EXPORT_INDEX_SCHEMA = {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$id": "https://schemas.local/v1/workflow-export-index.schema.json",
-    "title": "Workflow export index version 1",
-    "type": "object",
-    "additionalProperties": False,
-    "required": ["schema_version", "workflows"],
-    "properties": {
-        "schema_version": {"const": 1},
-        "workflows": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": ["workflow_id", "project_id", "source_path", "source_commit"],
-                "properties": {
-                    "workflow_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
-                    "project_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
-                    "source_path": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"},
-                    "source_commit": {"type": "string", "minLength": 40, "maxLength": 40},
-                },
-            },
-            "uniqueItems": True,
-        },
-    },
+WORKFLOW_EXPORT_INDEX_SCHEMA_PATH = Path("n8n/workflow-export-index.schema.json")
+WORKFLOW_SOURCE_SCHEMA_PATH = Path("n8n/workflow-source.schema.json")
+WORKFLOW_TOPLEVEL_VOLATILE_FIELDS = {
+    "id",
+    "name",
+    "updatedat",
+    "updated_at",
+    "createdat",
+    "created_at",
+    "settings",
+    "active",
+    "tags",
+    "static_data",
+    "pin_data",
+    "notes",
+    "trigger_count",
+    "version_id",
+    "versionid",
+    "status",
 }
-
-WORKFLOW_SOURCE_SCHEMA = {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "$id": "https://schemas.local/v1/workflow-source.schema.json",
-    "title": "Workflow source contract version 1",
-    "type": "object",
-    "additionalProperties": False,
-    "required": [
-        "schema_version",
-        "workflow_id",
-        "project_id",
-        "brand_id",
-        "owner",
-        "stage",
-        "trigger",
-        "timeout_seconds",
-        "input_schema_id",
-        "output_schema_id",
-        "revision_key_template",
-        "idempotency_key_template",
-        "retention",
-        "nodes",
-    ],
-    "properties": {
-        "schema_version": {"const": 1},
-        "workflow_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
-        "project_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
-        "brand_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
-        "owner": {"type": "string", "minLength": 1},
-        "stage": {"enum": ["research", "ideation", "drafting", "approval", "publishing", "metrics"]},
-        "trigger": {"enum": ["manual", "webhook", "schedule", "event"]},
-        "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 1200},
-        "input_schema_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?:-[a-z0-9]+)*$"},
-        "output_schema_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?:-[a-z0-9]+)*$"},
-        "revision_key_template": {"type": "string", "minLength": 1},
-        "idempotency_key_template": {"type": "string", "minLength": 1},
-        "retention": {
-            "type": "object",
-            "additionalProperties": False,
-            "required": ["success_days", "failure_days", "owner"],
-            "properties": {
-                "success_days": {"type": "integer", "minimum": 0},
-                "failure_days": {"type": "integer", "minimum": 1},
-                "owner": {"type": "string", "minLength": 1},
-            },
-        },
-        "nodes": {
-            "type": "array",
-            "minItems": 1,
-            "items": {
-                "type": "object",
-                "additionalProperties": True,
-                "required": ["id", "type", "parameters"],
-                "properties": {
-                    "id": {"type": "string", "minLength": 1},
-                    "type": {"type": "string", "minLength": 1},
-                    "parameters": {"type": "object"},
-                },
-            },
-        },
-    },
+WORKFLOW_NODE_VOLATILE_FIELDS = {
+    "position",
+    "notes",
+    "typeversion",
+    "type_version",
+    "webhookid",
+    "webhook_id",
+    "disabled",
+    "alwaysoutputdata",
+    "continueonfail",
+    "onerror",
+    "retryonfail",
+    "maxtries",
 }
 
 REVISION_KEY_TEMPLATE = (
@@ -119,9 +63,19 @@ IDEMPOTENCY_KEY_TEMPLATE = (
     "project/{project_id}/brand/{brand_id}/content/{content_id}/revision/{revision}/"
     "{channel}/{scheduled_at}"
 )
-FORBIDDEN_WORKFLOW_KEYS = {"credential", "credentials", "api_key", "api-token", "token", "secret"}
+FORBIDDEN_WORKFLOW_KEY_FRAGMENTS = {
+    "credential",
+    "api",
+    "token",
+    "secret",
+    "auth",
+    "password",
+    "privatekey",
+}
 FORBIDDEN_WORKFLOW_TEXT = ("autonomous", "autopublish", "bangla text")
-PROMPT_FORBIDDEN_TEXT = ("autonomous", "autopublish", "bangla text", "ai avatar testimonials")
+PROMPT_NEGATION_WORDS = {"never", "not", "avoid", "avoiding", "forbid", "forbidden"}
+PROMPT_APPROVED_PUBLISH_POLICY = "human-approved-only"
+PROMPT_APPROVED_IMAGE_TEXT_POLICY = "overlay-only"
 
 SCHEMA_CONTRACTS = {
     "backup_adapter": "infra/schemas/backup-adapter.schema.json",
@@ -134,6 +88,8 @@ SCHEMA_CONTRACTS = {
     "prompt": "prompts/prompt.schema.json",
     "publisher_mapping": "stack/publisher/mapping.schema.json",
     "release": "infra/schemas/release.schema.json",
+    "workflow_export_index": "n8n/workflow-export-index.schema.json",
+    "workflow_source": "n8n/workflow-source.schema.json",
     "route": "infra/schemas/route.schema.json",
     "secret_catalog": "infra/schemas/secret-catalog.schema.json",
     "service": "infra/schemas/service.schema.json",
@@ -224,20 +180,31 @@ def schema_errors(
     return findings
 
 
-def inline_schema_errors(
-    document: dict[str, Any], schema: dict[str, Any], document_name: str
-) -> list[str]:
-    Draft202012Validator.check_schema(schema)
-    validator = Draft202012Validator(schema, format_checker=FormatChecker())
-    findings: list[str] = []
-    for error in sorted(
-        validator.iter_errors(document),
-        key=lambda item: [str(part) for part in item.absolute_path],
-    ):
-        location = ".".join(str(part) for part in error.absolute_path) or "$"
-        findings.append(f"{document_name}: schema at {location}: {error.message}")
-    return findings
+def _normalized_workflow_field_name(field: Any) -> str:
+    return "".join(ch for ch in str(field).lower() if ch.isalnum())
 
+
+def _is_forbidden_workflow_key(field: Any) -> bool:
+    normalized = _normalized_workflow_field_name(field)
+    return any(fragment in normalized for fragment in FORBIDDEN_WORKFLOW_KEY_FRAGMENTS)
+
+
+def _contains_forbidden_prompt_phrase(template: str, phrase: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9\s]+", " ", template.lower())
+    tokens = normalized.split()
+    phrase_tokens = phrase.split()
+    if not tokens or not phrase_tokens:
+        return False
+    n = len(phrase_tokens)
+    for index in range(len(tokens) - n + 1):
+        window = tokens[index : index + n]
+        if window != phrase_tokens:
+            continue
+        prefix = tokens[max(0, index - 4) : index]
+        if any(token in PROMPT_NEGATION_WORDS for token in prefix):
+            continue
+        return True
+    return False
 
 WORKFLOW_METADATA_KEYS = {
     "schema_version",
@@ -260,21 +227,20 @@ def scan_forbidden_workflow_fields(
     findings: list[str],
     *,
     forbidden_brand_names: set[str],
-    in_metadata: bool = False,
     path: str = "$",
 ) -> None:
     if isinstance(value, dict):
         for field, nested in value.items():
             field_lower = str(field).lower()
-            nested_in_metadata = in_metadata or field_lower in WORKFLOW_METADATA_KEYS
-            if field_lower in FORBIDDEN_WORKFLOW_KEYS:
-                findings.append(f"{principal}: forbidden credential field in workflow source at {path}.{field}")
+            if _is_forbidden_workflow_key(field_lower):
+                findings.append(
+                    f"{principal}: forbidden credential field in workflow source at {path}.{field}"
+                )
             scan_forbidden_workflow_fields(
                 nested,
                 principal,
                 findings,
                 forbidden_brand_names=forbidden_brand_names,
-                in_metadata=nested_in_metadata,
                 path=f"{path}.{str(field)}",
             )
     elif isinstance(value, list):
@@ -284,11 +250,10 @@ def scan_forbidden_workflow_fields(
                 principal,
                 findings,
                 forbidden_brand_names=forbidden_brand_names,
-                in_metadata=in_metadata,
                 path=f"{path}[{index}]",
             )
     elif isinstance(value, str):
-        if in_metadata:
+        if any(path == f"$.{metadata_key}" for metadata_key in WORKFLOW_METADATA_KEYS):
             return
         lowered = value.lower()
         if any(marker in lowered for marker in FORBIDDEN_WORKFLOW_TEXT):
@@ -308,17 +273,61 @@ def prompt_policy_errors(
     brand_names: set[str],
     findings: list[str],
 ) -> None:
+    safety = prompt["safety"]
+    if safety["publish_policy"] != PROMPT_APPROVED_PUBLISH_POLICY:
+        findings.append(
+            f"{prompt_id}: prompt safety publish_policy must be {PROMPT_APPROVED_PUBLISH_POLICY}"
+        )
+    if safety["image_text_policy"] != PROMPT_APPROVED_IMAGE_TEXT_POLICY:
+        findings.append(
+            f"{prompt_id}: prompt safety image_text_policy must be {PROMPT_APPROVED_IMAGE_TEXT_POLICY}"
+        )
+    template = prompt["template"]
+    if _contains_forbidden_prompt_phrase(template, "autonomous"):
+        findings.append(f"{prompt_id}: prompt contains forbidden keyword 'autonomous' in template")
+    if _contains_forbidden_prompt_phrase(template, "autonomously"):
+        findings.append(f"{prompt_id}: prompt contains forbidden keyword 'autonomous' in template")
+    if _contains_forbidden_prompt_phrase(template, "autopublish"):
+        findings.append(f"{prompt_id}: prompt contains forbidden keyword 'autopublish' in template")
+    if _contains_forbidden_prompt_phrase(template, "bangla text"):
+        findings.append(f"{prompt_id}: prompt contains forbidden keyword 'bangla text' in template")
     lowered_template = prompt["template"].lower()
-    for phrase in PROMPT_FORBIDDEN_TEXT:
-        if phrase in lowered_template:
-            findings.append(
-                f"{prompt_id}: prompt contains forbidden keyword '{phrase}' in template"
-            )
     for brand_name in sorted(brand_names):
         if brand_name and brand_name in lowered_template:
             findings.append(
                 f"{prompt_id}: prompt references prohibited brand slug '{brand_name}'"
             )
+
+
+def normalize_workflow_source(source: Any) -> tuple[dict[str, Any], list[str]]:
+    """Return a canonical workflow-source copy and a list of removed volatile fields."""
+
+    removed: list[str] = []
+
+    def _normalize(node: Any, path: str) -> Any:
+        if isinstance(node, dict):
+            items = sorted(node.items(), key=lambda item: str(item[0]))
+            result: dict[str, Any] = {}
+            for key, value in items:
+                field = str(key)
+                key_norm = _normalized_workflow_field_name(field)
+                normalized_path = f"{path}.{field}" if path else str(field)
+                if path == "$" and key_norm in WORKFLOW_TOPLEVEL_VOLATILE_FIELDS:
+                    removed.append(normalized_path)
+                    continue
+                if path.startswith("$.nodes[") and key_norm in WORKFLOW_NODE_VOLATILE_FIELDS:
+                    removed.append(normalized_path)
+                    continue
+                result[field] = _normalize(value, normalized_path)
+            return result
+        if isinstance(node, list):
+            return [_normalize(item, f"{path}[{index}]") for index, item in enumerate(node)]
+        return node
+
+    normalized = _normalize(source, "$")
+    if not isinstance(normalized, dict):
+        raise TypeError("workflow source payload must be a JSON object")
+    return normalized, removed
 
 
 def declared_schema_versions(root: Path) -> dict[str, int]:
@@ -481,10 +490,9 @@ def origin_policy_errors(
 
 def validate_cross_file(root: Path, bundle: Bundle) -> list[str]:
     findings: list[str] = []
-    source_root = root if (root / "n8n").is_dir() else root.parent
+    source_root = root
     if not (source_root / "n8n").is_dir():
         findings.append("n8n: workflow exports directory is missing")
-        source_root = root
 
     hosts = index_records(bundle.one("inventory.yml")["hosts"], "id", "inventory", findings)
     services = index_records(bundle.one("registry.yml")["services"], "id", "services", findings)
@@ -519,8 +527,10 @@ def validate_cross_file(root: Path, bundle: Bundle) -> list[str]:
         findings.append(f"n8n/exports/index.yml: cannot load YAML: {error}")
     else:
         findings.extend(
-            inline_schema_errors(
-                export_index, WORKFLOW_EXPORT_INDEX_SCHEMA, "n8n/exports/index.yml"
+            schema_errors(
+                export_index,
+                root / WORKFLOW_EXPORT_INDEX_SCHEMA_PATH,
+                "n8n/exports/index.yml",
             )
         )
         if isinstance(export_index, dict):
@@ -529,6 +539,21 @@ def validate_cross_file(root: Path, bundle: Bundle) -> list[str]:
                 workflow_exports = index_records(records, "workflow_id", "workflow export index", findings)
             else:
                 findings.append("n8n/exports/index.yml: workflows must be an array")
+
+    for workflow_id, workflow_export in workflow_exports.items():
+        if workflow_id not in workflows:
+            findings.append(
+                f"workflow export index: workflow {workflow_id} has no matching manifest"
+            )
+        if not COMMIT_RE.fullmatch(workflow_export["source_commit"]):
+            findings.append(
+                f"n8n/exports/index.yml: workflow {workflow_id} has invalid source_commit"
+            )
+        source_path = source_root / workflow_export["source_path"]
+        if not source_path.is_file():
+            findings.append(
+                f"n8n/exports/index.yml: workflow {workflow_id} references missing source_path"
+            )
 
     principal_projects: dict[str, str] = {}
     for label, principal_index in (
@@ -772,59 +797,77 @@ def validate_cross_file(root: Path, bundle: Bundle) -> list[str]:
             except (OSError, ValueError, json.JSONDecodeError) as error:
                 findings.append(f"{workflow_id}: workflow source is invalid: {error}")
             else:
+                normalized_source, removed_workflow_fields = normalize_workflow_source(source)
+                if removed_workflow_fields:
+                    findings.append(
+                        f"{workflow_id}: workflow source is not normalized at "
+                        f"{', '.join(sorted(removed_workflow_fields))}"
+                    )
                 findings.extend(
-                    inline_schema_errors(
-                        source,
-                        WORKFLOW_SOURCE_SCHEMA,
+                    schema_errors(
+                        normalized_source,
+                        root / WORKFLOW_SOURCE_SCHEMA_PATH,
                         workflow["source_path"],
                     )
                 )
-                if source.get("workflow_id") != workflow["workflow_id"]:
+                if normalized_source.get("workflow_id") != workflow["workflow_id"]:
                     findings.append(
                         f"{workflow_id}: workflow source workflow_id does not match manifest"
                     )
-                if source.get("project_id") != workflow["project_id"]:
+                if normalized_source.get("project_id") != workflow["project_id"]:
                     findings.append(
                         f"{workflow_id}: workflow source project_id does not match manifest"
                     )
-                if source.get("brand_id") != workflow["brand_id"]:
+                if normalized_source.get("brand_id") != workflow["brand_id"]:
                     findings.append(
                         f"{workflow_id}: workflow source brand_id does not match manifest"
                     )
-                if source.get("owner") != workflow["project_id"]:
+                if normalized_source.get("owner") != workflow["project_id"]:
                     findings.append(
                         f"{workflow_id}: workflow source owner must match project_id"
                     )
-                if source.get("stage") != workflow["stage"]:
+                if normalized_source.get("stage") != workflow["stage"]:
                     findings.append(
                         f"{workflow_id}: workflow source stage does not match manifest"
                     )
-                if source.get("trigger") != workflow["trigger"]:
+                if normalized_source.get("trigger") != workflow["trigger"]:
                     findings.append(
                         f"{workflow_id}: workflow source trigger does not match manifest"
                     )
-                if source.get("timeout_seconds") != workflow["timeout_seconds"]:
+                if normalized_source.get("timeout_seconds") != workflow["timeout_seconds"]:
                     findings.append(
                         f"{workflow_id}: workflow source timeout_seconds does not match manifest"
                     )
-                if source.get("input_schema_id") != workflow["input_schema_id"]:
+                if (
+                    normalized_source.get("input_schema_id")
+                    != workflow["input_schema_id"]
+                ):
                     findings.append(
                         f"{workflow_id}: workflow source input_schema_id does not match manifest"
                     )
-                if source.get("output_schema_id") != workflow["output_schema_id"]:
+                if (
+                    normalized_source.get("output_schema_id")
+                    != workflow["output_schema_id"]
+                ):
                     findings.append(
                         f"{workflow_id}: workflow source output_schema_id does not match manifest"
                     )
-                if source.get("revision_key_template") != REVISION_KEY_TEMPLATE:
+                if (
+                    normalized_source.get("revision_key_template")
+                    != REVISION_KEY_TEMPLATE
+                ):
                     findings.append(
                         f"{workflow_id}: workflow source revision_key_template must be {REVISION_KEY_TEMPLATE}"
                     )
-                if source.get("idempotency_key_template") != IDEMPOTENCY_KEY_TEMPLATE:
+                if (
+                    normalized_source.get("idempotency_key_template")
+                    != IDEMPOTENCY_KEY_TEMPLATE
+                ):
                     findings.append(
                         f"{workflow_id}: workflow source idempotency_key_template must be {IDEMPOTENCY_KEY_TEMPLATE}"
                     )
                 scan_forbidden_workflow_fields(
-                    source, workflow_id, findings, forbidden_brand_names=brand_names
+                    normalized_source, workflow_id, findings, forbidden_brand_names=brand_names
                 )
         credential_scope_errors(
             workflow_id,

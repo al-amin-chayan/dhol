@@ -71,7 +71,7 @@
       }
     },
     "max_tokens": {"type": "integer", "minimum": 1, "maximum": 4096},
-    "max_cost_usd": {"type": "number", "minimum": 0, "exclusiveMinimum": 0},
+    "max_cost_usd": {"type": "number", "minimum": 0, "exclusiveMinimum": 0, "maximum": 0.2},
     "retry_policy": {
       "type": "object",
       "additionalProperties": false,
@@ -84,7 +84,12 @@
     "safety": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["disallowed_claims", "required_disclosure_tags"],
+      "required": [
+        "disallowed_claims",
+        "required_disclosure_tags",
+        "publish_policy",
+        "image_text_policy"
+      ],
       "properties": {
         "disallowed_claims": {
           "type": "array",
@@ -98,6 +103,14 @@
           "items": {"type": "string", "pattern": "^[a-z0-9-]+$"},
           "contains": {"const": "ai-generated"},
           "uniqueItems": true
+        },
+        "publish_policy": {
+          "type": "string",
+          "const": "human-approved-only"
+        },
+        "image_text_policy": {
+          "type": "string",
+          "enum": ["overlay-only", "external-tools-only"]
         }
       }
     }

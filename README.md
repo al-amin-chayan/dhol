@@ -76,6 +76,8 @@ No per-project rebuild: adding a brand = adding a **brand profile**, not code.
 ## 4. Brand profile (the extension point)
 
 ```yaml
+schema_version: 1
+project_id: poripati      # owner for approvals, credentials, and workflow/project scope
 brand: poripati            # or w3exam, or any future project
 languages: [bn, en]        # bn-first for poripati
 niche: "salon & beauty services, Bangladesh"
@@ -90,7 +92,7 @@ channels:                  # Postiz workspace mapping
   threads: poripati.app    # via Postiz
   bluesky: poripati.app
 cadence: {reels: 3/wk, static: 1-2/wk}
-approval_channel: telegram:<chat-id>
+approval_channel: telegram:DHOLBEAT_PORIPATI_APPROVAL_CHANNEL
 visual: {palette: ..., logo: ..., fonts: ...}
 no_go: ["AI avatar testimonials", "medical claims", ...]
 ```
@@ -237,3 +239,4 @@ requires a fresh founder cost decision. See the linked IaC plan for thresholds.
 | 2026-08-14 | Founder approved `core-1` n8n as the central trusted workflow runtime for Dholbeat and registered founder-owned external workloads, initially PoriPati Track-1. Dholbeat owns runtime/security/recovery; each consumer repository owns its workflows and product rules. No separate PoriPati n8n stack is planned. |
 | 2026-08-14 | Generalized the two-host plan so shared tools are multi-project-ready from first deployment: manifest-scoped n8n consumers, one same-image Hermes container with a verified data/state boundary per project, and separate publisher organizations/workspaces. This is trusted logical/process separation with measured shared capacity, not universal tenant isolation; product applications, databases and Paperclip remain isolated. |
 | 2026-08-16 | Founder approved native auto-merge for `develop` and `main`, accepting that an exact-head opposite-model approval plus green required checks may merge without a separate final human merge click; the founder must still initiate every review round. |
+| 2026-08-17 | Issue #9: updated brand template and contract checks for prompt/publish policy safety, workflow source/index/schema validation, and prompt/brand documentation drift correction (`brands/README.md` §4, `_template.yaml`, `README.md`); added bounded-cost and workflow normalization checks in fixtures/tests. |

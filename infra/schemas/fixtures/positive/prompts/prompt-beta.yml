@@ -28,3 +28,5 @@ retry_policy:
 safety:
   disallowed_claims: [medical claims, unsupported claims]
   required_disclosure_tags: [ai-generated]
+  publish_policy: human-approved-only
+  image_text_policy: overlay-only
