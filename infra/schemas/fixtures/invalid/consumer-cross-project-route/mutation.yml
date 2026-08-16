@@ -1,0 +1,5 @@
+target: n8n-consumers/project-alpha.yml
+operation: set
+path: [route_ids]
+value: [route-beta]
+expected_error: "consumer-alpha: route route-beta belongs to another project"

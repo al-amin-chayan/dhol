@@ -1,4 +1,5 @@
 target: routes.yml
-operation: delete
-path: [routes, 0, access]
-expected_error: "'access' is a required property"
+operation: set
+path: [routes, 0, access, mode]
+value: machine-exception
+expected_error: "route-alpha: human route requires enforced Access"

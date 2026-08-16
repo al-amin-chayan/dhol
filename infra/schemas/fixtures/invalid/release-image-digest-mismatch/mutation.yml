@@ -1,0 +1,5 @@
+target: release.yml
+operation: set
+path: [images, 0, digest]
+value: sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+expected_error: "fixture-release-1: image receipt digest does not match image-alpha"

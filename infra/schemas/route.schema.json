@@ -33,8 +33,9 @@
           "origin": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["scheme", "host", "port"],
+            "required": ["kind", "scheme", "host", "port"],
             "properties": {
+              "kind": {"enum": ["loopback", "service", "private-address"]},
               "scheme": {"enum": ["http", "https"]},
               "host": {"type": "string", "minLength": 1},
               "port": {"type": "integer", "minimum": 1, "maximum": 65535}

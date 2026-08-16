@@ -8,7 +8,7 @@ routes:
     caller: human
     access: {mode: enforced, policy_id: access-alpha}
     allowed_methods: [GET, POST]
-    origin: {scheme: http, host: 127.0.0.1, port: 18081}
+    origin: {kind: loopback, scheme: http, host: 127.0.0.1, port: 18081}
     application_auth: fixture-session
     rate_limit: {requests: 60, period_seconds: 60}
     data_classification: internal
@@ -23,7 +23,7 @@ routes:
     caller: human
     access: {mode: enforced, policy_id: access-beta}
     allowed_methods: [GET, POST]
-    origin: {scheme: http, host: 127.0.0.1, port: 18082}
+    origin: {kind: loopback, scheme: http, host: 127.0.0.1, port: 18082}
     application_auth: fixture-session
     rate_limit: {requests: 60, period_seconds: 60}
     data_classification: internal

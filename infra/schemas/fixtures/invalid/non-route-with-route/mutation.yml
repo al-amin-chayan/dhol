@@ -1,0 +1,5 @@
+target: registry.yml
+operation: set
+path: [services, 0, exposure]
+value: loopback
+expected_error: "service-alpha: non-route exposure cannot declare public routes"

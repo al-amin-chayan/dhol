@@ -12,7 +12,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "project_id", "host_id", "compose_project", "source_dir", "image_id", "exposure", "route_ids", "volume_ids", "secret_ids", "writable_paths", "backup_adapter_id", "health_probe", "resources", "monitoring_owner", "rollback_command"],
+        "required": ["id", "project_id", "host_id", "compose_project", "source_dir", "image_id", "exposure", "private_origin_addresses", "route_ids", "volume_ids", "secret_ids", "writable_paths", "backup_adapter_id", "health_probe", "resources", "monitoring_owner", "rollback_command"],
         "properties": {
           "id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
           "project_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
@@ -21,6 +21,12 @@
           "source_dir": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"},
           "image_id": {"type": "string", "minLength": 1},
           "exposure": {"enum": ["none", "loopback", "private-network", "route"]},
+          "private_origin_addresses": {
+            "description": "Explicit RFC1918 or IPv6-ULA addresses owned by this service and usable by its routes.",
+            "type": "array",
+            "items": {"type": "string", "minLength": 1},
+            "uniqueItems": true
+          },
           "route_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
           "volume_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
           "secret_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},

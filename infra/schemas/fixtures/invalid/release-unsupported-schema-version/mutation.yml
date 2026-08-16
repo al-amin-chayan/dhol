@@ -1,0 +1,5 @@
+target: release.yml
+operation: set
+path: [schema_versions, workflow]
+value: 2
+expected_error: "fixture-release-1: unsupported workflow schema version 2"

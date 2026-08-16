@@ -7,6 +7,7 @@ services:
     source_dir: stack/fixtures/alpha
     image_id: image-alpha
     exposure: route
+    private_origin_addresses: [172.18.0.2]
     route_ids: [route-alpha]
     volume_ids: [volume-alpha]
     secret_ids: [secret-alpha-api]
@@ -27,6 +28,7 @@ services:
     source_dir: stack/fixtures/beta
     image_id: image-beta
     exposure: route
+    private_origin_addresses: [172.18.0.3]
     route_ids: [route-beta]
     volume_ids: [volume-beta]
     secret_ids: [secret-beta-api]

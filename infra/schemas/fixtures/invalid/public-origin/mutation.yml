@@ -2,4 +2,4 @@ target: routes.yml
 operation: set
 path: [routes, 0, origin, host]
 value: 0.0.0.0
-expected_error: "route-alpha: public origin 0.0.0.0 is forbidden"
+expected_error: "route-alpha: loopback origin 0.0.0.0 is forbidden"

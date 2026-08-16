@@ -1,4 +1,4 @@
 target: registry.yml
 operation: delete
 path: [services, 0, resources, logs]
-expected_error: "'logs' is a required property"
+expected_error: "registry.yml: schema at services.0.resources: 'logs' is a required property"

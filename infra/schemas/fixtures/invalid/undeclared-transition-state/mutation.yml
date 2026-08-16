@@ -1,0 +1,5 @@
+target: workflows/workflow-alpha.yml
+operation: set
+path: [transitions, 0, from]
+value: missing-state
+expected_error: "workflow-alpha: transition references an undeclared state"

@@ -6,3 +6,9 @@ hosts:
     os: ubuntu-24.04
     service_ids: [service-alpha, service-beta]
     owner: fixture-operations
+  - id: fixture-publisher
+    role: fixture
+    hostname: fixture-publisher.example.test
+    os: ubuntu-24.04
+    service_ids: []
+    owner: fixture-operations

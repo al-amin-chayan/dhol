@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import shutil
 import sys
@@ -16,8 +17,7 @@ INVALID = SCHEMA_DIR / "fixtures/invalid"
 sys.path.insert(0, str(SCHEMA_DIR))
 
 from validate import (  # noqa: E402
-    DIRECTORY_SCHEMAS,
-    FILE_SCHEMAS,
+    SCHEMA_CONTRACTS,
     normalized_bundle,
     validate_bundle,
     validate_registries,
@@ -33,30 +33,54 @@ def load_yaml(path: Path) -> dict:
 
 def apply_mutation(bundle: Path, fixture: Path) -> str:
     mutation = load_yaml(fixture / "mutation.yml")
-    target = bundle / mutation["target"]
-    document = load_yaml(target)
-    cursor = document
-    path = mutation["path"]
-    for part in path[:-1]:
-        cursor = cursor[part]
-    if mutation["operation"] == "set":
-        cursor[path[-1]] = mutation.get("value")
-    elif mutation["operation"] == "delete":
-        del cursor[path[-1]]
-    else:
-        raise AssertionError(f"unknown fixture mutation operation: {mutation['operation']}")
-    target.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+    operations = mutation.get("mutations", [mutation])
+    for operation in operations:
+        target = bundle / operation["target"]
+        document = load_yaml(target)
+        cursor = document
+        path = operation["path"]
+        for part in path[:-1]:
+            cursor = cursor[part]
+        if operation["operation"] == "set":
+            cursor[path[-1]] = operation.get("value")
+        elif operation["operation"] == "delete":
+            del cursor[path[-1]]
+        else:
+            raise AssertionError(
+                f"unknown fixture mutation operation: {operation['operation']}"
+            )
+        target.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
     return mutation["expected_error"]
 
 
+def repository_schema_paths(root: Path) -> set[Path]:
+    skipped = {".artifacts", ".controller-cache", ".git", ".worktrees"}
+    schemas: set[Path] = set()
+    for directory, names, filenames in os.walk(root):
+        names[:] = sorted(name for name in names if name not in skipped)
+        base = Path(directory)
+        schemas.update(base / name for name in filenames if name.endswith(".schema.json"))
+    return schemas
+
+
 def test_schema_inventory_is_versioned_and_complete() -> None:
-    expected = {Path(path).name for path in [*FILE_SCHEMAS.values(), *DIRECTORY_SCHEMAS.values()]}
-    actual = {path.name for path in REPO_ROOT.rglob("*.schema.json")}
+    expected = {REPO_ROOT / path for path in SCHEMA_CONTRACTS.values()}
+    actual = repository_schema_paths(REPO_ROOT)
     assert actual == expected
-    for schema_path in REPO_ROOT.rglob("*.schema.json"):
+    for schema_path in sorted(actual):
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
         assert "/v1/" in schema["$id"]
         assert schema["properties"]["schema_version"]["const"] == 1
+
+
+def test_schema_inventory_ignores_other_worktrees(tmp_path: Path) -> None:
+    local = tmp_path / "infra/schemas/local.schema.json"
+    foreign = tmp_path / ".worktrees/other/foreign.schema.json"
+    local.parent.mkdir(parents=True)
+    foreign.parent.mkdir(parents=True)
+    local.write_text("{}\n", encoding="utf-8")
+    foreign.write_text("{}\n", encoding="utf-8")
+    assert repository_schema_paths(tmp_path) == {local}
 
 
 def test_empty_desired_state_registries_are_valid_and_idempotent() -> None:
@@ -89,6 +113,23 @@ def test_two_project_positive_bundle_is_valid_and_round_trips_deterministically(
     )
 
 
+def test_explicit_rfc1918_route_origin_is_valid(tmp_path: Path) -> None:
+    bundle_path = tmp_path / "bundle"
+    shutil.copytree(POSITIVE, bundle_path)
+    routes = load_yaml(bundle_path / "routes.yml")
+    routes["routes"][0]["origin"] = {
+        "kind": "private-address",
+        "scheme": "http",
+        "host": "172.18.0.2",
+        "port": 18081,
+    }
+    (bundle_path / "routes.yml").write_text(
+        yaml.safe_dump(routes, sort_keys=False), encoding="utf-8"
+    )
+    _, findings = validate_bundle(REPO_ROOT, bundle_path)
+    assert findings == []
+
+
 INVALID_CASES = sorted(path for path in INVALID.iterdir() if path.is_dir())
 
 
@@ -99,7 +140,7 @@ def test_invalid_fixture_fails_for_its_intended_reason(tmp_path: Path, fixture: 
     expected_error = apply_mutation(bundle_path, fixture)
     _, findings = validate_bundle(REPO_ROOT, bundle_path)
     assert findings, f"{fixture.name} unexpectedly validated"
-    assert any(expected_error in finding for finding in findings), findings
+    assert expected_error in findings, findings
     assert all("cannot load YAML" not in finding for finding in findings)
 
 

@@ -1,0 +1,5 @@
+target: routes.yml
+operation: set
+path: [routes, 0, origin]
+value: {kind: service, scheme: http, host: attacker-box, port: 18081}
+expected_error: "route-alpha: origin service attacker-box must match service-alpha"

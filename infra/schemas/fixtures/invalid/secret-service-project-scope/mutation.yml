@@ -1,0 +1,5 @@
+target: secrets.yml
+operation: set
+path: [secrets, 0, allowed_service_ids]
+value: [service-beta]
+expected_error: "secret-alpha-api: allowed service service-beta has no allowed project scope"

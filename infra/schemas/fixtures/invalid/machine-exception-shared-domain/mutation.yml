@@ -1,0 +1,14 @@
+mutations:
+  - target: routes.yml
+    operation: set
+    path: [routes, 1, caller]
+    value: machine
+  - target: routes.yml
+    operation: set
+    path: [routes, 1, access, mode]
+    value: machine-exception
+  - target: routes.yml
+    operation: set
+    path: [routes, 1, domain_id]
+    value: alpha-admin
+expected_error: "routes: machine exception shares human administration domain alpha-admin"

@@ -1,0 +1,5 @@
+target: inventory.yml
+operation: set
+path: [hosts, 0, service_ids]
+value: [service-beta]
+expected_error: "service-alpha: host fixture-core does not list this service"

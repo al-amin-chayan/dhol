@@ -16,58 +16,64 @@ import yaml
 
 
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
-SCHEMA_VERSION_KEYS = {
-    "backup_adapter",
-    "brand",
-    "domain",
-    "hermes_project",
-    "image",
-    "inventory",
-    "n8n_consumer",
-    "prompt",
-    "publisher_mapping",
-    "release",
-    "route",
-    "secret_catalog",
-    "service",
-    "volume",
-    "workflow",
+PRIVATE_ORIGIN_NETWORKS = tuple(
+    ipaddress.ip_network(network)
+    for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7")
+)
+
+SCHEMA_CONTRACTS = {
+    "backup_adapter": "infra/schemas/backup-adapter.schema.json",
+    "brand": "brands/brand.schema.json",
+    "domain": "infra/schemas/domain.schema.json",
+    "hermes_project": "stack/hermes/projects/project.schema.json",
+    "image": "infra/schemas/image.schema.json",
+    "inventory": "infra/schemas/inventory.schema.json",
+    "n8n_consumer": "n8n/consumers/consumer.schema.json",
+    "prompt": "prompts/prompt.schema.json",
+    "publisher_mapping": "stack/publisher/mapping.schema.json",
+    "release": "infra/schemas/release.schema.json",
+    "route": "infra/schemas/route.schema.json",
+    "secret_catalog": "infra/schemas/secret-catalog.schema.json",
+    "service": "infra/schemas/service.schema.json",
+    "volume": "infra/schemas/volume.schema.json",
+    "workflow": "n8n/workflow.schema.json",
 }
 
 FILE_SCHEMAS = {
-    "inventory.yml": "infra/schemas/inventory.schema.json",
-    "registry.yml": "infra/schemas/service.schema.json",
-    "images.lock.yml": "infra/schemas/image.schema.json",
-    "domains.yml": "infra/schemas/domain.schema.json",
-    "routes.yml": "infra/schemas/route.schema.json",
-    "volumes.yml": "infra/schemas/volume.schema.json",
-    "backup-adapters.yml": "infra/schemas/backup-adapter.schema.json",
-    "secrets.yml": "infra/schemas/secret-catalog.schema.json",
-    "release.yml": "infra/schemas/release.schema.json",
+    "inventory.yml": SCHEMA_CONTRACTS["inventory"],
+    "registry.yml": SCHEMA_CONTRACTS["service"],
+    "images.lock.yml": SCHEMA_CONTRACTS["image"],
+    "domains.yml": SCHEMA_CONTRACTS["domain"],
+    "routes.yml": SCHEMA_CONTRACTS["route"],
+    "volumes.yml": SCHEMA_CONTRACTS["volume"],
+    "backup-adapters.yml": SCHEMA_CONTRACTS["backup_adapter"],
+    "secrets.yml": SCHEMA_CONTRACTS["secret_catalog"],
+    "release.yml": SCHEMA_CONTRACTS["release"],
 }
 
 DIRECTORY_SCHEMAS = {
-    "brands": "brands/brand.schema.json",
-    "prompts": "prompts/prompt.schema.json",
-    "workflows": "n8n/workflow.schema.json",
-    "n8n-consumers": "n8n/consumers/consumer.schema.json",
-    "hermes-projects": "stack/hermes/projects/project.schema.json",
-    "publisher-mappings": "stack/publisher/mapping.schema.json",
+    "brands": SCHEMA_CONTRACTS["brand"],
+    "prompts": SCHEMA_CONTRACTS["prompt"],
+    "workflows": SCHEMA_CONTRACTS["workflow"],
+    "n8n-consumers": SCHEMA_CONTRACTS["n8n_consumer"],
+    "hermes-projects": SCHEMA_CONTRACTS["hermes_project"],
+    "publisher-mappings": SCHEMA_CONTRACTS["publisher_mapping"],
 }
 
 REGISTRY_SCHEMAS = {
-    "infra/services/registry.yml": "infra/schemas/service.schema.json",
-    "infra/services/images.lock.yml": "infra/schemas/image.schema.json",
-    "infra/services/domains.yml": "infra/schemas/domain.schema.json",
-    "infra/services/routes.yml": "infra/schemas/route.schema.json",
-    "infra/services/volumes.yml": "infra/schemas/volume.schema.json",
-    "infra/services/backup-adapters.yml": "infra/schemas/backup-adapter.schema.json",
+    "infra/services/registry.yml": SCHEMA_CONTRACTS["service"],
+    "infra/services/images.lock.yml": SCHEMA_CONTRACTS["image"],
+    "infra/services/domains.yml": SCHEMA_CONTRACTS["domain"],
+    "infra/services/routes.yml": SCHEMA_CONTRACTS["route"],
+    "infra/services/volumes.yml": SCHEMA_CONTRACTS["volume"],
+    "infra/services/backup-adapters.yml": SCHEMA_CONTRACTS["backup_adapter"],
 }
 
 
 @dataclass(frozen=True)
 class Bundle:
     documents: dict[str, dict[str, Any]]
+    schema_versions: dict[str, int]
 
     def one(self, name: str) -> dict[str, Any]:
         return self.documents[name]
@@ -108,6 +114,14 @@ def schema_errors(
     return findings
 
 
+def declared_schema_versions(root: Path) -> dict[str, int]:
+    versions: dict[str, int] = {}
+    for contract, relative_path in SCHEMA_CONTRACTS.items():
+        schema = json.loads((root / relative_path).read_text(encoding="utf-8"))
+        versions[contract] = int(schema["properties"]["schema_version"]["const"])
+    return versions
+
+
 def load_bundle(root: Path, bundle_path: Path) -> tuple[Bundle | None, list[str]]:
     documents: dict[str, dict[str, Any]] = {}
     findings: list[str] = []
@@ -142,7 +156,7 @@ def load_bundle(root: Path, bundle_path: Path) -> tuple[Bundle | None, list[str]
 
     if findings:
         return None, sorted(findings)
-    return Bundle(documents), []
+    return Bundle(documents, declared_schema_versions(root)), []
 
 
 def index_records(
@@ -152,7 +166,9 @@ def index_records(
     for record in records:
         identifier = str(record[key])
         if identifier in index:
-            findings.append(f"{label}: duplicate ID {identifier}")
+            findings.append(
+                f"{label}: duplicate ID {identifier}; subsequent definition skipped from reference checks"
+            )
         else:
             index[identifier] = record
     return index
@@ -181,7 +197,7 @@ def require_reference(
 
 
 def credential_scope_errors(
-    owner: str,
+    principal_id: str,
     project_id: str,
     service_id: str | None,
     credential_ids: Iterable[str],
@@ -189,31 +205,68 @@ def credential_scope_errors(
     findings: list[str],
 ) -> None:
     for secret_id in credential_ids:
-        secret = require_reference(owner, "credential_ids", secret_id, secrets, "secret", findings)
+        secret = require_reference(
+            principal_id, "credential_ids", secret_id, secrets, "secret", findings
+        )
         if secret is None:
             continue
         if project_id not in secret["allowed_project_ids"]:
             findings.append(
-                f"{owner}: cross-project credential {secret_id} is not allowed for {project_id}"
+                f"{principal_id}: cross-project credential {secret_id} is not allowed for {project_id}"
             )
         if secret["owner_project_id"] not in {"platform", project_id}:
             findings.append(
-                f"{owner}: cross-project credential {secret_id} is owned by {secret['owner_project_id']}"
+                f"{principal_id}: cross-project credential {secret_id} is owned by {secret['owner_project_id']}"
+            )
+        if principal_id not in secret["allowed_principal_ids"]:
+            findings.append(
+                f"{principal_id}: credential {secret_id} is not allowed for principal {principal_id}"
             )
         if service_id is not None and service_id not in secret["allowed_service_ids"]:
             findings.append(
-                f"{owner}: credential {secret_id} is not allowed for service {service_id}"
+                f"{principal_id}: credential {secret_id} is not allowed for service {service_id}"
             )
 
 
-def public_origin(host: str, service_ids: set[str]) -> bool:
-    if host in {"localhost", "127.0.0.1", "::1"} or host in service_ids:
-        return False
+def private_origin_address(host: str) -> bool:
     try:
         address = ipaddress.ip_address(host)
     except ValueError:
-        return "." in host
-    return not address.is_loopback
+        return False
+    return any(address in network for network in PRIVATE_ORIGIN_NETWORKS)
+
+
+def origin_policy_errors(
+    route_id: str,
+    origin: dict[str, Any],
+    service_id: str,
+    allowed_private_addresses: set[str],
+) -> list[str]:
+    host = origin["host"]
+    kind = origin["kind"]
+    if kind == "service":
+        if host != service_id:
+            return [f"{route_id}: origin service {host} must match {service_id}"]
+        return []
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        if kind == "loopback" and host == "localhost":
+            return []
+        return [f"{route_id}: unknown {kind} origin host {host}"]
+    if kind == "loopback":
+        if address.is_loopback:
+            return []
+        return [f"{route_id}: loopback origin {host} is forbidden"]
+    if kind == "private-address":
+        if not private_origin_address(host):
+            return [
+                f"{route_id}: private-address origin {host} is outside declared private networks"
+            ]
+        if host not in allowed_private_addresses:
+            return [f"{route_id}: private-address origin {host} is not declared by {service_id}"]
+        return []
+    return [f"{route_id}: unsupported origin kind {kind}"]
 
 
 def validate_cross_file(bundle: Bundle) -> list[str]:
@@ -243,6 +296,20 @@ def validate_cross_file(bundle: Bundle) -> list[str]:
     publisher_mappings = component_index(
         bundle, "publisher-mappings", "mapping_id", "publisher mappings", findings
     )
+    principal_projects: dict[str, str] = {}
+    for label, principal_index in (
+        ("service", services),
+        ("brand", brands),
+        ("workflow", workflows),
+        ("n8n consumer", consumers),
+        ("Hermes project", hermes_projects),
+        ("publisher mapping", publisher_mappings),
+    ):
+        for principal_id, principal in principal_index.items():
+            if principal_id in principal_projects:
+                findings.append(f"principals: duplicate principal ID {principal_id} at {label}")
+            else:
+                principal_projects[principal_id] = principal["project_id"]
     for host_id, host in hosts.items():
         for service_id in host["service_ids"]:
             service = require_reference(host_id, "service_ids", service_id, services, "service", findings)
@@ -266,6 +333,11 @@ def validate_cross_file(bundle: Bundle) -> list[str]:
             findings.append(
                 f"{service_id}: backup adapter {backup['id']} is owned by {backup['owner']}"
             )
+        for address in service["private_origin_addresses"]:
+            if not private_origin_address(address):
+                findings.append(
+                    f"{service_id}: private origin address {address} is outside declared private networks"
+                )
 
         service_routes: list[dict[str, Any]] = []
         for route_id in service["route_ids"]:
@@ -320,8 +392,17 @@ def validate_cross_file(bundle: Bundle) -> list[str]:
             findings.append(f"{route_id}: route and service have different owners")
         if service is not None and route["retention_owner"] != service["project_id"]:
             findings.append(f"{route_id}: route retention and service have different owners")
-        if public_origin(route["origin"]["host"], set(services)):
-            findings.append(f"{route_id}: public origin {route['origin']['host']} is forbidden")
+        allowed_private_addresses = (
+            set(service["private_origin_addresses"]) if service is not None else set()
+        )
+        findings.extend(
+            origin_policy_errors(
+                route_id,
+                route["origin"],
+                route["service_id"],
+                allowed_private_addresses,
+            )
+        )
         if route["caller"] == "human":
             human_domains.add(route["domain_id"])
             if route["access"]["mode"] != "enforced":
@@ -353,6 +434,16 @@ def validate_cross_file(bundle: Bundle) -> list[str]:
                 )
 
     for secret_id, secret in secrets.items():
+        for principal_id in secret["allowed_principal_ids"]:
+            principal_project = principal_projects.get(principal_id)
+            if principal_project is None:
+                findings.append(
+                    f"{secret_id}: allowed_principal_ids references unknown principal {principal_id}"
+                )
+            elif principal_project not in secret["allowed_project_ids"]:
+                findings.append(
+                    f"{secret_id}: allowed principal {principal_id} has no allowed project scope"
+                )
         for service_id in secret["allowed_service_ids"]:
             allowed_service = require_reference(
                 secret_id,
@@ -368,6 +459,10 @@ def validate_cross_file(bundle: Bundle) -> list[str]:
             ):
                 findings.append(
                     f"{secret_id}: allowed service {service_id} has no allowed project scope"
+                )
+            if service_id not in secret["allowed_principal_ids"]:
+                findings.append(
+                    f"{secret_id}: allowed service {service_id} is missing from allowed principals"
                 )
 
     for brand_id, brand in brands.items():
@@ -427,7 +522,7 @@ def validate_cross_file(bundle: Bundle) -> list[str]:
                 findings.append(f"{consumer_id}: route {route_id} belongs to another project")
 
     seen_data_mounts: dict[str, str] = {}
-    seen_workspaces: dict[str, str] = {}
+    seen_hermes_workspaces: dict[str, str] = {}
     seen_states: dict[str, str] = {}
     for hermes_id, project in hermes_projects.items():
         if not COMMIT_RE.fullmatch(project["source_commit"]):
@@ -442,7 +537,7 @@ def validate_cross_file(bundle: Bundle) -> list[str]:
         )
         for field, seen, label in (
             ("data_mount", seen_data_mounts, "data mount"),
-            ("workspace_mount", seen_workspaces, "workspace mount"),
+            ("workspace_mount", seen_hermes_workspaces, "workspace mount"),
         ):
             value = project[field]
             if value in seen:
@@ -470,7 +565,7 @@ def validate_cross_file(bundle: Bundle) -> list[str]:
                 findings.append(f"{hermes_id}: backup adapter {adapter_id} belongs to another project")
 
     seen_organizations: dict[str, str] = {}
-    seen_workspaces: dict[str, str] = {}
+    seen_publisher_workspaces: dict[str, str] = {}
     seen_accounts: dict[str, str] = {}
     for mapping_id, mapping in publisher_mappings.items():
         credential_scope_errors(
@@ -483,7 +578,7 @@ def validate_cross_file(bundle: Bundle) -> list[str]:
         )
         for field, seen in (
             ("organization_id", seen_organizations),
-            ("workspace_id", seen_workspaces),
+            ("workspace_id", seen_publisher_workspaces),
         ):
             value = mapping[field]
             if value in seen:
@@ -503,14 +598,15 @@ def validate_cross_file(bundle: Bundle) -> list[str]:
 
     release = bundle.one("release.yml")
     release_versions = release["schema_versions"]
-    missing_versions = SCHEMA_VERSION_KEYS - set(release_versions)
-    unknown_versions = set(release_versions) - SCHEMA_VERSION_KEYS
+    expected_versions = bundle.schema_versions
+    missing_versions = set(expected_versions) - set(release_versions)
+    unknown_versions = set(release_versions) - set(expected_versions)
     for schema_name in sorted(missing_versions):
         findings.append(f"{release['release_id']}: missing schema version {schema_name}")
     for schema_name in sorted(unknown_versions):
         findings.append(f"{release['release_id']}: unknown schema version {schema_name}")
     for schema_name, version in release_versions.items():
-        if schema_name in SCHEMA_VERSION_KEYS and version != 1:
+        if schema_name in expected_versions and version != expected_versions[schema_name]:
             findings.append(
                 f"{release['release_id']}: unsupported {schema_name} schema version {version}"
             )
