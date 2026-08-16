@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.dholbeat.local/v1/hermes-project.schema.json",
+  "title": "Hermes project manifest version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "hermes_project_id", "project_id", "profile_id", "owner", "repository", "config_path", "source_commit", "credential_ids", "data_mount", "workspace_mount", "state_backend", "allowed_tools", "allowed_paths", "allowed_commands", "outbound_hosts", "trigger_types", "caller_ids", "schedules", "max_runtime_seconds", "expected_jobs_per_day", "alert_destination", "incident_contact", "resources", "priority", "data_classification", "retention", "backup", "commands", "activation_conditions"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "hermes_project_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+    "project_id": {"type": "string", "minLength": 1},
+    "profile_id": {"type": "string", "minLength": 1},
+    "owner": {"type": "string", "minLength": 1},
+    "repository": {"type": "string", "format": "uri", "pattern": "^https://"},
+    "config_path": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"},
+    "source_commit": {"type": "string", "minLength": 1},
+    "credential_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "data_mount": {"type": "string", "pattern": "^/"},
+    "workspace_mount": {"type": "string", "pattern": "^/"},
+    "state_backend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "path"],
+      "properties": {
+        "type": {"const": "local"},
+        "path": {"type": "string", "pattern": "^/"}
+      }
+    },
+    "allowed_tools": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "allowed_paths": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^/"}, "uniqueItems": true},
+    "allowed_commands": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "outbound_hosts": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "trigger_types": {"type": "array", "items": {"enum": ["schedule", "manual", "telegram"]}, "uniqueItems": true},
+    "caller_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "schedules": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "max_runtime_seconds": {"type": "integer", "minimum": 1, "maximum": 3600},
+    "expected_jobs_per_day": {"type": "integer", "minimum": 0},
+    "alert_destination": {"type": "string", "minLength": 1},
+    "incident_contact": {"type": "string", "minLength": 1},
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["memory_mb", "cpus", "pids"],
+      "properties": {
+        "memory_mb": {"type": "integer", "minimum": 64, "maximum": 2048},
+        "cpus": {"type": "number", "exclusiveMinimum": 0},
+        "pids": {"type": "integer", "minimum": 1}
+      }
+    },
+    "priority": {"type": "integer", "minimum": 1},
+    "data_classification": {"enum": ["public", "internal", "confidential", "pii"]},
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session_days", "memory_days", "log_days", "deletion_trigger"],
+      "properties": {
+        "session_days": {"type": "integer", "minimum": 1},
+        "memory_days": {"type": "integer", "minimum": 1},
+        "log_days": {"type": "integer", "minimum": 1},
+        "deletion_trigger": {"type": "string", "minLength": 1}
+      }
+    },
+    "backup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["classification", "adapter_id"],
+      "properties": {
+        "classification": {"enum": ["rebuildable", "ephemeral", "retained"]},
+        "adapter_id": {"type": ["string", "null"]}
+      }
+    },
+    "commands": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["import", "smoke_test", "rollback", "restore"],
+      "properties": {
+        "import": {"type": "string", "minLength": 1},
+        "smoke_test": {"type": "string", "minLength": 1},
+        "rollback": {"type": "string", "minLength": 1},
+        "restore": {"type": "string", "minLength": 1}
+      }
+    },
+    "activation_conditions": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}, "uniqueItems": true}
+  }
+}

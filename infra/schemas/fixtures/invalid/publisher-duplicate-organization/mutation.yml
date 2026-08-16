@@ -1,0 +1,5 @@
+target: publisher-mappings/project-beta.yml
+operation: set
+path: [organization_id]
+value: fixture-org-alpha
+expected_error: "publisher-beta: duplicate publisher organization_id fixture-org-alpha"

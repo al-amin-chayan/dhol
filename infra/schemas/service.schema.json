@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.dholbeat.local/v1/service.schema.json",
+  "title": "Service registry version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "services"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "services": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "project_id", "host_id", "compose_project", "source_dir", "image_id", "exposure", "private_origin_addresses", "route_ids", "volume_ids", "secret_ids", "writable_paths", "backup_adapter_id", "health_probe", "resources", "monitoring_owner", "rollback_command"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+          "project_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+          "host_id": {"type": "string", "minLength": 1},
+          "compose_project": {"type": "string", "pattern": "^[a-z][a-z0-9_-]*$"},
+          "source_dir": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"},
+          "image_id": {"type": "string", "minLength": 1},
+          "exposure": {"enum": ["none", "loopback", "private-network", "route"]},
+          "private_origin_addresses": {
+            "description": "Explicit RFC1918 or IPv6-ULA addresses owned by this service and usable by its routes.",
+            "type": "array",
+            "items": {"type": "string", "minLength": 1},
+            "uniqueItems": true
+          },
+          "route_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+          "volume_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+          "secret_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+          "writable_paths": {"type": "array", "items": {"type": "string", "pattern": "^/"}, "uniqueItems": true},
+          "backup_adapter_id": {"type": "string", "minLength": 1},
+          "health_probe": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "target"],
+            "properties": {
+              "type": {"enum": ["http", "command", "tcp"]},
+              "target": {"type": "string", "minLength": 1}
+            }
+          },
+          "resources": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["cpus", "memory_mb", "pids", "logs"],
+            "properties": {
+              "cpus": {"type": "number", "exclusiveMinimum": 0},
+              "memory_mb": {"type": "integer", "minimum": 32},
+              "pids": {"type": "integer", "minimum": 1},
+              "logs": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["driver", "max_size_mb", "max_files"],
+                "properties": {
+                  "driver": {"const": "json-file"},
+                  "max_size_mb": {"type": "integer", "minimum": 1},
+                  "max_files": {"type": "integer", "minimum": 1}
+                }
+              }
+            }
+          },
+          "monitoring_owner": {"type": "string", "minLength": 1},
+          "rollback_command": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

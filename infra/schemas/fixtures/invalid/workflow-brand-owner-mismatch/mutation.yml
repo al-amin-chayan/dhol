@@ -1,0 +1,5 @@
+target: workflows/workflow-alpha.yml
+operation: set
+path: [brand_id]
+value: brand-beta
+expected_error: "workflow-alpha: workflow and brand have different owners"

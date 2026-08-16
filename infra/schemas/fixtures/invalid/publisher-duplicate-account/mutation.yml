@@ -1,0 +1,5 @@
+target: publisher-mappings/project-beta.yml
+operation: set
+path: [brands, 0, account_ids]
+value: [fixture-alpha-social]
+expected_error: "publisher-beta: publisher account fixture-alpha-social has duplicate ownership"

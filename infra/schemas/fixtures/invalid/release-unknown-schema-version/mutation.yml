@@ -1,0 +1,5 @@
+target: release.yml
+operation: set
+path: [schema_versions, unknown_contract]
+value: 1
+expected_error: "fixture-release-1: unknown schema version unknown_contract"

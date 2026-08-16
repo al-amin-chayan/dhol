@@ -1,0 +1,5 @@
+target: hermes-projects/project-beta.yml
+operation: set
+path: [state_backend, path]
+value: /srv/fixtures/project-alpha/hermes/state/state.db
+expected_error: "hermes-beta: shared Hermes state /srv/fixtures/project-alpha/hermes/state/state.db with hermes-alpha"

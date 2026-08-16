@@ -1,0 +1,5 @@
+target: n8n-consumers/project-alpha.yml
+operation: set
+path: [source_commit]
+value: main
+expected_error: "consumer-alpha: floating source ref main is forbidden"

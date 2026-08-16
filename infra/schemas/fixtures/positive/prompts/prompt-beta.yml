@@ -1,0 +1,8 @@
+schema_version: 1
+prompt_id: prompt-beta
+scope: generic
+stage: research
+template: "Summarize fixture signals using {{ brand_profile }} and {{ evidence }}."
+input_keys: [brand_profile, evidence]
+output_contract: fixture-research-v1
+prohibited_outputs: [AI avatar testimonials, unsupported claims]

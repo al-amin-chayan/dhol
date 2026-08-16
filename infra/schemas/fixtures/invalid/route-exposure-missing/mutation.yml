@@ -1,0 +1,5 @@
+target: registry.yml
+operation: set
+path: [services, 0, route_ids]
+value: []
+expected_error: "service-alpha: route exposure requires a declared route"

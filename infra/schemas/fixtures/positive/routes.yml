@@ -1,0 +1,32 @@
+schema_version: 1
+routes:
+  - id: route-alpha
+    service_id: service-alpha
+    host_id: fixture-core
+    domain_id: alpha-admin
+    path: /
+    caller: human
+    access: {mode: enforced, policy_id: access-alpha}
+    allowed_methods: [GET, POST]
+    origin: {kind: loopback, scheme: http, host: 127.0.0.1, port: 18081}
+    application_auth: fixture-session
+    rate_limit: {requests: 60, period_seconds: 60}
+    data_classification: internal
+    retention_owner: project-alpha
+    negative_probes: [deny-without-access, deny-public-origin]
+    owner: project-alpha
+  - id: route-beta
+    service_id: service-beta
+    host_id: fixture-core
+    domain_id: beta-admin
+    path: /
+    caller: human
+    access: {mode: enforced, policy_id: access-beta}
+    allowed_methods: [GET, POST]
+    origin: {kind: loopback, scheme: http, host: 127.0.0.1, port: 18082}
+    application_auth: fixture-session
+    rate_limit: {requests: 60, period_seconds: 60}
+    data_classification: internal
+    retention_owner: project-beta
+    negative_probes: [deny-without-access, deny-public-origin]
+    owner: project-beta

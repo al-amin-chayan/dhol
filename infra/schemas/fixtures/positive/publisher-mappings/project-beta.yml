@@ -1,0 +1,10 @@
+schema_version: 1
+mapping_id: publisher-beta
+project_id: project-beta
+organization_id: fixture-org-beta
+workspace_id: fixture-workspace-beta
+api_credential_id: secret-beta-api
+approval: {required: true, binds_content_hash: true}
+brands:
+  - brand_id: brand-beta
+    account_ids: [fixture-beta-social]

@@ -1,0 +1,12 @@
+schema_version: 1
+backup_adapters:
+  - id: backup-alpha
+    type: application-dump
+    owner: project-alpha
+    dump_command: fixture-backup alpha
+    restore_probe: fixture-restore alpha
+  - id: backup-beta
+    type: application-dump
+    owner: project-beta
+    dump_command: fixture-backup beta
+    restore_probe: fixture-restore beta

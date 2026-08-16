@@ -1,0 +1,5 @@
+target: volumes.yml
+operation: set
+path: [volumes, 0, backup_adapter_id]
+value: backup-missing
+expected_error: "volume-alpha: backup_adapter_id references unknown backup adapter backup-missing"

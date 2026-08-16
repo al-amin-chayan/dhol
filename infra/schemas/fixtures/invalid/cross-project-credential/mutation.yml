@@ -1,0 +1,5 @@
+target: registry.yml
+operation: set
+path: [services, 0, secret_ids]
+value: [secret-beta-api]
+expected_error: "service-alpha: cross-project credential secret-beta-api is not allowed for project-alpha"

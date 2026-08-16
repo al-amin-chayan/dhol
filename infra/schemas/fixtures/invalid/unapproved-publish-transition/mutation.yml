@@ -1,0 +1,5 @@
+target: workflows/workflow-alpha.yml
+operation: set
+path: [transitions, 1, approval]
+value: null
+expected_error: "workflow-alpha: unapproved publish transition to scheduled"

@@ -1,0 +1,4 @@
+target: release.yml
+operation: delete
+path: [schema_versions, workflow]
+expected_error: "fixture-release-1: missing schema version workflow"

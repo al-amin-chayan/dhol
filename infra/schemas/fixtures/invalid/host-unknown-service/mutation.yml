@@ -1,0 +1,5 @@
+target: inventory.yml
+operation: set
+path: [hosts, 1, service_ids]
+value: [missing-service]
+expected_error: "fixture-publisher: service_ids references unknown service missing-service"

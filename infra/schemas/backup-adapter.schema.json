@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.dholbeat.local/v1/backup-adapter.schema.json",
+  "title": "Backup adapter registry version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "backup_adapters"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "backup_adapters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "type", "owner", "dump_command", "restore_probe"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+          "type": {"enum": ["application-dump", "rebuild", "provider-reconcile"]},
+          "owner": {"type": "string", "minLength": 1},
+          "dump_command": {"type": ["string", "null"]},
+          "restore_probe": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

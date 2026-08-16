@@ -1,0 +1,15 @@
+schema_version: 1
+brand: brand-alpha
+project_id: project-alpha
+languages: [en]
+niche: synthetic alpha fixture
+tone: clear, calm, synthetic
+channels: {}
+cadence: {static: 1/wk}
+approval_channel: telegram:fixture-alpha
+visual:
+  palette: ["#112233"]
+  logo: fixtures/alpha.svg
+  fonts: [Fixture Sans]
+no_go: [AI avatar testimonials]
+secret_ids: []

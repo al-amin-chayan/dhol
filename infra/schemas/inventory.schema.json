@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.dholbeat.local/v1/inventory.schema.json",
+  "title": "Host inventory version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "hosts"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "hosts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "role", "hostname", "os", "service_ids", "owner"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+          "role": {"enum": ["core", "publisher", "fixture"]},
+          "hostname": {"type": "string", "minLength": 1},
+          "os": {"const": "ubuntu-24.04"},
+          "service_ids": {
+            "type": "array",
+            "items": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+            "uniqueItems": true
+          },
+          "owner": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}
