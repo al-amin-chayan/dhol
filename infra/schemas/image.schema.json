@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.dholbeat.local/v1/image.schema.json",
+  "title": "Container image registry version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "images"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "images": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "repository", "tag", "digest", "source_url", "license", "verified_on"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+          "repository": {"type": "string", "minLength": 1},
+          "tag": {"type": "string", "minLength": 1, "not": {"const": "latest"}},
+          "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+          "source_url": {"type": "string", "format": "uri", "pattern": "^https://"},
+          "license": {"type": "string", "minLength": 1},
+          "verified_on": {"type": "string", "format": "date"}
+        }
+      }
+    }
+  }
+}
