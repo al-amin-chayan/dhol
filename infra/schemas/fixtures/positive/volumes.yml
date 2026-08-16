@@ -1,0 +1,26 @@
+schema_version: 1
+volumes:
+  - id: volume-alpha
+    service_id: service-alpha
+    owner_project_id: project-alpha
+    mount_path: /var/lib/fixture-alpha
+    classification: retained
+    data_classification: internal
+    size_limit_mb: 128
+    backup_adapter_id: backup-alpha
+    retention: {max_age_days: 7, purge_events: [expired], owner: project-alpha}
+    rpo_hours: 24
+    rto_hours: 2
+    restore_probe: fixture-restore alpha
+  - id: volume-beta
+    service_id: service-beta
+    owner_project_id: project-beta
+    mount_path: /var/lib/fixture-beta
+    classification: retained
+    data_classification: internal
+    size_limit_mb: 128
+    backup_adapter_id: backup-beta
+    retention: {max_age_days: 7, purge_events: [expired], owner: project-beta}
+    rpo_hours: 24
+    rto_hours: 2
+    restore_probe: fixture-restore beta

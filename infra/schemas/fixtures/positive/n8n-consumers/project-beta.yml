@@ -1,0 +1,27 @@
+schema_version: 1
+consumer_id: consumer-beta
+project_id: project-beta
+workflow_namespace: project-beta
+repository: https://example.test/project-beta.git
+export_path: automation/n8n
+source_commit: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+owner: project-beta
+incident_contact: fixture-beta-operator
+alert_destination: fixture-beta-alerts
+credential_ids: []
+outbound_hosts: []
+direct_database_access: false
+trigger_types: [manual]
+max_execution_seconds: 60
+expected_runs_per_day: 0
+allowed_nodes: [Set]
+denied_nodes: [Execute Command, SSH, Read Binary File]
+data_classification: internal
+retention: {save_success: false, failure_days: 7, binary_hours: 1, deletion_reconciliation: fixture-prune beta}
+route_ids: []
+commands:
+  import: fixture-import beta --inactive
+  smoke_test: fixture-smoke beta
+  rollback: fixture-rollback beta
+  restore: fixture-restore beta
+activation_conditions: [exact source hash matches, remains inactive in fixture]

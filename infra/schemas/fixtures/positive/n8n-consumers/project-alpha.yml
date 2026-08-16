@@ -1,0 +1,27 @@
+schema_version: 1
+consumer_id: consumer-alpha
+project_id: project-alpha
+workflow_namespace: project-alpha
+repository: https://example.test/project-alpha.git
+export_path: automation/n8n
+source_commit: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+owner: project-alpha
+incident_contact: fixture-alpha-operator
+alert_destination: fixture-alpha-alerts
+credential_ids: []
+outbound_hosts: []
+direct_database_access: false
+trigger_types: [manual]
+max_execution_seconds: 60
+expected_runs_per_day: 0
+allowed_nodes: [Set]
+denied_nodes: [Execute Command, SSH, Read Binary File]
+data_classification: internal
+retention: {save_success: false, failure_days: 7, binary_hours: 1, deletion_reconciliation: fixture-prune alpha}
+route_ids: []
+commands:
+  import: fixture-import alpha --inactive
+  smoke_test: fixture-smoke alpha
+  rollback: fixture-rollback alpha
+  restore: fixture-restore alpha
+activation_conditions: [exact source hash matches, remains inactive in fixture]

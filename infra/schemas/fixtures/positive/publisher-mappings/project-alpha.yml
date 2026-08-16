@@ -1,0 +1,10 @@
+schema_version: 1
+mapping_id: publisher-alpha
+project_id: project-alpha
+organization_id: fixture-org-alpha
+workspace_id: fixture-workspace-alpha
+api_credential_id: secret-alpha-api
+approval: {required: true, binds_content_hash: true}
+brands:
+  - brand_id: brand-alpha
+    account_ids: [fixture-alpha-social]

@@ -1,0 +1,4 @@
+target: volumes.yml
+operation: delete
+path: [volumes, 0, size_limit_mb]
+expected_error: "'size_limit_mb' is a required property"

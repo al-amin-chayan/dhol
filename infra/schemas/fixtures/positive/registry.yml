@@ -1,0 +1,42 @@
+schema_version: 1
+services:
+  - id: service-alpha
+    project_id: project-alpha
+    host_id: fixture-core
+    compose_project: fixture_alpha
+    source_dir: stack/fixtures/alpha
+    image_id: image-alpha
+    exposure: route
+    route_ids: [route-alpha]
+    volume_ids: [volume-alpha]
+    secret_ids: [secret-alpha-api]
+    writable_paths: [/var/lib/fixture-alpha]
+    backup_adapter_id: backup-alpha
+    health_probe: {type: http, target: /health}
+    resources:
+      cpus: 0.25
+      memory_mb: 128
+      pids: 64
+      logs: {driver: json-file, max_size_mb: 10, max_files: 3}
+    monitoring_owner: project-alpha
+    rollback_command: fixture-rollback alpha
+  - id: service-beta
+    project_id: project-beta
+    host_id: fixture-core
+    compose_project: fixture_beta
+    source_dir: stack/fixtures/beta
+    image_id: image-beta
+    exposure: route
+    route_ids: [route-beta]
+    volume_ids: [volume-beta]
+    secret_ids: [secret-beta-api]
+    writable_paths: [/var/lib/fixture-beta]
+    backup_adapter_id: backup-beta
+    health_probe: {type: http, target: /health}
+    resources:
+      cpus: 0.25
+      memory_mb: 128
+      pids: 64
+      logs: {driver: json-file, max_size_mb: 10, max_files: 3}
+    monitoring_owner: project-beta
+    rollback_command: fixture-rollback beta

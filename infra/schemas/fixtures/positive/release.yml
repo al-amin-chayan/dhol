@@ -1,0 +1,28 @@
+schema_version: 1
+release_id: fixture-release-1
+git_commit: cccccccccccccccccccccccccccccccccccccccc
+tag: infra-prod-20260816-1
+toolchain_lock_sha256: dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+target_roles: [fixture]
+approved_plan_sha256: eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+schema_versions:
+  inventory: 1
+  service: 1
+  image: 1
+  domain: 1
+  route: 1
+  volume: 1
+  backup_adapter: 1
+  secret_catalog: 1
+  release: 1
+  brand: 1
+  prompt: 1
+  workflow: 1
+  n8n_consumer: 1
+  hermes_project: 1
+  publisher_mapping: 1
+images:
+  - image_id: image-alpha
+    digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  - image_id: image-beta
+    digest: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb

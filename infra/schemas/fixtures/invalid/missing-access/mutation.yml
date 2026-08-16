@@ -1,0 +1,4 @@
+target: routes.yml
+operation: delete
+path: [routes, 0, access]
+expected_error: "'access' is a required property"

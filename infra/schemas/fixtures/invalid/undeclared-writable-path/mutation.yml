@@ -1,0 +1,5 @@
+target: registry.yml
+operation: set
+path: [services, 0, writable_paths]
+value: []
+expected_error: "service-alpha: undeclared writable path /var/lib/fixture-alpha"

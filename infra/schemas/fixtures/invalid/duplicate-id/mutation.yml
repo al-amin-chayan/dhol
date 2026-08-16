@@ -1,0 +1,5 @@
+target: registry.yml
+operation: set
+path: [services, 1, id]
+value: service-alpha
+expected_error: "services: duplicate ID service-alpha"

@@ -1,0 +1,20 @@
+schema_version: 1
+workflow_id: workflow-beta
+project_id: project-beta
+brand_id: brand-beta
+stage: publishing
+source_path: fixtures/workflows/beta.json
+source_commit: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+credential_ids: []
+states: [draft, final-approved, scheduled, published, cancelled]
+transitions:
+  - from: draft
+    to: final-approved
+    approval: {type: human-final, binds_content_hash: true}
+  - from: final-approved
+    to: scheduled
+    approval: {type: human-final, binds_content_hash: true}
+  - from: scheduled
+    to: published
+    approval: {type: human-final, binds_content_hash: true}
+retention: {success_days: 1, failure_days: 7, owner: project-beta}
