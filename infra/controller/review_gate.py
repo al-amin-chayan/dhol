@@ -44,6 +44,7 @@ class ReviewMarkers:
 class GateResult:
     allowed: bool
     findings: tuple[str, ...]
+    diagnostics: tuple[str, ...] = ()
 
 
 def normalize_login(login: str) -> str:
@@ -89,8 +90,31 @@ def review_sort_key(review: dict[str, Any]) -> tuple[str, int]:
     return str(review.get("submitted_at") or ""), int(review.get("id") or 0)
 
 
+def review_marker_problem(
+    review: dict[str, Any],
+    markers: ReviewMarkers | None,
+    expected_reviewer: str,
+) -> str | None:
+    review_id = review.get("id", "<unknown>")
+    if markers is None:
+        return f"review {review_id} has invalid or missing review markers"
+    if markers.reviewer != expected_reviewer:
+        return (
+            f"review {review_id} has Reviewer: {markers.reviewer}; "
+            f"expected {expected_reviewer}"
+        )
+    review_commit = str(review.get("commit_id") or "").lower()
+    if markers.reviewed_head != review_commit:
+        return (
+            f"review {review_id} has Reviewed head {markers.reviewed_head}; "
+            f"GitHub attached it to {review_commit or '<missing>'}"
+        )
+    return None
+
+
 def evaluate_pull_request(pull: dict[str, Any], reviews: list[dict[str, Any]]) -> GateResult:
     findings: list[str] = []
+    diagnostics: list[str] = []
     if pull.get("draft"):
         findings.append("the pull request is still a draft")
 
@@ -150,15 +174,19 @@ def evaluate_pull_request(pull: dict[str, Any], reviews: list[dict[str, Any]]) -
         findings.append(f"no formal {expected_reviewer} cross-review has been submitted")
         return GateResult(False, tuple(findings))
 
+    current_reviews = [
+        item
+        for item in expected_reviews
+        if str(item[0].get("commit_id") or "").lower() == head_sha
+    ]
+    latest_current_review = current_reviews[-1][0] if current_reviews else None
     valid_reviews = []
     for review, markers in expected_reviews:
-        review_commit = str(review.get("commit_id") or "").lower()
-        if (
-            markers is not None
-            and markers.reviewer == expected_reviewer
-            and markers.reviewed_head == review_commit
-        ):
+        marker_problem = review_marker_problem(review, markers, expected_reviewer)
+        if marker_problem is None:
             valid_reviews.append((review, markers))
+        elif review is not latest_current_review:
+            diagnostics.append(f"ignored historical {marker_problem}")
     if not valid_reviews:
         findings.append(f"no correctly marked formal {expected_reviewer} cross-review exists")
     else:
@@ -178,14 +206,9 @@ def evaluate_pull_request(pull: dict[str, Any], reviews: list[dict[str, Any]]) -
                 )
                 break
 
-    current_reviews = [
-        item
-        for item in expected_reviews
-        if str(item[0].get("commit_id") or "").lower() == head_sha
-    ]
     if not current_reviews:
         findings.append(f"{expected_reviewer} has not reviewed the exact current head {head_sha}")
-        return GateResult(False, tuple(findings))
+        return GateResult(False, tuple(findings), tuple(diagnostics))
 
     latest_review, latest_markers = current_reviews[-1]
     latest_state = str(latest_review.get("state") or "").upper()
@@ -207,7 +230,7 @@ def evaluate_pull_request(pull: dict[str, Any], reviews: list[dict[str, Any]]) -
             f"the latest {expected_reviewer} review on the current head is {latest_state}, not APPROVED"
         )
 
-    return GateResult(not findings, tuple(findings))
+    return GateResult(not findings, tuple(findings), tuple(diagnostics))
 
 
 def github_get(token: str, repository: str, path: str) -> Any:
@@ -246,6 +269,8 @@ def main() -> None:
     pull = github_get(token, repository, f"pulls/{number}")
     reviews = github_get(token, repository, f"pulls/{number}/reviews?per_page=100")
     result = evaluate_pull_request(pull, reviews)
+    for diagnostic in result.diagnostics:
+        print(f"cross-review note: {diagnostic}")
     if not result.allowed:
         for finding in result.findings:
             print(f"cross-review gate: {finding}")

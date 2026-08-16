@@ -252,7 +252,22 @@ def converge_labels(token: str, repository: str, desired: dict[str, Any]) -> Non
         elif normalized_label(current) == normalized_label(label):
             print(f"unchanged: label {name}")
         else:
-            github_request(token, repository, "PATCH", label_path(name), label)
+            update_payload = {
+                "color": label["color"],
+                "description": label["description"],
+            }
+            updated = github_request(
+                token,
+                repository,
+                "PATCH",
+                label_path(name),
+                update_payload,
+            )
+            if not isinstance(updated, dict) or normalized_label(updated) != normalized_label(
+                label
+            ):
+                raise RuntimeError(f"GitHub did not confirm label update: {name}")
+            live[name] = updated
             print(f"updated label: {name}")
 
 

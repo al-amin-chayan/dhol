@@ -5,12 +5,12 @@
   "labels": [
     {
       "name": "review:requested",
-      "color": "D4C5F9",
+      "color": "FBCA04",
       "description": "Cross-agent review is required for the current PR head."
     },
     {
       "name": "review:changes-requested",
-      "color": "D73A4A",
+      "color": "D93F0B",
       "description": "Cross-agent review found blockers; do not run heavy CI or merge."
     },
     {

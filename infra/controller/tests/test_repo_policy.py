@@ -114,7 +114,7 @@ def test_explicit_read_only_workflow_permissions_are_accepted(tmp_path: Path) ->
     assert check_workflow_permissions(tmp_path, repository_files(tmp_path)) == []
 
 
-def test_review_gate_is_head_attached_but_executes_trusted_develop_code() -> None:
+def test_review_gate_is_head_attached_but_executes_the_develop_gate_script() -> None:
     workflow = (REPO_ROOT / ".github/workflows/review-gate.yml").read_text(encoding="utf-8")
     assert "  pull_request:\n" in workflow
     assert "pull_request_target" not in workflow

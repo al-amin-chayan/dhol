@@ -153,6 +153,9 @@ def test_invalid_historical_review_does_not_permanently_block_recovery() -> None
     corrected = review(review_type="Baseline", review_id=2)
     result = evaluate_pull_request(pull(), [invalid, corrected])
     assert result.allowed is True
+    assert result.diagnostics == (
+        "ignored historical review 1 has invalid or missing review markers",
+    )
 
 
 def test_invalid_latest_exact_head_review_still_blocks() -> None:
@@ -161,6 +164,18 @@ def test_invalid_latest_exact_head_review_still_blocks() -> None:
     result = evaluate_pull_request(pull(), [invalid])
     assert result.allowed is False
     assert any("no correctly marked formal" in finding for finding in result.findings)
+
+
+def test_historical_marker_diagnostic_names_the_failed_sha() -> None:
+    mismatched = review(state="CHANGES_REQUESTED", review_id=1)
+    mismatched["body"] = mismatched["body"].replace(HEAD_ONE, HEAD_TWO)
+    corrected = review(review_id=2)
+    result = evaluate_pull_request(pull(), [mismatched, corrected])
+    assert result.allowed is True
+    assert result.diagnostics == (
+        f"ignored historical review 1 has Reviewed head {HEAD_TWO}; "
+        f"GitHub attached it to {HEAD_ONE}",
+    )
 
 
 def test_unknown_pr_author_fails_closed() -> None:

@@ -90,3 +90,8 @@ When a PR introduces a new required workflow check, merge that bootstrap PR
 under the existing rules first and only then run `--apply`. Required checks
 must execute a gate script already present on `develop`; applying the ruleset
 early would deadlock the bootstrap.
+
+After PR #35 merges and `--apply` succeeds, the next tooling PR removes
+`BOOTSTRAP_PR_NUMBER`, the missing-script success branch, and their three
+assertions in `test_repo_policy.py`. Until then the exception matches only the
+already-merged bootstrap PR; every other missing-script run fails closed.

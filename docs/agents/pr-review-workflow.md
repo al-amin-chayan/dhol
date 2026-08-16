@@ -130,9 +130,9 @@ the reviewer corrects or dismisses it using its own App before resubmitting.
 
 An implementation-complete PR is ready, not draft. The author applies at least
 one `area:*` label plus `review:requested`, then arms native auto-merge using
-its own App identity. The founder approved this behavior on 2026-08-16 with
-the explicit consequence that an exact-head opposite-model approval can merge
-without a separate final human merge click:
+its own App identity. `README.md` §10 records the founder's 2026-08-16 approval
+and its explicit consequence: an exact-head opposite-model approval can merge
+without a separate final human merge click.
 
 ```bash
 # routine branch -> develop

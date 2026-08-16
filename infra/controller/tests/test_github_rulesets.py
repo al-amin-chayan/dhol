@@ -57,6 +57,12 @@ def test_develop_first_configuration_is_complete() -> None:
     }
     assert REVIEW_LABELS | WORKFLOW_BLOCKER_LABELS <= managed_labels
     assert any(name.startswith(AREA_LABEL_PREFIX) for name in managed_labels)
+    review_labels = {
+        label["name"]: label for label in configuration["labels"]["labels"]
+        if label["name"].startswith("review:")
+    }
+    assert review_labels["review:requested"]["color"] == "FBCA04"
+    assert review_labels["review:changes-requested"]["color"] == "D93F0B"
     assert configuration["labels"]["renames"] == {
         "review:approved": "review:ready-for-ci"
     }
@@ -248,6 +254,33 @@ def test_unconfirmed_label_rename_fails_closed(monkeypatch) -> None:
     monkeypatch.setattr(MODULE, "github_request", request)
     with pytest.raises(RuntimeError, match="did not confirm label rename"):
         MODULE.converge_labels("token", "owner/repository", desired)
+
+
+def test_drifted_label_update_uses_only_the_github_contract_fields(monkeypatch) -> None:
+    desired = MODULE.desired_configuration()["labels"]
+    requested = next(label for label in desired["labels"] if label["name"] == "review:requested")
+    live = [dict(label) for label in desired["labels"]]
+    next(label for label in live if label["name"] == "review:requested")["color"] = "000000"
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def request(token, repository, method, path, payload=None):
+        calls.append((method, path, payload))
+        if method == "GET":
+            return live
+        if method == "PATCH":
+            return requested
+        return None
+
+    monkeypatch.setattr(MODULE, "github_request", request)
+    MODULE.converge_labels("token", "owner/repository", desired)
+    assert calls == [
+        ("GET", "labels?per_page=100", None),
+        (
+            "PATCH",
+            "labels/review%3Arequested",
+            {"color": requested["color"], "description": requested["description"]},
+        ),
+    ]
 
 
 def test_superseded_label_assignments_are_migrated_before_removal(
