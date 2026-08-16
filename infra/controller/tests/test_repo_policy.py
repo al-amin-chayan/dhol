@@ -120,9 +120,6 @@ def test_review_gate_is_head_attached_but_executes_the_develop_gate_script() -> 
     assert "pull_request_target" not in workflow
     assert "          ref: develop\n" in workflow
     assert "python infra/controller/review_gate.py" in workflow
-    assert 'BOOTSTRAP_PR_NUMBER: "35"' in workflow
-    assert 'if [ "$PR_NUMBER" = "$BOOTSTRAP_PR_NUMBER" ]; then' in workflow
-    assert 'echo "trusted review gate is missing from develop" >&2' in workflow
 
 
 def test_plaintext_env_generated_media_and_state_are_rejected(tmp_path: Path) -> None:

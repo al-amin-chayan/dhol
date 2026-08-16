@@ -27,15 +27,10 @@ jobs:
           persist-credentials: false
       - name: Verify the formal review for the exact PR head
         env:
-          BOOTSTRAP_PR_NUMBER: "35"
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           if [ ! -f infra/controller/review_gate.py ]; then
-            if [ "$PR_NUMBER" = "$BOOTSTRAP_PR_NUMBER" ]; then
-              echo "bootstrap: trusted review gate is not on develop yet"
-              exit 0
-            fi
             echo "trusted review gate is missing from develop" >&2
             exit 1
           fi
