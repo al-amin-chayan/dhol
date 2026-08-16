@@ -2,7 +2,9 @@
   "name": "main: develop promotion gate",
   "target": "branch",
   "enforcement": "active",
-  "bypass_actors": [],
+  "bypass_actors": [
+    {"actor_id": 6504305, "actor_type": "User", "bypass_mode": "pull_request"}
+  ],
   "conditions": {
     "ref_name": {
       "include": ["refs/heads/main"],

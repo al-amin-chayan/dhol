@@ -18,6 +18,8 @@ REVIEW_LABELS = {
     "review:changes-requested",
     "review:ready-for-ci",
 }
+WORKFLOW_BLOCKER_LABELS = {"blocked", "decision"}
+AREA_LABEL_PREFIX = "area:"
 DECISIVE_STATES = {"APPROVED", "CHANGES_REQUESTED"}
 AGENT_LOGINS = {
     "chayan-codex": "Codex",
@@ -115,9 +117,9 @@ def evaluate_pull_request(pull: dict[str, Any], reviews: list[dict[str, Any]]) -
             "the exact head must have only review:ready-for-ci; "
             f"active review labels: {rendered}"
         )
-    if not any(name.startswith("area:") for name in label_names):
+    if not any(name.startswith(AREA_LABEL_PREFIX) for name in label_names):
         findings.append("the pull request must have at least one area:* label")
-    workflow_blockers = sorted(label_names & {"blocked", "decision"})
+    workflow_blockers = sorted(label_names & WORKFLOW_BLOCKER_LABELS)
     if workflow_blockers:
         findings.append(
             "blocked or decision PRs cannot pass review; active labels: "
@@ -148,42 +150,33 @@ def evaluate_pull_request(pull: dict[str, Any], reviews: list[dict[str, Any]]) -
         findings.append(f"no formal {expected_reviewer} cross-review has been submitted")
         return GateResult(False, tuple(findings))
 
+    valid_reviews = []
     for review, markers in expected_reviews:
-        review_id = review.get("id", "<unknown>")
-        if markers is None:
-            findings.append(
-                f"formal review {review_id} is missing valid Review type, Reviewer, "
-                "or full Reviewed head markers"
-            )
-            continue
-        if markers.reviewer != expected_reviewer:
-            findings.append(
-                f"formal review {review_id} has Reviewer: {markers.reviewer}; "
-                f"expected {expected_reviewer}"
-            )
         review_commit = str(review.get("commit_id") or "").lower()
-        if markers.reviewed_head != review_commit:
-            findings.append(
-                f"formal review {review_id} Reviewed head does not match its GitHub review commit"
-            )
-
-    valid_reviews = [(review, markers) for review, markers in expected_reviews if markers is not None]
+        if (
+            markers is not None
+            and markers.reviewer == expected_reviewer
+            and markers.reviewed_head == review_commit
+        ):
+            valid_reviews.append((review, markers))
     if not valid_reviews:
-        return GateResult(False, tuple(findings))
-
-    baseline_reviews = [item for item in valid_reviews if item[1].review_type == "Baseline"]
-    if len(baseline_reviews) != 1:
-        findings.append(
-            f"the PR must contain exactly one formal Baseline review by {expected_reviewer}; "
-            f"found {len(baseline_reviews)}"
-        )
-    first_valid_type = valid_reviews[0][1].review_type
-    if first_valid_type != "Baseline":
-        findings.append("the first formal cross-review must be Review type: Baseline")
-    for _, markers in valid_reviews[1:]:
-        if markers.review_type != "Follow-up":
-            findings.append("every formal review after the baseline must be Review type: Follow-up")
-            break
+        findings.append(f"no correctly marked formal {expected_reviewer} cross-review exists")
+    else:
+        baseline_reviews = [item for item in valid_reviews if item[1].review_type == "Baseline"]
+        if len(baseline_reviews) != 1:
+            findings.append(
+                f"the PR must contain exactly one formal Baseline review by {expected_reviewer}; "
+                f"found {len(baseline_reviews)}"
+            )
+        first_valid_type = valid_reviews[0][1].review_type
+        if first_valid_type != "Baseline":
+            findings.append("the first formal cross-review must be Review type: Baseline")
+        for _, markers in valid_reviews[1:]:
+            if markers.review_type != "Follow-up":
+                findings.append(
+                    "every formal review after the baseline must be Review type: Follow-up"
+                )
+                break
 
     current_reviews = [
         item

@@ -147,13 +147,20 @@ def test_blocked_or_decision_labels_cannot_pass() -> None:
     assert any("blocked or decision PRs cannot pass" in finding for finding in result.findings)
 
 
-def test_invalid_earlier_formal_review_cannot_be_skipped() -> None:
+def test_invalid_historical_review_does_not_permanently_block_recovery() -> None:
     invalid = review(state="CHANGES_REQUESTED", review_id=1)
     invalid["body"] = "No governance markers"
     corrected = review(review_type="Baseline", review_id=2)
     result = evaluate_pull_request(pull(), [invalid, corrected])
+    assert result.allowed is True
+
+
+def test_invalid_latest_exact_head_review_still_blocks() -> None:
+    invalid = review()
+    invalid["body"] = "No governance markers"
+    result = evaluate_pull_request(pull(), [invalid])
     assert result.allowed is False
-    assert any("formal review 1 is missing valid" in finding for finding in result.findings)
+    assert any("no correctly marked formal" in finding for finding in result.findings)
 
 
 def test_unknown_pr_author_fails_closed() -> None:

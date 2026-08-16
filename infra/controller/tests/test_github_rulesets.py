@@ -3,9 +3,18 @@ from __future__ import annotations
 import copy
 import importlib.util
 from pathlib import Path
+import sys
+
+import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+CONTROLLER_DIR = REPO_ROOT / "infra/controller"
+sys.path.insert(0, str(CONTROLLER_DIR))
+
+from review_gate import AREA_LABEL_PREFIX, REVIEW_LABELS, WORKFLOW_BLOCKER_LABELS  # noqa: E402
+
+
 SCRIPT = REPO_ROOT / "scripts/configure-github-rulesets.py"
 SPEC = importlib.util.spec_from_file_location("configure_github_rulesets", SCRIPT)
 assert SPEC is not None and SPEC.loader is not None
@@ -32,11 +41,22 @@ def test_develop_first_configuration_is_complete() -> None:
         "allowed_actions": "all",
         "sha_pinning_required": True,
     }
-    assert {label["name"] for label in configuration["labels"]["labels"]} == {
+    managed_labels = {label["name"] for label in configuration["labels"]["labels"]}
+    assert managed_labels == {
         "review:requested",
         "review:changes-requested",
         "review:ready-for-ci",
+        "area:content",
+        "area:infra",
+        "area:operations",
+        "area:pipeline",
+        "area:tooling",
+        "blocked",
+        "decision",
+        "production-risk",
     }
+    assert REVIEW_LABELS | WORKFLOW_BLOCKER_LABELS <= managed_labels
+    assert any(name.startswith(AREA_LABEL_PREFIX) for name in managed_labels)
     assert configuration["labels"]["renames"] == {
         "review:approved": "review:ready-for-ci"
     }
@@ -47,7 +67,9 @@ def test_develop_first_configuration_is_complete() -> None:
 def test_both_rulesets_require_cross_review_and_controller_checks() -> None:
     for ruleset in MODULE.desired_configuration()["rulesets"]:
         assert ruleset["enforcement"] == "active"
-        assert ruleset["bypass_actors"] == []
+        assert ruleset["bypass_actors"] == [
+            {"actor_id": 6504305, "actor_type": "User", "bypass_mode": "pull_request"}
+        ]
         assert {item["type"] for item in ruleset["rules"]} >= {
             "deletion",
             "non_fast_forward",
@@ -65,9 +87,19 @@ def test_both_rulesets_require_cross_review_and_controller_checks() -> None:
             {"context": "Controller check (linux/amd64)", "integration_id": 15368},
             {"context": "Controller check (linux/arm64)", "integration_id": 15368},
         ]
-        assert rule(ruleset, "required_status_checks")["parameters"][
-            "strict_required_status_checks_policy"
-        ] is True
+
+
+def test_only_main_requires_an_up_to_date_base() -> None:
+    rulesets = {
+        item["conditions"]["ref_name"]["include"][0]: item
+        for item in MODULE.desired_configuration()["rulesets"]
+    }
+    assert rule(rulesets["refs/heads/develop"], "required_status_checks")["parameters"][
+        "strict_required_status_checks_policy"
+    ] is False
+    assert rule(rulesets["refs/heads/main"], "required_status_checks")["parameters"][
+        "strict_required_status_checks_policy"
+    ] is True
 
 
 def test_merge_methods_preserve_develop_to_main_ancestry() -> None:
@@ -173,39 +205,49 @@ def test_drifted_actions_permissions_are_updated(monkeypatch, capsys) -> None:
 
 def test_labels_are_renamed_and_converged_without_losing_assignments(monkeypatch, capsys) -> None:
     desired = MODULE.desired_configuration()["labels"]
-    requested = next(label for label in desired["labels"] if label["name"] == "review:requested")
+    ready = next(label for label in desired["labels"] if label["name"] == "review:ready-for-ci")
+    live = [label for label in desired["labels"] if label["name"] != "review:ready-for-ci"]
+    live.append({"name": "review:approved", "color": "123456", "description": "old"})
     calls: list[tuple[str, str, dict | None]] = []
 
     def request(token, repository, method, path, payload=None):
         calls.append((method, path, payload))
         if method == "GET":
-            return [
-                {
-                    "name": "review:approved",
-                    "color": "123456",
-                    "description": "old",
-                },
-                requested,
-            ]
+            return live
+        if method == "PATCH":
+            return ready
         return None
 
     monkeypatch.setattr(MODULE, "github_request", request)
     MODULE.converge_labels("token", "owner/repository", desired)
-    ready = next(label for label in desired["labels"] if label["name"] == "review:ready-for-ci")
-    changes = next(
-        label for label in desired["labels"] if label["name"] == "review:changes-requested"
-    )
+    rename_payload = {
+        "new_name": ready["name"],
+        "color": ready["color"],
+        "description": ready["description"],
+    }
     assert calls == [
         ("GET", "labels?per_page=100", None),
-        ("PATCH", "labels/review%3Aapproved", ready),
-        ("POST", "labels", changes),
+        ("PATCH", "labels/review%3Aapproved", rename_payload),
     ]
-    assert capsys.readouterr().out == (
-        "renamed label: review:approved -> review:ready-for-ci\n"
-        "unchanged: label review:requested\n"
-        "created label: review:changes-requested\n"
-        "unchanged: label review:ready-for-ci\n"
-    )
+    assert set(rename_payload) == {"new_name", "color", "description"}
+    assert "renamed label: review:approved -> review:ready-for-ci" in capsys.readouterr().out
+
+
+def test_unconfirmed_label_rename_fails_closed(monkeypatch) -> None:
+    desired = MODULE.desired_configuration()["labels"]
+    ready = next(label for label in desired["labels"] if label["name"] == "review:ready-for-ci")
+    old = {"name": "review:approved", "color": "123456", "description": "old"}
+
+    def request(token, repository, method, path, payload=None):
+        if method == "GET":
+            return [old]
+        if method == "PATCH":
+            return {**ready, "name": "review:approved"}
+        return None
+
+    monkeypatch.setattr(MODULE, "github_request", request)
+    with pytest.raises(RuntimeError, match="did not confirm label rename"):
+        MODULE.converge_labels("token", "owner/repository", desired)
 
 
 def test_superseded_label_assignments_are_migrated_before_removal(

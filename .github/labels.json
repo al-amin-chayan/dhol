@@ -17,6 +17,46 @@
       "name": "review:ready-for-ci",
       "color": "0E8A16",
       "description": "Current PR head passed cross-agent review; required CI and merge may proceed."
+    },
+    {
+      "name": "area:content",
+      "color": "C2E0C6",
+      "description": "Brand, prompt, drafting, rendering, and content behavior"
+    },
+    {
+      "name": "area:infra",
+      "color": "1D76DB",
+      "description": "Hosts, networking, security, state, and shared services"
+    },
+    {
+      "name": "area:operations",
+      "color": "0052CC",
+      "description": "Backup, monitoring, release, recovery, and runbooks"
+    },
+    {
+      "name": "area:pipeline",
+      "color": "0E8A16",
+      "description": "n8n workflows and application pipeline behavior"
+    },
+    {
+      "name": "area:tooling",
+      "color": "5319E7",
+      "description": "Repository tooling, schemas, controller, and CI"
+    },
+    {
+      "name": "blocked",
+      "color": "6A737D",
+      "description": "An exact external dependency or founder gate is currently unmet"
+    },
+    {
+      "name": "decision",
+      "color": "D4C5F9",
+      "description": "Founder decision packet required before dependent implementation"
+    },
+    {
+      "name": "production-risk",
+      "color": "B60205",
+      "description": "Can mutate a host, provider, durable state, or live integration"
     }
   ]
 }

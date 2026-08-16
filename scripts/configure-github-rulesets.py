@@ -224,9 +224,24 @@ def converge_labels(token: str, repository: str, desired: dict[str, Any]) -> Non
         replacement = desired_labels.get(new_name)
         if replacement is None:
             raise ValueError(f"label rename target has no desired definition: {new_name}")
-        github_request(token, repository, "PATCH", label_path(old_name), replacement)
+        rename_payload = {
+            "new_name": replacement["name"],
+            "color": replacement["color"],
+            "description": replacement["description"],
+        }
+        renamed = github_request(
+            token,
+            repository,
+            "PATCH",
+            label_path(old_name),
+            rename_payload,
+        )
+        if not isinstance(renamed, dict) or normalized_label(renamed) != normalized_label(
+            replacement
+        ):
+            raise RuntimeError(f"GitHub did not confirm label rename: {old_name} -> {new_name}")
         live.pop(old_name)
-        live[new_name] = replacement
+        live[new_name] = renamed
         print(f"renamed label: {old_name} -> {new_name}")
 
     for name, label in desired_labels.items():

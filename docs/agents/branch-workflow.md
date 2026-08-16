@@ -18,8 +18,9 @@ source for `main`.
 5. The founder starts the other model to perform the exact-head baseline or
    follow-up review described in `docs/agents/pr-review-workflow.md`.
 6. GitHub squash-merges into `develop` only after the opposite-model approval,
-   exact-head review gate, up-to-date base, controller checks, and resolved
-   threads all pass.
+   exact-head review gate, controller checks, and resolved threads all pass.
+   Develop deliberately does not require a mechanical base update: concurrent
+   lanes do not consume a follow-up round merely because another PR merged.
 
 ## Main promotion
 
@@ -28,12 +29,31 @@ same founder-triggered cross-review and required checks, then use a merge
 commit. The founder starts one agent App to open or update the promotion PR and
 the other agent App to review it: the latest pusher/PR author and approving App
 must be different identities. This satisfies the last-push approval gate
-without a personal-account bypass. Approval is valid only for the exact head;
+without using the founder bypass. Approval is valid only for the exact head;
 the author never triggers the reviewer. The promotion author arms native
 auto-merge with the merge-commit method. Main's ruleset allows only merge
 commits so `develop` remains an ancestor of `main`. Direct pushes, force
 pushes, deletion, feature-to-main PRs, stale-base merges, and unresolved review
 threads are blocked.
+
+## Founder break glass
+
+Both rulesets grant only the founder GitHub user (`actor_id: 6504305`) a
+pull-request-only bypass. Direct pushes remain protected, and neither agent App
+is a bypass actor. Use it only when a broken required check or ruleset makes
+the normal reviewed path impossible:
+
+1. Confirm the failure is in governance rather than the implementation and
+   capture the failed check or ruleset response.
+2. Open the smallest revert or repair PR and run `scripts/check` locally.
+3. The founder, signed into their own GitHub account, uses the ruleset bypass
+   on that PR and records the reason in the merge message.
+4. Immediately restore the normal gate and run
+   `scripts/configure-github-rulesets.py --apply` to confirm convergence.
+
+Agents must never use the founder's token or account for this procedure. The
+committed ruleset tests verify that only the founder user has
+`bypass_mode: pull_request` on both protected branches.
 
 ## Reproduce GitHub settings
 
@@ -68,5 +88,5 @@ personal authentication.
 
 When a PR introduces a new required workflow check, merge that bootstrap PR
 under the existing rules first and only then run `--apply`. Required checks
-must execute trusted code already present on `develop`; applying the ruleset
+must execute a gate script already present on `develop`; applying the ruleset
 early would deadlock the bootstrap.

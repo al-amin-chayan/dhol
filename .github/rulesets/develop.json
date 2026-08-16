@@ -2,7 +2,9 @@
   "name": "develop: PR + cross-review gate",
   "target": "branch",
   "enforcement": "active",
-  "bypass_actors": [],
+  "bypass_actors": [
+    {"actor_id": 6504305, "actor_type": "User", "bypass_mode": "pull_request"}
+  ],
   "conditions": {
     "ref_name": {
       "include": ["refs/heads/develop"],
@@ -32,7 +34,7 @@
           {"context": "Controller check (linux/amd64)", "integration_id": 15368},
           {"context": "Controller check (linux/arm64)", "integration_id": 15368}
         ],
-        "strict_required_status_checks_policy": true
+        "strict_required_status_checks_policy": false
       }
     }
   ]

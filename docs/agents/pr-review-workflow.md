@@ -116,14 +116,23 @@ head. The review must be submitted by that model's own GitHub App.
 
 The read-only `Cross-review gate` checks the PR author App, opposite reviewer
 App, review sequence, formal state, markers, current head, and
-`review:ready-for-ci`. It runs trusted code from `develop`; it cannot invoke a
-model, change a label, approve, or merge.
+`review:ready-for-ci`. The head-attached workflow checks out and runs the gate
+script from `develop`; the workflow definition itself remains PR content and
+the formal branch approval remains its security boundary. The gate cannot
+invoke a model, change a label, approve, or merge.
+
+Only correctly marked historical reviews participate in the Baseline/Follow-up
+sequence. A malformed historical review is informational rather than a
+permanent merge blocker. A malformed latest exact-head verdict still blocks;
+the reviewer corrects or dismisses it using its own App before resubmitting.
 
 ## Ready PR and native auto-merge
 
 An implementation-complete PR is ready, not draft. The author applies at least
 one `area:*` label plus `review:requested`, then arms native auto-merge using
-its own App identity:
+its own App identity. The founder approved this behavior on 2026-08-16 with
+the explicit consequence that an exact-head opposite-model approval can merge
+without a separate final human merge click:
 
 ```bash
 # routine branch -> develop
@@ -134,17 +143,19 @@ scripts/github-app-gh pr merge <number> --repo al-amin-chayan/dhol --auto --merg
 ```
 
 GitHub performs the merge only after the formal opposite-model approval,
-exact-head review gate, controller checks, current-base requirement, and thread
-resolution all pass. Reviewers never merge author work. If a new commit or base
-update changes the head, the author restores `review:requested`; approval and
-checks must be earned again for that exact head.
+exact-head review gate, controller checks, and thread resolution all pass;
+`main` additionally requires an up-to-date base. Reviewers never directly merge
+author work. If a new commit changes the head, the author restores
+`review:requested`; approval and checks must be earned again for that exact
+head.
 
 ## Bootstrap and reproduction
 
-The PR that introduces this protocol is reviewed under the existing branch
-rules. Do not activate its new required check before it merges: the trusted
-gate script does not yet exist on `develop`, which would deadlock the bootstrap.
-After that PR merges, run:
+PR #35, which introduces this protocol, is reviewed under the existing branch
+rules. Its workflow has a one-PR bootstrap exception because the gate script is
+not yet on `develop`; a missing script fails closed for every other PR. Do not
+activate the new required check before #35 merges, which would deadlock the
+bootstrap. After that PR merges, run:
 
 ```bash
 scripts/configure-github-rulesets.py --apply
