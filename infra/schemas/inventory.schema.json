@@ -4,9 +4,11 @@
   "title": "Host inventory version 1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "hosts"],
+  "required": ["schema_version", "environment", "ip_override_policy", "hosts", "public_endpoints"],
   "properties": {
     "schema_version": {"const": 1},
+    "environment": {"enum": ["production", "fixture"]},
+    "ip_override_policy": {"const": "local-explicit-only"},
     "hosts": {
       "type": "array",
       "items": {
@@ -24,6 +26,24 @@
             "uniqueItems": true
           },
           "owner": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "public_endpoints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "host_id", "hostname", "interface", "audience"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+          "host_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+          "hostname": {
+            "type": "string",
+            "pattern": "^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{0,62}$"
+          },
+          "interface": {"type": "string", "minLength": 1},
+          "audience": {"enum": ["human", "machine"]}
         }
       }
     }

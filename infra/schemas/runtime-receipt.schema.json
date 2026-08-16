@@ -1,30 +1,22 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://schemas.dholbeat.local/v1/release.schema.json",
-  "title": "Release receipt version 1",
+  "$id": "https://schemas.dholbeat.local/v1/runtime-receipt.schema.json",
+  "title": "Host runtime receipt version 1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "receipt_type", "release_id", "git_commit", "tag", "created_at", "review", "toolchain_lock_sha256", "target_roles", "approved_plan_sha256", "required_backup_snapshot_id", "schema_versions", "images"],
+  "required": ["schema_version", "receipt_type", "release_id", "git_commit", "tag", "host_id", "host_role", "applied_at", "toolchain_lock_sha256", "approved_plan_sha256", "applied_plan_sha256", "required_backup_snapshot_id", "schema_versions", "images"],
   "properties": {
     "schema_version": {"const": 1},
-    "receipt_type": {"const": "release"},
+    "receipt_type": {"const": "host-runtime"},
     "release_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
     "git_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
     "tag": {"type": "string", "pattern": "^infra-prod-[0-9]{8}-[0-9]+$"},
-    "created_at": {"type": "string", "format": "date-time"},
-    "review": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["reviewer", "reviewed_commit", "verdict"],
-      "properties": {
-        "reviewer": {"enum": ["codex", "claude-code"]},
-        "reviewed_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
-        "verdict": {"const": "approved"}
-      }
-    },
+    "host_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+    "host_role": {"enum": ["core", "publisher", "fixture"]},
+    "applied_at": {"type": "string", "format": "date-time"},
     "toolchain_lock_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-    "target_roles": {"type": "array", "minItems": 1, "items": {"enum": ["core", "publisher", "fixture"]}, "uniqueItems": true},
     "approved_plan_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "applied_plan_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "required_backup_snapshot_id": {"type": "string", "minLength": 1},
     "schema_versions": {
       "type": "object",

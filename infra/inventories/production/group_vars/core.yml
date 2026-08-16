@@ -1,0 +1,4 @@
+schema_version: 1
+scope: core
+host_ids: [core-1]
+public_endpoint_ids: [paperclip-admin, n8n-admin, approval-webhooks]

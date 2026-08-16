@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.dholbeat.local/v1/inventory-vars.schema.json",
+  "title": "Inventory variables version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "scope"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "scope": {"enum": ["all", "core", "publisher"]},
+    "host_timezone": {"const": "UTC"},
+    "business_timezone": {"type": "string", "pattern": "^[A-Za-z_]+(?:/[A-Za-z_+-]+)+$"},
+    "release_receipt_path": {"const": "/etc/dholbeat-release"},
+    "infra_controller_principal_id": {"const": "infra-controller"},
+    "local_ip_overrides": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tracked_in_git", "source", "requires_exact_host_limit"],
+      "properties": {
+        "tracked_in_git": {"const": false},
+        "source": {"const": "operator-extra-vars"},
+        "requires_exact_host_limit": {"const": true}
+      }
+    },
+    "release_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tag_pattern", "annotated_tag_required", "reviewed_commit_required", "approved_plan_digest_required", "ci_apply_allowed"],
+      "properties": {
+        "tag_pattern": {"const": "infra-prod-YYYYMMDD-N"},
+        "annotated_tag_required": {"const": true},
+        "reviewed_commit_required": {"const": true},
+        "approved_plan_digest_required": {"const": true},
+        "ci_apply_allowed": {"const": false}
+      }
+    },
+    "host_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+      "uniqueItems": true
+    },
+    "public_endpoint_ids": {
+      "type": "array",
+      "items": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+      "uniqueItems": true
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"scope": {"const": "all"}}},
+      "then": {
+        "required": ["host_timezone", "business_timezone", "release_receipt_path", "infra_controller_principal_id", "local_ip_overrides", "release_policy"]
+      },
+      "else": {"required": ["host_ids", "public_endpoint_ids"]}
+    }
+  ]
+}
