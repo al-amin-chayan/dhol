@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import subprocess
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -17,6 +18,7 @@ TOKEN_HELPER = REPO_ROOT / "scripts/github-app-token.sh"
 DEFAULT_REPOSITORY = "al-amin-chayan/dhol"
 SETTINGS_FILE = REPO_ROOT / ".github/repository-settings.json"
 ACTIONS_PERMISSIONS_FILE = REPO_ROOT / ".github/actions-permissions.json"
+LABELS_FILE = REPO_ROOT / ".github/labels.json"
 RULESET_FILES = (
     REPO_ROOT / ".github/rulesets/develop.json",
     REPO_ROOT / ".github/rulesets/main.json",
@@ -41,6 +43,7 @@ def desired_configuration() -> dict[str, Any]:
     return {
         "repository_settings": load_json(SETTINGS_FILE),
         "actions_permissions": load_json(ACTIONS_PERMISSIONS_FILE),
+        "labels": load_json(LABELS_FILE),
         "rulesets": [load_json(path) for path in RULESET_FILES],
     }
 
@@ -162,6 +165,82 @@ def converge_actions_permissions(
     print("updated: Actions permissions")
 
 
+def label_path(name: str) -> str:
+    return f"labels/{urllib.parse.quote(name, safe='')}"
+
+
+def normalized_label(value: dict[str, Any]) -> dict[str, str]:
+    return {
+        "name": str(value.get("name") or ""),
+        "color": str(value.get("color") or "").upper(),
+        "description": str(value.get("description") or ""),
+    }
+
+
+def migrate_label_assignments(
+    token: str,
+    repository: str,
+    old_name: str,
+    new_name: str,
+) -> None:
+    page = 1
+    while True:
+        query = urllib.parse.urlencode(
+            {
+                "state": "all",
+                "labels": old_name,
+                "per_page": 100,
+                "page": page,
+            }
+        )
+        issues = github_request(token, repository, "GET", f"issues?{query}")
+        for issue in issues:
+            github_request(
+                token,
+                repository,
+                "POST",
+                f"issues/{issue['number']}/labels",
+                {"labels": [new_name]},
+            )
+        if len(issues) < 100:
+            return
+        page += 1
+
+
+def converge_labels(token: str, repository: str, desired: dict[str, Any]) -> None:
+    live_payload = github_request(token, repository, "GET", "labels?per_page=100")
+    live = {label["name"]: label for label in live_payload}
+    desired_labels = {label["name"]: label for label in desired.get("labels", [])}
+
+    for old_name, new_name in desired.get("renames", {}).items():
+        if old_name not in live:
+            continue
+        if new_name in live:
+            migrate_label_assignments(token, repository, old_name, new_name)
+            github_request(token, repository, "DELETE", label_path(old_name))
+            live.pop(old_name)
+            print(f"removed superseded label: {old_name}")
+            continue
+        replacement = desired_labels.get(new_name)
+        if replacement is None:
+            raise ValueError(f"label rename target has no desired definition: {new_name}")
+        github_request(token, repository, "PATCH", label_path(old_name), replacement)
+        live.pop(old_name)
+        live[new_name] = replacement
+        print(f"renamed label: {old_name} -> {new_name}")
+
+    for name, label in desired_labels.items():
+        current = live.get(name)
+        if current is None:
+            github_request(token, repository, "POST", "labels", label)
+            print(f"created label: {name}")
+        elif normalized_label(current) == normalized_label(label):
+            print(f"unchanged: label {name}")
+        else:
+            github_request(token, repository, "PATCH", label_path(name), label)
+            print(f"updated label: {name}")
+
+
 def apply(repository: str, configuration: dict[str, Any]) -> None:
     token = mint_token()
     ensure_develop(token, repository)
@@ -173,6 +252,7 @@ def apply(repository: str, configuration: dict[str, Any]) -> None:
         github_request(token, repository, "PATCH", "", repository_settings)
         print("updated: repository settings")
     converge_actions_permissions(token, repository, configuration["actions_permissions"])
+    converge_labels(token, repository, configuration["labels"])
     upsert_rulesets(token, repository, configuration["rulesets"])
 
 

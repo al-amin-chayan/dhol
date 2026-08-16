@@ -114,6 +114,14 @@ def test_explicit_read_only_workflow_permissions_are_accepted(tmp_path: Path) ->
     assert check_workflow_permissions(tmp_path, repository_files(tmp_path)) == []
 
 
+def test_review_gate_is_head_attached_but_executes_trusted_develop_code() -> None:
+    workflow = (REPO_ROOT / ".github/workflows/review-gate.yml").read_text(encoding="utf-8")
+    assert "  pull_request:\n" in workflow
+    assert "pull_request_target" not in workflow
+    assert "          ref: develop\n" in workflow
+    assert "python infra/controller/review_gate.py" in workflow
+
+
 def test_plaintext_env_generated_media_and_state_are_rejected(tmp_path: Path) -> None:
     write(tmp_path, ".env.production", "TOKEN=not-a-real-token\n")
     write(tmp_path, "out/generated.png")

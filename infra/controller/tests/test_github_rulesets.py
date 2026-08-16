@@ -24,12 +24,21 @@ def test_develop_first_configuration_is_complete() -> None:
         "allow_merge_commit": True,
         "allow_squash_merge": True,
         "allow_rebase_merge": False,
+        "allow_auto_merge": True,
         "delete_branch_on_merge": True,
     }
     assert configuration["actions_permissions"] == {
         "enabled": True,
         "allowed_actions": "all",
         "sha_pinning_required": True,
+    }
+    assert {label["name"] for label in configuration["labels"]["labels"]} == {
+        "review:requested",
+        "review:changes-requested",
+        "review:ready-for-ci",
+    }
+    assert configuration["labels"]["renames"] == {
+        "review:approved": "review:ready-for-ci"
     }
     rulesets = {item["conditions"]["ref_name"]["include"][0]: item for item in configuration["rulesets"]}
     assert set(rulesets) == {"refs/heads/develop", "refs/heads/main"}
@@ -52,9 +61,13 @@ def test_both_rulesets_require_cross_review_and_controller_checks() -> None:
         assert pull_request["required_review_thread_resolution"] is True
         checks = rule(ruleset, "required_status_checks")["parameters"]["required_status_checks"]
         assert checks == [
+            {"context": "Cross-review gate", "integration_id": 15368},
             {"context": "Controller check (linux/amd64)", "integration_id": 15368},
             {"context": "Controller check (linux/arm64)", "integration_id": 15368},
         ]
+        assert rule(ruleset, "required_status_checks")["parameters"][
+            "strict_required_status_checks_policy"
+        ] is True
 
 
 def test_merge_methods_preserve_develop_to_main_ancestry() -> None:
@@ -119,6 +132,7 @@ def test_apply_mints_one_token_for_the_whole_invocation(monkeypatch) -> None:
         "converge_actions_permissions",
         lambda token, repository, actions_permissions: None,
     )
+    monkeypatch.setattr(MODULE, "converge_labels", lambda token, repository, labels: None)
     monkeypatch.setattr(MODULE, "upsert_rulesets", lambda token, repository, rulesets: None)
     MODULE.apply("owner/repository", configuration)
     assert tokens == ["token"]
@@ -155,3 +169,69 @@ def test_drifted_actions_permissions_are_updated(monkeypatch, capsys) -> None:
         ("PUT", "actions/permissions", desired),
     ]
     assert capsys.readouterr().out == "updated: Actions permissions\n"
+
+
+def test_labels_are_renamed_and_converged_without_losing_assignments(monkeypatch, capsys) -> None:
+    desired = MODULE.desired_configuration()["labels"]
+    requested = next(label for label in desired["labels"] if label["name"] == "review:requested")
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def request(token, repository, method, path, payload=None):
+        calls.append((method, path, payload))
+        if method == "GET":
+            return [
+                {
+                    "name": "review:approved",
+                    "color": "123456",
+                    "description": "old",
+                },
+                requested,
+            ]
+        return None
+
+    monkeypatch.setattr(MODULE, "github_request", request)
+    MODULE.converge_labels("token", "owner/repository", desired)
+    ready = next(label for label in desired["labels"] if label["name"] == "review:ready-for-ci")
+    changes = next(
+        label for label in desired["labels"] if label["name"] == "review:changes-requested"
+    )
+    assert calls == [
+        ("GET", "labels?per_page=100", None),
+        ("PATCH", "labels/review%3Aapproved", ready),
+        ("POST", "labels", changes),
+    ]
+    assert capsys.readouterr().out == (
+        "renamed label: review:approved -> review:ready-for-ci\n"
+        "unchanged: label review:requested\n"
+        "created label: review:changes-requested\n"
+        "unchanged: label review:ready-for-ci\n"
+    )
+
+
+def test_superseded_label_assignments_are_migrated_before_removal(
+    monkeypatch, capsys
+) -> None:
+    desired = MODULE.desired_configuration()["labels"]
+    live = [*desired["labels"], {"name": "review:approved", "color": "123456"}]
+    calls: list[tuple[str, str]] = []
+
+    def request(token, repository, method, path, payload=None):
+        calls.append((method, path))
+        if path == "labels?per_page=100":
+            return live
+        if path.startswith("issues?state=all"):
+            return [{"number": 17}]
+        return None
+
+    monkeypatch.setattr(MODULE, "github_request", request)
+    MODULE.converge_labels("token", "owner/repository", desired)
+    assert calls == [
+        ("GET", "labels?per_page=100"),
+        (
+            "GET",
+            "issues?state=all&labels=review%3Aapproved&per_page=100&page=1",
+        ),
+        ("POST", "issues/17/labels"),
+        ("DELETE", "labels/review%3Aapproved"),
+    ]
+    assert "removed superseded label: review:approved" in capsys.readouterr().out
