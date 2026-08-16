@@ -1,0 +1,5 @@
+target: brands/brand-alpha.yml
+operation: set
+path: [approval_channel]
+value: telegram:DHOLBEAT_BRAND_ALPHA_UNKNOWN_APPROVAL_CHANNEL
+expected_error: "brand-alpha: approval_channel references unknown secret dholbeat-brand-alpha-unknown-approval-channel"

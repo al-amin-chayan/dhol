@@ -21,6 +21,8 @@ schema_versions:
   n8n_consumer: 1
   hermes_project: 1
   publisher_mapping: 1
+  workflow_export_index: 1
+  workflow_source: 1
 images:
   - image_id: image-alpha
     digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa

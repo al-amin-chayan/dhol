@@ -1,0 +1,5 @@
+target: secrets.yml
+operation: set
+path: [secrets, 1, allowed_principal_ids]
+value: [publisher-alpha]
+expected_error: "brand-alpha: approval channel secret dholbeat-brand-alpha-approval-channel is not allowed for principal brand-alpha"

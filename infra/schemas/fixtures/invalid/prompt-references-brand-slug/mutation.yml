@@ -1,0 +1,5 @@
+target: prompts/prompt-alpha.yml
+operation: set
+path: [template]
+value: "Draft a campaign inspired by brand-alpha's latest launch notes."
+expected_error: "prompt-alpha: prompt references prohibited brand slug 'brand-alpha'"

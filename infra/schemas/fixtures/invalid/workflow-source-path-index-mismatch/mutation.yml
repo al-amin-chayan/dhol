@@ -1,0 +1,5 @@
+target: workflows/workflow-alpha.yml
+operation: set
+path: [source_path]
+value: n8n/exports/workflows/missing-workflow.normalized.json
+expected_error: "workflow-alpha: source path does not match n8n/exports/index.yml"

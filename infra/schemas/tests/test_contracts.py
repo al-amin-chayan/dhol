@@ -18,6 +18,9 @@ sys.path.insert(0, str(SCHEMA_DIR))
 
 from validate import (  # noqa: E402
     SCHEMA_CONTRACTS,
+    _is_forbidden_workflow_key,
+    normalize_workflow_source,
+    schema_errors,
     normalized_bundle,
     validate_bundle,
     validate_registries,
@@ -90,7 +93,7 @@ def test_empty_desired_state_registries_are_valid_and_idempotent() -> None:
     assert second == first
 
 
-def test_two_project_positive_bundle_is_valid_and_round_trips_deterministically() -> None:
+def test_data_only_third_brand_bundle_is_valid_and_deterministic() -> None:
     first_bundle, first_findings = validate_bundle(REPO_ROOT, POSITIVE)
     second_bundle, second_findings = validate_bundle(REPO_ROOT, POSITIVE)
     assert first_findings == []
@@ -103,14 +106,123 @@ def test_two_project_positive_bundle_is_valid_and_round_trips_deterministically(
     assert json.dumps(json.loads(first_normalized), separators=(",", ":"), sort_keys=True) == first_normalized
 
     brands = {manifest["brand"] for _, manifest in first_bundle.many("brands")}
-    assert brands == {"brand-alpha", "brand-beta"}
-    projects = {manifest["project_id"] for _, manifest in first_bundle.many("n8n-consumers")}
-    assert projects == {"project-alpha", "project-beta"}
+    assert brands == {"brand-alpha", "brand-beta", "brand-gamma"}
+    prompts = {manifest["prompt_id"] for _, manifest in first_bundle.many("prompts")}
+    workflows = {manifest["workflow_id"] for _, manifest in first_bundle.many("workflows")}
+    mappings = {
+        manifest["mapping_id"]: manifest
+        for _, manifest in first_bundle.many("publisher-mappings")
+    }
+    assert prompts == {"prompt-alpha", "prompt-beta"}
+    assert workflows == {"workflow-alpha", "workflow-beta"}
+    assert set(mappings) == {"publisher-alpha", "publisher-beta", "publisher-gamma"}
+    assert mappings["publisher-gamma"]["brands"] == [
+        {"brand_id": "brand-gamma", "account_ids": ["fixture-gamma-social"]}
+    ]
+    consumer_projects = {
+        manifest["project_id"] for _, manifest in first_bundle.many("n8n-consumers")
+    }
+    assert consumer_projects == {"project-alpha", "project-beta"}
     assert all(
         manifest["credential_ids"] == []
         for directory in ("n8n-consumers", "hermes-projects")
         for _, manifest in first_bundle.many(directory)
     )
+
+
+def test_brand_profiles_validate_against_schema() -> None:
+    schema = REPO_ROOT / SCHEMA_CONTRACTS["brand"]
+    for brand_path in sorted((REPO_ROOT / "brands").glob("*.yaml")):
+        brand = load_yaml(brand_path)
+        findings = schema_errors(
+            brand, schema, brand_path.relative_to(REPO_ROOT).as_posix()
+        )
+        assert not findings, f"{brand_path.name}: {findings}"
+
+
+def test_workflow_source_normalization_is_stable_and_removes_volatiles() -> None:
+    source = json.loads(
+        (POSITIVE / "n8n/exports/workflows/workflow-alpha.normalized.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    source["updatedAt"] = "2026-01-01T00:00:00Z"
+    source["nodes"][0]["position"] = [100, 200]
+    source["nodes"][0]["webhookId"] = "uuid-placeholder"
+    source["nodes"][0]["notes"] = "caption note"
+    source["nodes"][0]["parameters"] = {"options": {"disabled": True}}
+
+    normalized, removed = normalize_workflow_source(source)
+    assert "$.updatedAt" in removed
+    assert "$.nodes[0].position" in removed
+    assert "$.nodes[0].webhookId" in removed
+    assert "$.nodes[0].notes" in removed
+    assert "$.nodes[0].parameters.disabled" not in removed
+    assert "$.nodes[0].parameters.options.disabled" not in removed
+    assert "$.updatedAt" not in normalized
+    assert "position" not in normalized["nodes"][0]
+    assert "webhookId" not in normalized["nodes"][0]
+    assert "disabled" in normalized["nodes"][0]["parameters"]["options"]
+
+    repeated, _ = normalize_workflow_source(normalized)
+    assert normalized == repeated
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "credentials",
+        "apiKey",
+        "APIKey",
+        "api_key",
+        "apikey",
+        "accessToken",
+        "bearerToken",
+        "password",
+        "auth",
+        "authorization",
+        "privateKey",
+        "private_key",
+        "privatekey",
+        "client_secret",
+    ],
+)
+def test_workflow_source_scan_flags_credential_field_names(field: str) -> None:
+    assert _is_forbidden_workflow_key(field)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "author",
+        "authorName",
+        "authors",
+        "capital",
+        "capitalize",
+        "rapid",
+        "apiVersion",
+        "tokenize",
+        "secretary",
+    ],
+)
+def test_workflow_source_scan_allows_safe_field_names(field: str) -> None:
+    assert not _is_forbidden_workflow_key(field)
+
+
+def test_workflow_source_scan_does_not_flag_safe_parameter_names(tmp_path: Path) -> None:
+    bundle_path = tmp_path / "bundle"
+    shutil.copytree(POSITIVE, bundle_path)
+    source_path = (
+        bundle_path / "n8n/exports/workflows/workflow-alpha.normalized.json"
+    )
+    source = json.loads(source_path.read_text(encoding="utf-8"))
+    source["nodes"][0]["parameters"]["authorName"] = "fixture-author"
+    source["nodes"][0]["parameters"]["apiVersion"] = "v1"
+    source_path.write_text(
+        json.dumps(source, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    _, findings = validate_bundle(REPO_ROOT, bundle_path)
+    assert findings == []
 
 
 def test_explicit_rfc1918_route_origin_is_valid(tmp_path: Path) -> None:

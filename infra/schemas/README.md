@@ -66,9 +66,11 @@ looking placeholders.
 
 ## Fixture matrix
 
-The positive bundle contains two credential-free projects and brands. Invalid
-fixtures are overlays on that bundle; tests assert the named policy failure so
-a YAML parse error cannot accidentally satisfy a negative test.
+The positive bundle contains three fixture projects and brands. The gamma variant
+adds only brand, scoped-secret, and publisher-mapping data; the prompt and workflow
+sets remain unchanged to prove the data-only extension point. Invalid fixtures are
+overlays on that bundle; tests assert the named policy failure so a YAML parse error
+cannot accidentally satisfy a negative test.
 
 | Fixture | Intended failure |
 | --- | --- |
@@ -86,6 +88,10 @@ a YAML parse error cannot accidentally satisfy a negative test.
 | `unbounded-log` | service has no bounded log policy |
 | `unbounded-volume` | volume has no size quota |
 | `floating-ref` | external source follows a branch |
+| `brand-approval-channel-unresolved` | brand approval channel reference is not declared in `secrets.yml` |
+| `brand-approval-channel-principal-scope` | approval channel secret omits the consuming brand principal |
+| `prompt-autonomous-publish-policy` | prompt safety policy permits autonomous publishing |
+| `prompt-bangla-image-policy` | prompt safety policy permits image-generated text instead of overlays |
 | `shared-hermes-mount` | two Hermes projects share `/opt/data` |
 | `shared-hermes-state` | two Hermes projects share local state |
 | `unknown-writable-path` | service declares a path with no volume |
@@ -115,5 +121,6 @@ a YAML parse error cannot accidentally satisfy a negative test.
 | `release-image-digest-mismatch` | release receipt differs from the image lock |
 
 All fixture identities are synthetic (`project-alpha`, `project-beta`,
-`brand-alpha`, and `brand-beta`). Validation performs no network, provider, or
+`project-gamma`, `brand-alpha`, `brand-beta`, and `brand-gamma`).
+Validation performs no network, provider, or
 host access and adds no monthly cost.

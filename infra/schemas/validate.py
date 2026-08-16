@@ -21,6 +21,63 @@ PRIVATE_ORIGIN_NETWORKS = tuple(
     ipaddress.ip_network(network)
     for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7")
 )
+WORKFLOW_EXPORT_INDEX_SCHEMA_PATH = Path("n8n/workflow-export-index.schema.json")
+WORKFLOW_SOURCE_SCHEMA_PATH = Path("n8n/workflow-source.schema.json")
+WORKFLOW_TOPLEVEL_VOLATILE_FIELDS = {
+    "id",
+    "name",
+    "updatedat",
+    "updated_at",
+    "createdat",
+    "created_at",
+    "settings",
+    "active",
+    "tags",
+    "static_data",
+    "pin_data",
+    "notes",
+    "trigger_count",
+    "version_id",
+    "versionid",
+    "status",
+}
+WORKFLOW_NODE_VOLATILE_FIELDS = {
+    "position",
+    "notes",
+    "typeversion",
+    "type_version",
+    "webhookid",
+    "webhook_id",
+    "disabled",
+    "alwaysoutputdata",
+    "continueonfail",
+    "onerror",
+    "retryonfail",
+    "maxtries",
+}
+WORKFLOW_NODE_PATH_RE = re.compile(r"^\$\.nodes\[\d+\]$")
+
+REVISION_KEY_TEMPLATE = (
+    "project/{project_id}/brand/{brand_id}/content/{content_id}/revision/{revision}"
+)
+IDEMPOTENCY_KEY_TEMPLATE = (
+    "project/{project_id}/brand/{brand_id}/content/{content_id}/revision/{revision}/"
+    "{channel}/{scheduled_at}"
+)
+FORBIDDEN_WORKFLOW_KEY_TOKENS = {
+    "credential",
+    "credentials",
+    "token",
+    "secret",
+    "password",
+    "auth",
+    "authorization",
+}
+FORBIDDEN_WORKFLOW_KEY_TOKEN_PAIRS = {"apikey", "privatekey"}
+FORBIDDEN_WORKFLOW_TEXT = ("autonomous", "autopublish", "bangla text")
+PROMPT_APPROVED_PUBLISH_POLICY = "human-approved-only"
+PROMPT_APPROVED_IMAGE_TEXT_POLICY = "overlay-only"
+WORKFLOW_FIELD_TOKEN_RE = re.compile(r"[a-z0-9]+")
 
 SCHEMA_CONTRACTS = {
     "backup_adapter": "infra/schemas/backup-adapter.schema.json",
@@ -33,6 +90,8 @@ SCHEMA_CONTRACTS = {
     "prompt": "prompts/prompt.schema.json",
     "publisher_mapping": "stack/publisher/mapping.schema.json",
     "release": "infra/schemas/release.schema.json",
+    "workflow_export_index": "n8n/workflow-export-index.schema.json",
+    "workflow_source": "n8n/workflow-source.schema.json",
     "route": "infra/schemas/route.schema.json",
     "secret_catalog": "infra/schemas/secret-catalog.schema.json",
     "service": "infra/schemas/service.schema.json",
@@ -99,6 +158,14 @@ def load_yaml(path: Path) -> dict[str, Any]:
     return document
 
 
+def load_json(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as handle:
+        document = json.load(handle)
+    if not isinstance(document, dict):
+        raise ValueError("expected a JSON object")
+    return document
+
+
 def schema_errors(
     document: dict[str, Any], schema_path: Path, document_name: str
 ) -> list[str]:
@@ -113,6 +180,162 @@ def schema_errors(
         location = ".".join(str(part) for part in error.absolute_path) or "$"
         findings.append(f"{document_name}: schema at {location}: {error.message}")
     return findings
+
+
+def _normalized_workflow_field_name(field: Any) -> str:
+    return "".join(ch for ch in str(field).lower() if ch.isalnum())
+
+
+def _tokenized_workflow_field_names(field: Any) -> list[str]:
+    normalized = str(field).strip()
+    if not normalized:
+        return []
+    segmented = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", normalized)
+    segmented = segmented.replace("-", " ").replace("_", " ")
+    return [match.group(0) for match in WORKFLOW_FIELD_TOKEN_RE.finditer(segmented.lower())]
+
+
+def _is_forbidden_workflow_key(field: Any) -> bool:
+    tokens = _tokenized_workflow_field_names(field)
+    if not tokens:
+        return False
+    if any(token in FORBIDDEN_WORKFLOW_KEY_TOKENS for token in tokens):
+        return True
+    if any(token in FORBIDDEN_WORKFLOW_KEY_TOKEN_PAIRS for token in tokens):
+        return True
+    for index in range(len(tokens) - 1):
+        if "".join(tokens[index : index + 2]) in FORBIDDEN_WORKFLOW_KEY_TOKEN_PAIRS:
+            return True
+    return False
+
+
+def _resolve_source_file(relative_path: Path, roots: Iterable[Path]) -> Path | None:
+    if relative_path.is_absolute():
+        return relative_path if relative_path.is_file() else None
+    for root in roots:
+        candidate = root / relative_path
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _approval_channel_secret_id(approval_channel: str) -> str:
+    if ":" not in approval_channel:
+        return ""
+    return approval_channel.rsplit(":", 1)[1].lower().replace("_", "-")
+
+WORKFLOW_METADATA_KEYS = {
+    "schema_version",
+    "workflow_id",
+    "project_id",
+    "brand_id",
+    "owner",
+    "stage",
+    "trigger",
+    "timeout_seconds",
+    "input_schema_id",
+    "output_schema_id",
+    "retention",
+}
+
+
+def scan_forbidden_workflow_fields(
+    value: Any,
+    principal: str,
+    findings: list[str],
+    *,
+    forbidden_brand_names: set[str],
+    path: str = "$",
+) -> None:
+    if isinstance(value, dict):
+        for field, nested in value.items():
+            if _is_forbidden_workflow_key(field):
+                findings.append(
+                    f"{principal}: forbidden credential field in workflow source at {path}.{field}"
+                )
+            scan_forbidden_workflow_fields(
+                nested,
+                principal,
+                findings,
+                forbidden_brand_names=forbidden_brand_names,
+                path=f"{path}.{str(field)}",
+            )
+    elif isinstance(value, list):
+        for index, nested in enumerate(value):
+            scan_forbidden_workflow_fields(
+                nested,
+                principal,
+                findings,
+                forbidden_brand_names=forbidden_brand_names,
+                path=f"{path}[{index}]",
+            )
+    elif isinstance(value, str):
+        if any(path == f"$.{metadata_key}" for metadata_key in WORKFLOW_METADATA_KEYS):
+            return
+        lowered = value.lower()
+        if any(marker in lowered for marker in FORBIDDEN_WORKFLOW_TEXT):
+            findings.append(
+                f"{principal}: forbidden keyword in workflow source value at {path}"
+            )
+        for brand_name in sorted(forbidden_brand_names):
+            if brand_name and brand_name in lowered:
+                findings.append(
+                    f"{principal}: workflow source references prohibited brand slug '{brand_name}'"
+                )
+
+
+def prompt_policy_errors(
+    prompt_id: str,
+    prompt: dict[str, Any],
+    brand_names: set[str],
+    findings: list[str],
+) -> None:
+    safety = prompt["safety"]
+    if safety["publish_policy"] != PROMPT_APPROVED_PUBLISH_POLICY:
+        findings.append(
+            f"{prompt_id}: prompt safety publish_policy must be {PROMPT_APPROVED_PUBLISH_POLICY}"
+        )
+    if safety["image_text_policy"] != PROMPT_APPROVED_IMAGE_TEXT_POLICY:
+        findings.append(
+            f"{prompt_id}: prompt safety image_text_policy must be {PROMPT_APPROVED_IMAGE_TEXT_POLICY}"
+        )
+    lowered_template = prompt["template"].lower()
+    for brand_name in sorted(brand_names):
+        if brand_name and brand_name in lowered_template:
+            findings.append(
+                f"{prompt_id}: prompt references prohibited brand slug '{brand_name}'"
+            )
+
+
+def normalize_workflow_source(source: Any) -> tuple[dict[str, Any], list[str]]:
+    """Return a canonical workflow-source copy and a list of removed volatile fields."""
+
+    removed: list[str] = []
+
+    def _normalize(node: Any, path: str) -> Any:
+        if isinstance(node, dict):
+            items = sorted(node.items(), key=lambda item: str(item[0]))
+            result: dict[str, Any] = {}
+            for key, value in items:
+                field = str(key)
+                key_norm = _normalized_workflow_field_name(field)
+                normalized_path = f"{path}.{field}" if path else str(field)
+                if path == "$" and key_norm in WORKFLOW_TOPLEVEL_VOLATILE_FIELDS:
+                    removed.append(normalized_path)
+                    continue
+                if WORKFLOW_NODE_PATH_RE.fullmatch(path) and key_norm in WORKFLOW_NODE_VOLATILE_FIELDS:
+                    removed.append(normalized_path)
+                    continue
+                result[field] = _normalize(value, normalized_path)
+            return result
+        if isinstance(node, list):
+            return [_normalize(item, f"{path}[{index}]") for index, item in enumerate(node)]
+        return node
+
+    normalized = _normalize(source, "$")
+    if not isinstance(normalized, dict):
+        raise TypeError("workflow source payload must be a JSON object")
+    return normalized, removed
 
 
 def declared_schema_versions(root: Path) -> dict[str, int]:
@@ -273,8 +496,10 @@ def origin_policy_errors(
     return [f"{route_id}: unsupported origin kind {kind}"]
 
 
-def validate_cross_file(bundle: Bundle) -> list[str]:
+def validate_cross_file(root: Path, bundle: Bundle, bundle_path: Path) -> list[str]:
     findings: list[str] = []
+    source_roots = [bundle_path]
+
     hosts = index_records(bundle.one("inventory.yml")["hosts"], "id", "inventory", findings)
     services = index_records(bundle.one("registry.yml")["services"], "id", "services", findings)
     images = index_records(bundle.one("images.lock.yml")["images"], "id", "images", findings)
@@ -289,7 +514,7 @@ def validate_cross_file(bundle: Bundle) -> list[str]:
     )
     secrets = index_records(bundle.one("secrets.yml")["secrets"], "id", "secrets", findings)
     brands = component_index(bundle, "brands", "brand", "brands", findings)
-    component_index(bundle, "prompts", "prompt_id", "prompts", findings)
+    prompts = component_index(bundle, "prompts", "prompt_id", "prompts", findings)
     workflows = component_index(bundle, "workflows", "workflow_id", "workflows", findings)
     consumers = component_index(
         bundle, "n8n-consumers", "consumer_id", "n8n consumers", findings
@@ -300,6 +525,44 @@ def validate_cross_file(bundle: Bundle) -> list[str]:
     publisher_mappings = component_index(
         bundle, "publisher-mappings", "mapping_id", "publisher mappings", findings
     )
+    workflow_exports: dict[str, dict[str, Any]] = {}
+    export_index_path = _resolve_source_file(Path("n8n/exports/index.yml"), source_roots)
+    try:
+        if export_index_path is None:
+            raise OSError("missing workflow export index")
+        export_index = load_yaml(export_index_path)
+    except (OSError, ValueError, yaml.YAMLError) as error:
+        findings.append(f"n8n/exports/index.yml: cannot load YAML: {error}")
+    else:
+        findings.extend(
+            schema_errors(
+                export_index,
+                root / WORKFLOW_EXPORT_INDEX_SCHEMA_PATH,
+                "n8n/exports/index.yml",
+            )
+        )
+        if isinstance(export_index, dict):
+            records = export_index.get("workflows")
+            if isinstance(records, list):
+                workflow_exports = index_records(records, "workflow_id", "workflow export index", findings)
+            else:
+                findings.append("n8n/exports/index.yml: workflows must be an array")
+
+    for workflow_id, workflow_export in workflow_exports.items():
+        if workflow_id not in workflows:
+            findings.append(
+                f"workflow export index: workflow {workflow_id} has no matching manifest"
+            )
+        if not COMMIT_RE.fullmatch(workflow_export["source_commit"]):
+            findings.append(
+                f"n8n/exports/index.yml: workflow {workflow_id} has invalid source_commit"
+            )
+        source_path = _resolve_source_file(Path(workflow_export["source_path"]), source_roots)
+        if source_path is None:
+            findings.append(
+                f"n8n/exports/index.yml: workflow {workflow_id} references missing source_path"
+            )
+
     principal_projects: dict[str, str] = {}
     for label, principal_index in (
         ("service", services),
@@ -497,12 +760,150 @@ def validate_cross_file(bundle: Bundle) -> list[str]:
             findings,
         )
 
+        approval_secret_id = _approval_channel_secret_id(brand["approval_channel"])
+        approval_secret = require_reference(
+            brand_id,
+            "approval_channel",
+            approval_secret_id,
+            secrets,
+            "secret",
+            findings,
+        )
+        if approval_secret is not None and brand["project_id"] not in approval_secret["allowed_project_ids"]:
+            findings.append(
+                f"{brand_id}: approval channel secret {approval_secret_id} is not for {brand['project_id']}"
+            )
+        if approval_secret is not None and approval_secret["owner_project_id"] not in {
+            "platform",
+            brand["project_id"],
+        }:
+            findings.append(
+                f"{brand_id}: approval channel secret {approval_secret_id} is owned by "
+                f"{approval_secret['owner_project_id']}"
+            )
+        if approval_secret is not None and brand_id not in approval_secret["allowed_principal_ids"]:
+            findings.append(
+                f"{brand_id}: approval channel secret {approval_secret_id} is not allowed "
+                f"for principal {brand_id}"
+            )
+
+    brand_names = {brand["brand"] for brand in brands.values()}
+    for prompt_id, prompt in prompts.items():
+        prompt_policy_errors(prompt_id, prompt, brand_names, findings)
+
     for workflow_id, workflow in workflows.items():
+        workflow_export = workflow_exports.get(workflow_id)
+        if workflow_export is None:
+            findings.append(f"{workflow_id}: workflow is not present in n8n/exports/index.yml")
+        else:
+            if workflow_export["project_id"] != workflow["project_id"]:
+                findings.append(
+                    f"{workflow_id}: workflow/project mismatch with export index"
+                )
+            if workflow_export["source_path"] != workflow["source_path"]:
+                findings.append(
+                    f"{workflow_id}: source path does not match n8n/exports/index.yml"
+                )
+            if workflow_export["source_commit"] != workflow["source_commit"]:
+                findings.append(
+                    f"{workflow_id}: source commit does not match n8n/exports/index.yml"
+                )
         if not COMMIT_RE.fullmatch(workflow["source_commit"]):
             findings.append(f"{workflow_id}: floating source ref {workflow['source_commit']} is forbidden")
+        if workflow["revision_key_template"] != REVISION_KEY_TEMPLATE:
+            findings.append(
+                f"{workflow_id}: revision_key_template must be {REVISION_KEY_TEMPLATE}"
+            )
+        if workflow["idempotency_key_template"] != IDEMPOTENCY_KEY_TEMPLATE:
+            findings.append(
+                f"{workflow_id}: idempotency_key_template must be {IDEMPOTENCY_KEY_TEMPLATE}"
+            )
         brand = require_reference(workflow_id, "brand_id", workflow["brand_id"], brands, "brand", findings)
         if brand is not None and brand["project_id"] != workflow["project_id"]:
             findings.append(f"{workflow_id}: workflow and brand have different owners")
+        source_path = _resolve_source_file(Path(workflow["source_path"]), source_roots)
+        if source_path is None:
+            findings.append(
+                f"{workflow_id}: workflow source file missing at {workflow['source_path']}"
+            )
+        else:
+            try:
+                source = load_json(source_path)
+            except (OSError, ValueError, json.JSONDecodeError) as error:
+                findings.append(f"{workflow_id}: workflow source is invalid: {error}")
+            else:
+                normalized_source, removed_workflow_fields = normalize_workflow_source(source)
+                if removed_workflow_fields:
+                    findings.append(
+                        f"{workflow_id}: workflow source is not normalized at "
+                        f"{', '.join(sorted(removed_workflow_fields))}"
+                    )
+                findings.extend(
+                    schema_errors(
+                        normalized_source,
+                        root / WORKFLOW_SOURCE_SCHEMA_PATH,
+                        workflow["source_path"],
+                    )
+                )
+                if normalized_source.get("workflow_id") != workflow["workflow_id"]:
+                    findings.append(
+                        f"{workflow_id}: workflow source workflow_id does not match manifest"
+                    )
+                if normalized_source.get("project_id") != workflow["project_id"]:
+                    findings.append(
+                        f"{workflow_id}: workflow source project_id does not match manifest"
+                    )
+                if normalized_source.get("brand_id") != workflow["brand_id"]:
+                    findings.append(
+                        f"{workflow_id}: workflow source brand_id does not match manifest"
+                    )
+                if normalized_source.get("owner") != workflow["project_id"]:
+                    findings.append(
+                        f"{workflow_id}: workflow source owner must match project_id"
+                    )
+                if normalized_source.get("stage") != workflow["stage"]:
+                    findings.append(
+                        f"{workflow_id}: workflow source stage does not match manifest"
+                    )
+                if normalized_source.get("trigger") != workflow["trigger"]:
+                    findings.append(
+                        f"{workflow_id}: workflow source trigger does not match manifest"
+                    )
+                if normalized_source.get("timeout_seconds") != workflow["timeout_seconds"]:
+                    findings.append(
+                        f"{workflow_id}: workflow source timeout_seconds does not match manifest"
+                    )
+                if (
+                    normalized_source.get("input_schema_id")
+                    != workflow["input_schema_id"]
+                ):
+                    findings.append(
+                        f"{workflow_id}: workflow source input_schema_id does not match manifest"
+                    )
+                if (
+                    normalized_source.get("output_schema_id")
+                    != workflow["output_schema_id"]
+                ):
+                    findings.append(
+                        f"{workflow_id}: workflow source output_schema_id does not match manifest"
+                    )
+                if (
+                    normalized_source.get("revision_key_template")
+                    != REVISION_KEY_TEMPLATE
+                ):
+                    findings.append(
+                        f"{workflow_id}: workflow source revision_key_template must be {REVISION_KEY_TEMPLATE}"
+                    )
+                if (
+                    normalized_source.get("idempotency_key_template")
+                    != IDEMPOTENCY_KEY_TEMPLATE
+                ):
+                    findings.append(
+                        f"{workflow_id}: workflow source idempotency_key_template must be {IDEMPOTENCY_KEY_TEMPLATE}"
+                    )
+                scan_forbidden_workflow_fields(
+                    normalized_source, workflow_id, findings, forbidden_brand_names=brand_names
+                )
         credential_scope_errors(
             workflow_id,
             workflow["project_id"],
@@ -666,7 +1067,7 @@ def validate_bundle(root: Path, bundle_path: Path) -> tuple[Bundle | None, list[
     bundle, findings = load_bundle(root, bundle_path)
     if bundle is None:
         return None, findings
-    return bundle, validate_cross_file(bundle)
+    return bundle, validate_cross_file(root, bundle, bundle_path)
 
 
 def normalized_bundle(bundle: Bundle) -> str:

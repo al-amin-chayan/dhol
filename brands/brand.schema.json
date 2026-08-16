@@ -23,7 +23,7 @@
       "propertyNames": {"pattern": "^[a-z][a-z0-9-]*$"},
       "additionalProperties": {"type": "string", "pattern": "^[0-9]+(?:-[0-9]+)?/wk$"}
     },
-    "approval_channel": {"type": "string", "pattern": "^[a-z][a-z0-9-]*:[A-Za-z0-9_-]+$"},
+    "approval_channel": {"type": "string", "pattern": "^[a-z][a-z0-9-]*:DHOLBEAT_[A-Z0-9_]+$"},
     "visual": {
       "type": "object",
       "additionalProperties": false,

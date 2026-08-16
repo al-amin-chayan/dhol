@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "workflow_id": "workflow-beta",
+  "project_id": "project-beta",
+  "brand_id": "brand-beta",
+  "owner": "project-beta",
+  "stage": "publishing",
+  "trigger": "webhook",
+  "timeout_seconds": 300,
+  "input_schema_id": "content-revision-v1",
+  "output_schema_id": "publish-result-v1",
+  "revision_key_template": "project/{project_id}/brand/{brand_id}/content/{content_id}/revision/{revision}",
+  "idempotency_key_template": "project/{project_id}/brand/{brand_id}/content/{content_id}/revision/{revision}/{channel}/{scheduled_at}",
+  "retention": {
+    "success_days": 1,
+    "failure_days": 7,
+    "owner": "project-beta"
+  },
+  "nodes": [
+    {
+      "id": "approval_trigger",
+      "type": "n8n-nodes-base.Webhook",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "content-approval",
+        "responseMode": "onReceived"
+      }
+    },
+    {
+      "id": "approval_gate",
+      "type": "n8n-nodes-base.If",
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true
+          },
+          "conditions": [
+            {
+              "value1": "={{ $json.approval_state }}",
+              "operation": "equal",
+              "value2": "final-approved"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "prepare_publish_input",
+      "type": "n8n-nodes-base.Set",
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "revision",
+              "value": "={{ $json.content.revision }}"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

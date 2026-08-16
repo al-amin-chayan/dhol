@@ -5,4 +5,28 @@ stage: research
 template: "Summarize fixture signals using {{ brand_profile }} and {{ evidence }}."
 input_keys: [brand_profile, evidence]
 output_contract: fixture-research-v1
+output_schema:
+  type: object
+  required: [summary]
+  properties:
+    summary:
+      type: string
+    recommendations:
+      type: array
+      items:
+        type: string
 prohibited_outputs: [AI avatar testimonials, unsupported claims]
+model:
+  provider: claude
+  model: claude-opus
+  capability: summarization
+max_tokens: 1800
+max_cost_usd: 0.04
+retry_policy:
+  max_attempts: 2
+  backoff_seconds: 5
+safety:
+  disallowed_claims: [medical claims, unsupported claims]
+  required_disclosure_tags: [ai-generated]
+  publish_policy: human-approved-only
+  image_text_policy: overlay-only
