@@ -73,7 +73,10 @@ Ranked, cheapest first:
 ## Cross-review in practice
 
 Every tracked implementation task requires review by the other model at the
-exact head that may merge. Review is never author-triggered or automated:
+exact head that may merge. The complete baseline/follow-up contract, finding
+format, labels, and auto-merge rules live in
+[`pr-review-workflow.md`](pr-review-workflow.md). Review is never
+author-triggered or automated:
 
 1. The author finishes the lane, rebases on `develop`, runs the required checks,
    and publishes a ready-for-review PR or local handoff containing the exact
@@ -85,22 +88,24 @@ exact head that may merge. Review is never author-triggered or automated:
 2. The founder explicitly starts a separate session of the **other** model and
    asks it to review that SHA. For a local lane, point it at
    `.worktrees/<slug>`; for a PR, provide the PR number and head SHA.
-3. The reviewer first verifies that the checked-out or remote head equals the
-   founder-requested SHA, then posts findings as `blocker` / `required` /
-   `suggestion`, each
-   with a citation (a rule in `AGENTS.md` / `README.md`, or a concrete failure
-   scenario). No citation → it is a `suggestion` and does not gate the merge.
-4. The author adjudicates every finding (`accept` / `already-done` / `reject`
-   with evidence / `out-of-scope`), fixes the whole class, and re-checks its
-   own diff before replying. A fix changes the head, so the author hands the
-   new SHA back to the founder; only the founder may trigger the next review.
-5. Merge commit body records:
+3. The reviewer verifies the requested SHA, performs the one full-scope
+   `Baseline` review without stopping at the first failure, and returns one
+   consolidated finding set with evidence, an ask, and a probable fix for each
+   finding.
+4. Before editing, the author adjudicates every finding with evidence. It does
+   not blindly copy the suggested fix. Accepted findings are fixed by failure
+   class and the new full SHA goes back to the founder.
+5. Every founder-triggered review after the baseline is a `Follow-up`: verify
+   all dispositions and fixes, accept sound explanations, and inspect the fix
+   delta for introduced regressions or additional findings.
+6. Merge evidence records:
    ```
    Reviewer: Codex
    Reviewed head: <sha>
    ```
-6. Two rounds max. Still contested → both stop, write a
-   `Needs founder decision` block, and ask.
+7. Baseline plus one follow-up is the normal limit. Still contested → both
+   stop, write a `Needs founder decision` block, and ask. Any later
+   founder-directed review remains a follow-up.
 
 The reviewer uses its own personal GitHub App identity for any GitHub read or
 write. Codex never uses Claude Code's App profile, and Claude Code never uses

@@ -91,11 +91,18 @@ GitHub rulesets: `docs/agents/branch-workflow.md`.
 - Reviewer mindset is adversarial: verify claims against files and against
   `README.md`'s constraints (cost, disk, disclosure rules), not against the
   author's summary.
+- The first formal review is a full end-to-end **Baseline** review: inspect the
+  entire implementation and return one consolidated finding set, including a
+  probable fix for every finding. Do not stop at the first failure. Every
+  later review is a **Follow-up** that verifies every prior disposition/fix,
+  accepts sound explanations, and checks the fix delta for introduced issues.
 - Record the review verdict in the merge commit body or in the lane's handoff
   note: `Reviewer: <Codex|Claude Code>` + `Reviewed head: <sha>`.
 - Findings are `blocker` / `required` / `suggestion`. The implementer
-  adjudicates each (`accept` / `already-done` / `reject` with evidence) before
-  fixing. Two rounds max; still contested → stop and ask the founder.
+  adjudicates each with evidence before editing and never applies a suggested
+  fix blindly. Baseline plus one follow-up is the normal limit; still
+  contested → stop and ask the founder. Full contract:
+  `docs/agents/pr-review-workflow.md`.
 
 ## GitHub identity
 
