@@ -151,17 +151,21 @@ head.
 
 ## Bootstrap and reproduction
 
-PR #35, which introduces this protocol, is reviewed under the existing branch
-rules. Its workflow has a one-PR bootstrap exception because the gate script is
-not yet on `develop`; a missing script fails closed for every other PR. Do not
-activate the new required check before #35 merges, which would deadlock the
-bootstrap. After that PR merges, run:
+PR #35 introduced this protocol under the branch rules that existed before the
+trusted gate script was on `develop`. Its workflow therefore carried a one-PR
+bootstrap exception during review. After #35 merged, the installer converged
+the live configuration and a second apply reported every managed setting
+unchanged. The bootstrap exception has since been removed, so a missing trusted
+gate script now fails closed for every PR.
+
+Reproduce or reconverge the live configuration at any time with:
 
 ```bash
 scripts/configure-github-rulesets.py --apply
 ```
 
-This renames `review:approved` to `review:ready-for-ci`, converges all managed
-review labels, enables native auto-merge, and adds the trusted gate to both
-protected-branch rulesets. The command uses only the running agent's personal
-GitHub App profile.
+This converges all managed review labels, repository settings, Actions policy,
+and both protected-branch rulesets, including native auto-merge and the trusted
+cross-review gate. It also migrates `review:approved` to
+`review:ready-for-ci` when the old label exists. The command is idempotent and
+uses only the running agent's personal GitHub App profile.
