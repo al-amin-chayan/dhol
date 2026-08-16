@@ -16,6 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 TOKEN_HELPER = REPO_ROOT / "scripts/github-app-token.sh"
 DEFAULT_REPOSITORY = "al-amin-chayan/dhol"
 SETTINGS_FILE = REPO_ROOT / ".github/repository-settings.json"
+ACTIONS_PERMISSIONS_FILE = REPO_ROOT / ".github/actions-permissions.json"
 RULESET_FILES = (
     REPO_ROOT / ".github/rulesets/develop.json",
     REPO_ROOT / ".github/rulesets/main.json",
@@ -39,6 +40,7 @@ def load_json(path: Path) -> dict[str, Any]:
 def desired_configuration() -> dict[str, Any]:
     return {
         "repository_settings": load_json(SETTINGS_FILE),
+        "actions_permissions": load_json(ACTIONS_PERMISSIONS_FILE),
         "rulesets": [load_json(path) for path in RULESET_FILES],
     }
 
@@ -146,6 +148,20 @@ def upsert_rulesets(token: str, repository: str, rulesets: list[dict[str, Any]])
             print(f"created: {desired['name']}")
 
 
+def converge_actions_permissions(
+    token: str,
+    repository: str,
+    desired: dict[str, Any],
+) -> None:
+    path = "actions/permissions"
+    live = github_request(token, repository, "GET", path)
+    if all(live.get(key) == value for key, value in desired.items()):
+        print("unchanged: Actions permissions")
+        return
+    github_request(token, repository, "PUT", path, desired)
+    print("updated: Actions permissions")
+
+
 def apply(repository: str, configuration: dict[str, Any]) -> None:
     token = mint_token()
     ensure_develop(token, repository)
@@ -156,6 +172,7 @@ def apply(repository: str, configuration: dict[str, Any]) -> None:
     else:
         github_request(token, repository, "PATCH", "", repository_settings)
         print("updated: repository settings")
+    converge_actions_permissions(token, repository, configuration["actions_permissions"])
     upsert_rulesets(token, repository, configuration["rulesets"])
 
 

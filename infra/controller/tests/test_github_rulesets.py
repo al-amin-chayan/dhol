@@ -26,6 +26,11 @@ def test_develop_first_configuration_is_complete() -> None:
         "allow_rebase_merge": False,
         "delete_branch_on_merge": True,
     }
+    assert configuration["actions_permissions"] == {
+        "enabled": True,
+        "allowed_actions": "all",
+        "sha_pinning_required": True,
+    }
     rulesets = {item["conditions"]["ref_name"]["include"][0]: item for item in configuration["rulesets"]}
     assert set(rulesets) == {"refs/heads/develop", "refs/heads/main"}
 
@@ -109,6 +114,44 @@ def test_apply_mints_one_token_for_the_whole_invocation(monkeypatch) -> None:
     monkeypatch.setattr(MODULE, "mint_token", mint)
     monkeypatch.setattr(MODULE, "ensure_develop", lambda token, repository: None)
     monkeypatch.setattr(MODULE, "github_request", repository_request)
+    monkeypatch.setattr(
+        MODULE,
+        "converge_actions_permissions",
+        lambda token, repository, actions_permissions: None,
+    )
     monkeypatch.setattr(MODULE, "upsert_rulesets", lambda token, repository, rulesets: None)
     MODULE.apply("owner/repository", configuration)
     assert tokens == ["token"]
+
+
+def test_unchanged_actions_permissions_do_not_issue_a_write(monkeypatch, capsys) -> None:
+    desired = MODULE.desired_configuration()["actions_permissions"]
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def request(token, repository, method, path, payload=None):
+        calls.append((method, path, payload))
+        return {**desired, "selected_actions_url": "https://api.github.test/selected-actions"}
+
+    monkeypatch.setattr(MODULE, "github_request", request)
+    MODULE.converge_actions_permissions("token", "owner/repository", desired)
+    assert calls == [("GET", "actions/permissions", None)]
+    assert capsys.readouterr().out == "unchanged: Actions permissions\n"
+
+
+def test_drifted_actions_permissions_are_updated(monkeypatch, capsys) -> None:
+    desired = MODULE.desired_configuration()["actions_permissions"]
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def request(token, repository, method, path, payload=None):
+        calls.append((method, path, payload))
+        if method == "GET":
+            return {**desired, "sha_pinning_required": False}
+        return None
+
+    monkeypatch.setattr(MODULE, "github_request", request)
+    MODULE.converge_actions_permissions("token", "owner/repository", desired)
+    assert calls == [
+        ("GET", "actions/permissions", None),
+        ("PUT", "actions/permissions", desired),
+    ]
+    assert capsys.readouterr().out == "updated: Actions permissions\n"

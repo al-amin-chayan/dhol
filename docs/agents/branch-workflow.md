@@ -31,9 +31,11 @@ blocked.
 
 ## Reproduce GitHub settings
 
-The desired repository settings and active rulesets are committed in:
+The desired repository settings, Actions policy, and active rulesets are
+committed in:
 
 - `.github/repository-settings.json`
+- `.github/actions-permissions.json`
 - `.github/rulesets/develop.json`
 - `.github/rulesets/main.json`
 
@@ -51,6 +53,7 @@ scripts/configure-github-rulesets.py --apply
 
 The installer detects the running agent, mints one fresh token for the
 installer invocation, creates `develop` from `main` only when missing,
-converges repository merge defaults and the two named rulesets, and reports
-whether each item changed. It never reads the other agent's profile and never
-falls back to personal authentication.
+converges repository merge defaults, requires full-SHA action pinning at the
+GitHub boundary, converges the two named rulesets, and reports whether each
+item changed. It never reads the other agent's profile and never falls back to
+personal authentication.
