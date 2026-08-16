@@ -13,3 +13,16 @@ the first consumer, not a second n8n stack or a Dholbeat workflow.
 Exports contain credential names/references only. Runtime values come from the
 consumer's values-only `infra/secrets/**/*.sops.yml` ciphertext, are rendered
 without a decrypted workspace copy and are never committed as `.env` files.
+
+## Workflow export index and source contracts
+
+`n8n/exports/index.yml` is the canonical index of committed workflow exports.
+Each workflow manifest (`workflows/*.yml`) references a normalized export under
+`n8n/exports/workflows/<workflow-id>.normalized.json`. Export files must:
+
+- contain stable metadata IDs and contract fields (`workflow_id`, `project_id`,
+  `brand_id`, `owner`, `input_schema_id`, `output_schema_id`, `trigger`,
+  `timeout_seconds`, retention, revision/idempotency templates),
+- omit UI-volatility fields and secrets,
+- avoid any direct autonomous publish action,
+- be plain JSON that can be replayed in offline review procedures.

@@ -21,7 +21,7 @@ cadence:
   reels: 3/wk
   static: 1-2/wk
 
-approval_channel: telegram:<chat-id>   # human approval gate; required
+approval_channel: telegram:DHOLBEAT_BRAND_EXAMPLE_APPROVAL_CHANNEL   # human approval gate; required
 
 visual:
   palette: []
@@ -32,5 +32,5 @@ no_go:                         # hard content bans for this brand
   - "AI avatar testimonials"   # platform-wide rule, never remove
   - "medical claims"
 
-secrets:                       # env-var NAMES only, never values
-  telegram_bot_token: DHOLBEAT_EXAMPLE_TELEGRAM_BOT_TOKEN
+secret_ids:                    # secret catalog IDs only, never values
+  - DHOLBEAT_EXAMPLE_BRAND_SECRET_ID

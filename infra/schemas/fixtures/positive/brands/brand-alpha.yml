@@ -6,10 +6,10 @@ niche: synthetic alpha fixture
 tone: clear, calm, synthetic
 channels: {}
 cadence: {static: 1/wk}
-approval_channel: telegram:fixture-alpha
+approval_channel: telegram:DHOLBEAT_BRAND_ALPHA_APPROVAL_CHANNEL
 visual:
   palette: ["#112233"]
   logo: fixtures/alpha.svg
   fonts: [Fixture Sans]
-no_go: [AI avatar testimonials]
-secret_ids: []
+no_go: [AI avatar testimonials, medical claims]
+secret_ids: [secret-alpha-api]

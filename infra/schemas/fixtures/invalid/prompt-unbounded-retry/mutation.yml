@@ -1,0 +1,5 @@
+target: prompts/prompt-alpha.yml
+operation: set
+path: [retry_policy, max_attempts]
+value: 6
+expected_error: "prompts/prompt-alpha.yml: schema at retry_policy.max_attempts: 6 is greater than the maximum of 5"

@@ -22,6 +22,107 @@ PRIVATE_ORIGIN_NETWORKS = tuple(
     for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7")
 )
 
+WORKFLOW_EXPORT_INDEX_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://schemas.local/v1/workflow-export-index.schema.json",
+    "title": "Workflow export index version 1",
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["schema_version", "workflows"],
+    "properties": {
+        "schema_version": {"const": 1},
+        "workflows": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["workflow_id", "project_id", "source_path", "source_commit"],
+                "properties": {
+                    "workflow_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+                    "project_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+                    "source_path": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"},
+                    "source_commit": {"type": "string", "minLength": 40, "maxLength": 40},
+                },
+            },
+            "uniqueItems": True,
+        },
+    },
+}
+
+WORKFLOW_SOURCE_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://schemas.local/v1/workflow-source.schema.json",
+    "title": "Workflow source contract version 1",
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "schema_version",
+        "workflow_id",
+        "project_id",
+        "brand_id",
+        "owner",
+        "stage",
+        "trigger",
+        "timeout_seconds",
+        "input_schema_id",
+        "output_schema_id",
+        "revision_key_template",
+        "idempotency_key_template",
+        "retention",
+        "nodes",
+    ],
+    "properties": {
+        "schema_version": {"const": 1},
+        "workflow_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+        "project_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+        "brand_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+        "owner": {"type": "string", "minLength": 1},
+        "stage": {"enum": ["research", "ideation", "drafting", "approval", "publishing", "metrics"]},
+        "trigger": {"enum": ["manual", "webhook", "schedule", "event"]},
+        "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 1200},
+        "input_schema_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?:-[a-z0-9]+)*$"},
+        "output_schema_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?:-[a-z0-9]+)*$"},
+        "revision_key_template": {"type": "string", "minLength": 1},
+        "idempotency_key_template": {"type": "string", "minLength": 1},
+        "retention": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["success_days", "failure_days", "owner"],
+            "properties": {
+                "success_days": {"type": "integer", "minimum": 0},
+                "failure_days": {"type": "integer", "minimum": 1},
+                "owner": {"type": "string", "minLength": 1},
+            },
+        },
+        "nodes": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "additionalProperties": True,
+                "required": ["id", "type", "parameters"],
+                "properties": {
+                    "id": {"type": "string", "minLength": 1},
+                    "type": {"type": "string", "minLength": 1},
+                    "parameters": {"type": "object"},
+                },
+            },
+        },
+    },
+}
+
+REVISION_KEY_TEMPLATE = (
+    "project/{project_id}/brand/{brand_id}/content/{content_id}/revision/{revision}"
+)
+IDEMPOTENCY_KEY_TEMPLATE = (
+    "project/{project_id}/brand/{brand_id}/content/{content_id}/revision/{revision}/"
+    "{channel}/{scheduled_at}"
+)
+FORBIDDEN_WORKFLOW_KEYS = {"credential", "credentials", "api_key", "api-token", "token", "secret"}
+FORBIDDEN_WORKFLOW_TEXT = ("autonomous", "autopublish", "bangla text")
+PROMPT_FORBIDDEN_TEXT = ("autonomous", "autopublish", "bangla text", "ai avatar testimonials")
+
 SCHEMA_CONTRACTS = {
     "backup_adapter": "infra/schemas/backup-adapter.schema.json",
     "brand": "brands/brand.schema.json",
@@ -99,6 +200,14 @@ def load_yaml(path: Path) -> dict[str, Any]:
     return document
 
 
+def load_json(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as handle:
+        document = json.load(handle)
+    if not isinstance(document, dict):
+        raise ValueError("expected a JSON object")
+    return document
+
+
 def schema_errors(
     document: dict[str, Any], schema_path: Path, document_name: str
 ) -> list[str]:
@@ -113,6 +222,103 @@ def schema_errors(
         location = ".".join(str(part) for part in error.absolute_path) or "$"
         findings.append(f"{document_name}: schema at {location}: {error.message}")
     return findings
+
+
+def inline_schema_errors(
+    document: dict[str, Any], schema: dict[str, Any], document_name: str
+) -> list[str]:
+    Draft202012Validator.check_schema(schema)
+    validator = Draft202012Validator(schema, format_checker=FormatChecker())
+    findings: list[str] = []
+    for error in sorted(
+        validator.iter_errors(document),
+        key=lambda item: [str(part) for part in item.absolute_path],
+    ):
+        location = ".".join(str(part) for part in error.absolute_path) or "$"
+        findings.append(f"{document_name}: schema at {location}: {error.message}")
+    return findings
+
+
+WORKFLOW_METADATA_KEYS = {
+    "schema_version",
+    "workflow_id",
+    "project_id",
+    "brand_id",
+    "owner",
+    "stage",
+    "trigger",
+    "timeout_seconds",
+    "input_schema_id",
+    "output_schema_id",
+    "retention",
+}
+
+
+def scan_forbidden_workflow_fields(
+    value: Any,
+    principal: str,
+    findings: list[str],
+    *,
+    forbidden_brand_names: set[str],
+    in_metadata: bool = False,
+    path: str = "$",
+) -> None:
+    if isinstance(value, dict):
+        for field, nested in value.items():
+            field_lower = str(field).lower()
+            nested_in_metadata = in_metadata or field_lower in WORKFLOW_METADATA_KEYS
+            if field_lower in FORBIDDEN_WORKFLOW_KEYS:
+                findings.append(f"{principal}: forbidden credential field in workflow source at {path}.{field}")
+            scan_forbidden_workflow_fields(
+                nested,
+                principal,
+                findings,
+                forbidden_brand_names=forbidden_brand_names,
+                in_metadata=nested_in_metadata,
+                path=f"{path}.{str(field)}",
+            )
+    elif isinstance(value, list):
+        for index, nested in enumerate(value):
+            scan_forbidden_workflow_fields(
+                nested,
+                principal,
+                findings,
+                forbidden_brand_names=forbidden_brand_names,
+                in_metadata=in_metadata,
+                path=f"{path}[{index}]",
+            )
+    elif isinstance(value, str):
+        if in_metadata:
+            return
+        lowered = value.lower()
+        if any(marker in lowered for marker in FORBIDDEN_WORKFLOW_TEXT):
+            findings.append(
+                f"{principal}: forbidden keyword in workflow source value at {path}"
+            )
+        for brand_name in sorted(forbidden_brand_names):
+            if brand_name and brand_name in lowered:
+                findings.append(
+                    f"{principal}: workflow source references prohibited brand slug '{brand_name}'"
+                )
+
+
+def prompt_policy_errors(
+    prompt_id: str,
+    prompt: dict[str, Any],
+    brand_names: set[str],
+    findings: list[str],
+) -> None:
+    lowered_template = prompt["template"].lower()
+    for phrase in PROMPT_FORBIDDEN_TEXT:
+        if phrase in lowered_template:
+            findings.append(
+                f"{prompt_id}: prompt contains forbidden keyword '{phrase}' in template"
+            )
+    for brand_name in sorted(brand_names):
+        if brand_name and brand_name in lowered_template:
+            findings.append(
+                f"{prompt_id}: prompt references prohibited brand slug '{brand_name}'"
+            )
 
 
 def declared_schema_versions(root: Path) -> dict[str, int]:
@@ -273,8 +479,13 @@ def origin_policy_errors(
     return [f"{route_id}: unsupported origin kind {kind}"]
 
 
-def validate_cross_file(bundle: Bundle) -> list[str]:
+def validate_cross_file(root: Path, bundle: Bundle) -> list[str]:
     findings: list[str] = []
+    source_root = root if (root / "n8n").is_dir() else root.parent
+    if not (source_root / "n8n").is_dir():
+        findings.append("n8n: workflow exports directory is missing")
+        source_root = root
+
     hosts = index_records(bundle.one("inventory.yml")["hosts"], "id", "inventory", findings)
     services = index_records(bundle.one("registry.yml")["services"], "id", "services", findings)
     images = index_records(bundle.one("images.lock.yml")["images"], "id", "images", findings)
@@ -289,7 +500,7 @@ def validate_cross_file(bundle: Bundle) -> list[str]:
     )
     secrets = index_records(bundle.one("secrets.yml")["secrets"], "id", "secrets", findings)
     brands = component_index(bundle, "brands", "brand", "brands", findings)
-    component_index(bundle, "prompts", "prompt_id", "prompts", findings)
+    prompts = component_index(bundle, "prompts", "prompt_id", "prompts", findings)
     workflows = component_index(bundle, "workflows", "workflow_id", "workflows", findings)
     consumers = component_index(
         bundle, "n8n-consumers", "consumer_id", "n8n consumers", findings
@@ -300,6 +511,25 @@ def validate_cross_file(bundle: Bundle) -> list[str]:
     publisher_mappings = component_index(
         bundle, "publisher-mappings", "mapping_id", "publisher mappings", findings
     )
+    workflow_exports: dict[str, dict[str, Any]] = {}
+    export_index_path = source_root / "n8n" / "exports" / "index.yml"
+    try:
+        export_index = load_yaml(export_index_path)
+    except (OSError, ValueError, yaml.YAMLError) as error:
+        findings.append(f"n8n/exports/index.yml: cannot load YAML: {error}")
+    else:
+        findings.extend(
+            inline_schema_errors(
+                export_index, WORKFLOW_EXPORT_INDEX_SCHEMA, "n8n/exports/index.yml"
+            )
+        )
+        if isinstance(export_index, dict):
+            records = export_index.get("workflows")
+            if isinstance(records, list):
+                workflow_exports = index_records(records, "workflow_id", "workflow export index", findings)
+            else:
+                findings.append("n8n/exports/index.yml: workflows must be an array")
+
     principal_projects: dict[str, str] = {}
     for label, principal_index in (
         ("service", services),
@@ -497,12 +727,105 @@ def validate_cross_file(bundle: Bundle) -> list[str]:
             findings,
         )
 
+    brand_names = {brand["brand"] for brand in brands.values()}
+    for prompt_id, prompt in prompts.items():
+        prompt_policy_errors(prompt_id, prompt, brand_names, findings)
+
     for workflow_id, workflow in workflows.items():
+        workflow_export = workflow_exports.get(workflow_id)
+        if workflow_export is None:
+            findings.append(f"{workflow_id}: workflow is not present in n8n/exports/index.yml")
+        else:
+            if workflow_export["project_id"] != workflow["project_id"]:
+                findings.append(
+                    f"{workflow_id}: workflow/project mismatch with export index"
+                )
+            if workflow_export["source_path"] != workflow["source_path"]:
+                findings.append(
+                    f"{workflow_id}: source path does not match n8n/exports/index.yml"
+                )
+            if workflow_export["source_commit"] != workflow["source_commit"]:
+                findings.append(
+                    f"{workflow_id}: source commit does not match n8n/exports/index.yml"
+                )
         if not COMMIT_RE.fullmatch(workflow["source_commit"]):
             findings.append(f"{workflow_id}: floating source ref {workflow['source_commit']} is forbidden")
+        if workflow["revision_key_template"] != REVISION_KEY_TEMPLATE:
+            findings.append(
+                f"{workflow_id}: revision_key_template must be {REVISION_KEY_TEMPLATE}"
+            )
+        if workflow["idempotency_key_template"] != IDEMPOTENCY_KEY_TEMPLATE:
+            findings.append(
+                f"{workflow_id}: idempotency_key_template must be {IDEMPOTENCY_KEY_TEMPLATE}"
+            )
         brand = require_reference(workflow_id, "brand_id", workflow["brand_id"], brands, "brand", findings)
         if brand is not None and brand["project_id"] != workflow["project_id"]:
             findings.append(f"{workflow_id}: workflow and brand have different owners")
+        source_path = source_root / workflow["source_path"]
+        if not source_path.is_file():
+            findings.append(
+                f"{workflow_id}: workflow source file missing at {workflow['source_path']}"
+            )
+        else:
+            try:
+                source = load_json(source_path)
+            except (OSError, ValueError, json.JSONDecodeError) as error:
+                findings.append(f"{workflow_id}: workflow source is invalid: {error}")
+            else:
+                findings.extend(
+                    inline_schema_errors(
+                        source,
+                        WORKFLOW_SOURCE_SCHEMA,
+                        workflow["source_path"],
+                    )
+                )
+                if source.get("workflow_id") != workflow["workflow_id"]:
+                    findings.append(
+                        f"{workflow_id}: workflow source workflow_id does not match manifest"
+                    )
+                if source.get("project_id") != workflow["project_id"]:
+                    findings.append(
+                        f"{workflow_id}: workflow source project_id does not match manifest"
+                    )
+                if source.get("brand_id") != workflow["brand_id"]:
+                    findings.append(
+                        f"{workflow_id}: workflow source brand_id does not match manifest"
+                    )
+                if source.get("owner") != workflow["project_id"]:
+                    findings.append(
+                        f"{workflow_id}: workflow source owner must match project_id"
+                    )
+                if source.get("stage") != workflow["stage"]:
+                    findings.append(
+                        f"{workflow_id}: workflow source stage does not match manifest"
+                    )
+                if source.get("trigger") != workflow["trigger"]:
+                    findings.append(
+                        f"{workflow_id}: workflow source trigger does not match manifest"
+                    )
+                if source.get("timeout_seconds") != workflow["timeout_seconds"]:
+                    findings.append(
+                        f"{workflow_id}: workflow source timeout_seconds does not match manifest"
+                    )
+                if source.get("input_schema_id") != workflow["input_schema_id"]:
+                    findings.append(
+                        f"{workflow_id}: workflow source input_schema_id does not match manifest"
+                    )
+                if source.get("output_schema_id") != workflow["output_schema_id"]:
+                    findings.append(
+                        f"{workflow_id}: workflow source output_schema_id does not match manifest"
+                    )
+                if source.get("revision_key_template") != REVISION_KEY_TEMPLATE:
+                    findings.append(
+                        f"{workflow_id}: workflow source revision_key_template must be {REVISION_KEY_TEMPLATE}"
+                    )
+                if source.get("idempotency_key_template") != IDEMPOTENCY_KEY_TEMPLATE:
+                    findings.append(
+                        f"{workflow_id}: workflow source idempotency_key_template must be {IDEMPOTENCY_KEY_TEMPLATE}"
+                    )
+                scan_forbidden_workflow_fields(
+                    source, workflow_id, findings, forbidden_brand_names=brand_names
+                )
         credential_scope_errors(
             workflow_id,
             workflow["project_id"],
@@ -666,7 +989,7 @@ def validate_bundle(root: Path, bundle_path: Path) -> tuple[Bundle | None, list[
     bundle, findings = load_bundle(root, bundle_path)
     if bundle is None:
         return None, findings
-    return bundle, validate_cross_file(bundle)
+    return bundle, validate_cross_file(root, bundle)
 
 
 def normalized_bundle(bundle: Bundle) -> str:

@@ -1,0 +1,5 @@
+target: prompts/prompt-alpha.yml
+operation: set
+path: [max_cost_usd]
+value: 0
+expected_error: "prompts/prompt-alpha.yml: schema at max_cost_usd: 0 is less than or equal to the minimum of 0"
