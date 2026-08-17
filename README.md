@@ -226,11 +226,11 @@ requires a fresh founder cost decision. See the linked IaC plan for thresholds.
 - [ ] Approval bot: custom Telegram bot vs Hermes gateway
 - [ ] Per-brand X usage (worth $2–3/mo per brand?)
 - [ ] Media archival: purge-only vs B2 push
-- [ ] Before PR #39 merges or any provider-issued production secret is
-      encrypted, escrow both Dholbeat age private keys (public-recipient
-      SHA-256 fingerprints `32a10a74…0f849` and `bed909c0…a969b`) in the
-      `dholbeat-sops-root` password-manager record and confirm the break-glass
-      key is retrievable without the office laptop.
+- [ ] Run a second-device break-glass retrieval drill for the two Dholbeat age
+      keys (public-recipient SHA-256 fingerprints `32a10a74…0f849` and
+      `bed909c0…a969b`). Deferred 2026-08-17 until a device is available; this
+      drill is required before the first provider-issued production secret is
+      encrypted to these recipients.
 
 ## 10. Change log
 
@@ -245,4 +245,5 @@ requires a fresh founder cost decision. See the linked IaC plan for thresholds.
 | 2026-08-14 | Generalized the two-host plan so shared tools are multi-project-ready from first deployment: manifest-scoped n8n consumers, one same-image Hermes container with a verified data/state boundary per project, and separate publisher organizations/workspaces. This is trusted logical/process separation with measured shared capacity, not universal tenant isolation; product applications, databases and Paperclip remain isolated. |
 | 2026-08-16 | Founder approved native auto-merge for `develop` and `main`, accepting that an exact-head opposite-model approval plus green required checks may merge without a separate final human merge click; the founder must still initiate every review round. |
 | 2026-08-17 | Issue #9: updated brand template and contract checks for prompt/publish policy safety, workflow source/index/schema validation, and prompt/brand documentation drift correction (`brands/README.md` §4, `_template.yaml`, `README.md`); added bounded-cost and workflow normalization checks in fixtures/tests. |
-| 2026-08-17 | Issue #10: defined production inventory, secret ownership/SOPS, and immutable release-identity contracts with fail-closed validation; PR #39 remains gated on password-manager escrow and independently retrievable break-glass custody for its two age keys. |
+| 2026-08-17 | Issue #10: defined production inventory, secret ownership/SOPS, and immutable release-identity contracts with fail-closed validation. |
+| 2026-08-17 | Founder accepted a byte-identical NordPass download-and-restore round trip for both Dholbeat age keys as satisfying the initial recovery gate; the second-device break-glass drill is deferred until a device is available and remains required before encrypting the first provider-issued production secret. |

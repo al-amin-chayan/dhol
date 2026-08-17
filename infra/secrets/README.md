@@ -24,19 +24,24 @@ age-keygen -y ~/.config/dholbeat/age/founder.age | tr -d '\n' | shasum -a 256
 
 ## Recovery-account checklist
 
-Before the first production ciphertext or apply, the founder verifies that:
+Before the first provider-issued production ciphertext or apply, the founder
+verifies that:
 
-- the `dholbeat-sops-root` record contains both private age keys, names their
-  independent custodians, and can derive the two public recipients in
+- the `dholbeat-sops-root` record contains both private age keys, records their
+  founder and break-glass roles, and can derive the two public recipients in
   `.sops.yaml`;
 - each catalogued `recovery_account.id` exists in the password manager, has a
   current owner and recovery login, and contains no dependency on this Git
   checkout;
-- a second device or custodian can retrieve the break-glass key without the
-  founder's laptop;
 - provider recovery logins are distinct from runtime tokens; and
 - a redacted check records only account IDs, recipient fingerprints, date, and
   verifier—never a login, private key, token, or decrypted value.
+
+On 2026-08-17 the founder accepted a byte-identical NordPass
+download-and-restore round trip for both keys as satisfying the initial canary
+recovery gate. A retrieval drill from a second device remains deferred until a
+device is available and must pass before any provider-issued production secret
+is encrypted to these recipients.
 
 ## Encrypt and validate one set
 
