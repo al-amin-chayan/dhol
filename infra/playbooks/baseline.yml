@@ -1,0 +1,55 @@
+---
+- name: Converge the project-neutral shared host baseline
+  hosts: baseline_targets
+  become: true
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+    - name: Validate every baseline gate before mutation
+      ansible.builtin.import_role:
+        name: base
+        tasks_from: preflight
+      tags: [always, preflight]
+
+    - name: Configure the common operating-system baseline
+      ansible.builtin.import_role:
+        name: base
+      tags: [base]
+
+    - name: Prove the named administrator can open a second connection
+      ansible.builtin.import_role:
+        name: base
+        tasks_from: connection_probe
+      tags: [base, connection-safety]
+
+    - name: Install and bound Docker Engine
+      ansible.builtin.import_role:
+        name: docker
+      tags: [docker]
+
+    - name: Apply the default-deny host and container firewall
+      ansible.builtin.import_role:
+        name: firewall
+      tags: [firewall]
+
+    - name: Prove access after firewall convergence
+      ansible.builtin.import_role:
+        name: base
+        tasks_from: connection_probe
+      tags: [connection-safety, firewall]
+
+    - name: Stage key-only SSH hardening after the firewall probe
+      ansible.builtin.import_role:
+        name: base
+        tasks_from: ssh_hardening
+      tags: [base, connection-safety]
+
+    - name: Apply pending SSH handlers only after the safety probes
+      ansible.builtin.meta: flush_handlers
+
+    - name: Re-prove access after SSH hardening
+      ansible.builtin.import_role:
+        name: base
+        tasks_from: connection_probe
+      tags: [base, connection-safety]

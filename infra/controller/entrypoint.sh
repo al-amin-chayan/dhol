@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-mkdir -p "${HOME}" "${ANSIBLE_LOCAL_TEMP}" "${ANSIBLE_REMOTE_TEMP}"
+mkdir -p "${HOME}" "${ANSIBLE_LOCAL_TEMP}"
 
 if [ "${1:-}" = "versions" ]; then
   exec python /opt/dholbeat/runtime_versions.py

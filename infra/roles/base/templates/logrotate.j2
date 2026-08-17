@@ -1,0 +1,10 @@
+/var/log/dholbeat/*.log {
+    daily
+    rotate {{ base_logrotate_rotate }}
+    maxsize {{ base_logrotate_max_size }}
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}

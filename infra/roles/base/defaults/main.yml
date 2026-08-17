@@ -1,0 +1,27 @@
+---
+base_host_timezone: UTC
+base_minimum_memory_mb: 5500
+base_minimum_disk_total_mb: 30000
+base_minimum_disk_free_mb: 8192
+base_admin_shell: /bin/bash
+base_ssh_port: 22
+base_ssh_password_authentication: false
+base_ssh_root_login: "no"
+base_second_connection_required: true
+base_apt_cache_valid_seconds: 3600
+base_unattended_reboot_enabled: false
+base_unattended_reboot_time: "04:00"
+base_journald_system_max_use: 256M
+base_journald_runtime_max_use: 64M
+base_journald_max_retention: 7day
+base_logrotate_rotate: 7
+base_logrotate_max_size: 16M
+base_packages:
+  - ca-certificates
+  - chrony
+  - curl
+  - iproute2
+  - logrotate
+  - openssh-server
+  - sudo
+  - unattended-upgrades

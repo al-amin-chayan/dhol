@@ -1,0 +1,26 @@
+FROM ubuntu:24.04@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends \
+      dbus \
+      iproute2 \
+      openssh-server \
+      python3 \
+      sudo \
+      systemd \
+      systemd-sysv \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /root/.ssh /run/sshd \
+    && chmod 0700 /root/.ssh \
+    && printf '%s\n' \
+      'PasswordAuthentication no' \
+      'KbdInteractiveAuthentication no' \
+      'PermitRootLogin prohibit-password' \
+      >/etc/ssh/sshd_config.d/10-disposable-bootstrap.conf
+
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]
+

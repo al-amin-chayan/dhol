@@ -10,7 +10,7 @@ LABEL org.opencontainers.image.title="Dholbeat repository controller" \
 
 ENV ANSIBLE_COLLECTIONS_PATH=/usr/share/ansible/collections \
     ANSIBLE_LOCAL_TEMP=/tmp/ansible-local \
-    ANSIBLE_REMOTE_TEMP=/tmp/ansible-remote \
+    ANSIBLE_REMOTE_TEMP=~/.ansible/tmp \
     HOME=/tmp/controller-home \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
@@ -23,7 +23,7 @@ RUN python -m pip install --require-hashes --no-deps -r /tmp/controller-requirem
 
 COPY toolchain.lock.yml /opt/dholbeat/toolchain.lock.yml
 COPY infra/controller/install_tools.py /opt/dholbeat/install_tools.py
-RUN mkdir -p "${HOME}" "${ANSIBLE_LOCAL_TEMP}" "${ANSIBLE_REMOTE_TEMP}" \
+RUN mkdir -p "${HOME}" "${ANSIBLE_LOCAL_TEMP}" \
     && python /opt/dholbeat/install_tools.py \
       --lock /opt/dholbeat/toolchain.lock.yml \
       --arch "${TARGETARCH}" \
