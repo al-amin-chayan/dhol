@@ -421,6 +421,7 @@ def check_executable_entrypoints(root: Path) -> list[str]:
         "scripts/check",
         "scripts/configure-github-rulesets.py",
         "scripts/controller",
+        "scripts/eof-marker.sh",
         "scripts/github-app-gh",
         "scripts/github-app-git",
         "scripts/github-app-token.sh",
