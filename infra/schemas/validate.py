@@ -86,14 +86,17 @@ SCHEMA_CONTRACTS = {
     "hermes_project": "stack/hermes/projects/project.schema.json",
     "image": "infra/schemas/image.schema.json",
     "inventory": "infra/schemas/inventory.schema.json",
+    "inventory_vars": "infra/schemas/inventory-vars.schema.json",
     "n8n_consumer": "n8n/consumers/consumer.schema.json",
     "prompt": "prompts/prompt.schema.json",
     "publisher_mapping": "stack/publisher/mapping.schema.json",
     "release": "infra/schemas/release.schema.json",
-    "workflow_export_index": "n8n/workflow-export-index.schema.json",
-    "workflow_source": "n8n/workflow-source.schema.json",
+    "runtime_receipt": "infra/schemas/runtime-receipt.schema.json",
     "route": "infra/schemas/route.schema.json",
     "secret_catalog": "infra/schemas/secret-catalog.schema.json",
+    "secret_values": "infra/schemas/secret-values.schema.json",
+    "workflow_export_index": "n8n/workflow-export-index.schema.json",
+    "workflow_source": "n8n/workflow-source.schema.json",
     "service": "infra/schemas/service.schema.json",
     "volume": "infra/schemas/volume.schema.json",
     "workflow": "n8n/workflow.schema.json",
@@ -564,6 +567,8 @@ def validate_cross_file(root: Path, bundle: Bundle, bundle_path: Path) -> list[s
             )
 
     principal_projects: dict[str, str] = {}
+    for host_id in hosts:
+        principal_projects[host_id] = "platform"
     for label, principal_index in (
         ("service", services),
         ("brand", brands),
@@ -582,6 +587,19 @@ def validate_cross_file(root: Path, bundle: Bundle, bundle_path: Path) -> list[s
             service = require_reference(host_id, "service_ids", service_id, services, "service", findings)
             if service is not None and service["host_id"] != host_id:
                 findings.append(f"{host_id}: service {service_id} belongs to host {service['host_id']}")
+
+    seen_endpoint_hostnames: dict[str, str] = {}
+    for endpoint in bundle.one("inventory.yml")["public_endpoints"]:
+        endpoint_id = endpoint["id"]
+        require_reference(endpoint_id, "host_id", endpoint["host_id"], hosts, "host", findings)
+        existing_endpoint = seen_endpoint_hostnames.get(endpoint["hostname"])
+        if existing_endpoint is not None:
+            findings.append(
+                f"{endpoint_id}: public endpoint hostname {endpoint['hostname']} "
+                f"is already declared by {existing_endpoint}"
+            )
+        else:
+            seen_endpoint_hostnames[endpoint["hostname"]] = endpoint_id
 
     seen_private_origin_addresses: dict[tuple[str, IPAddress], str] = {}
     service_private_origin_addresses: dict[str, set[IPAddress]] = {}
@@ -719,6 +737,17 @@ def validate_cross_file(root: Path, bundle: Bundle, bundle_path: Path) -> list[s
                 )
 
     for secret_id, secret in secrets.items():
+        if secret["value_key"] != secret_id:
+            findings.append(f"{secret_id}: value_key must equal the secret ID")
+        if secret["target"]["kind"] == "host-file":
+            require_reference(
+                secret_id,
+                "target.host_id",
+                secret["target"]["host_id"],
+                hosts,
+                "host",
+                findings,
+            )
         for principal_id in secret["allowed_principal_ids"]:
             principal_project = principal_projects.get(principal_id)
             if principal_project is None:

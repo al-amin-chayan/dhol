@@ -8,6 +8,9 @@ rules:
   line-length:
     max: 240
     level: error
+    ignore: |
+      infra/secrets/*.sops.yml
+      infra/secrets/**/*.sops.yml
   truthy:
     allowed-values: ["true", "false"]
     check-keys: false

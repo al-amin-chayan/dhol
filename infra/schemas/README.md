@@ -33,6 +33,7 @@ scripts/controller exec python infra/schemas/validate.py \
 | Contract | Schema | Version |
 | --- | --- | ---: |
 | Inventory | `inventory.schema.json` | 1 |
+| Inventory variables | `inventory-vars.schema.json` | 1 |
 | Service registry | `service.schema.json` | 1 |
 | Image registry | `image.schema.json` | 1 |
 | Domain registry | `domain.schema.json` | 1 |
@@ -40,7 +41,9 @@ scripts/controller exec python infra/schemas/validate.py \
 | Volume registry | `volume.schema.json` | 1 |
 | Backup-adapter registry | `backup-adapter.schema.json` | 1 |
 | Secret catalog | `secret-catalog.schema.json` | 1 |
+| Decrypted secret values | `secret-values.schema.json` | 1 |
 | Release receipt | `release.schema.json` | 1 |
+| Host runtime receipt | `runtime-receipt.schema.json` | 1 |
 | Brand profile | `brands/brand.schema.json` | 1 |
 | Prompt manifest | `prompts/prompt.schema.json` | 1 |
 | Workflow manifest | `n8n/workflow.schema.json` | 1 |
