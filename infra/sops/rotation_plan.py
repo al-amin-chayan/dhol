@@ -53,6 +53,8 @@ def build_rotation_plan(root: Path, leaked_recipient: str) -> tuple[dict, list[s
     plan = {
         "schema_version": 1,
         "mode": "dry-run",
+        "scope": "current-working-tree",
+        "historical_ciphertext_review_required": True,
         "leaked_recipient": leaked_recipient,
         "replace_recipient": True,
         "reencryption_alone_is_sufficient": False,

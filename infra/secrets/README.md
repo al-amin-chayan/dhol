@@ -78,7 +78,16 @@ rotation planner in dry-run mode, replace the leaked recipient, rotate every
 underlying value in every affected historical SOPS file, revoke the old
 provider/runtime values, encrypt fresh values to both current recipients, and
 verify each service independently before committing. The planner emits only
-secret IDs and paths.
+secret IDs and paths. Its output declares `scope: current-working-tree` and
+`historical_ciphertext_review_required: true`: it cannot prove that a retired
+set is absent from Git history. Before rotating, enumerate historical SOPS
+paths and manually inspect any renamed or deleted set plus its catalog version;
+rotate every provider value that historical ciphertext represented.
+
+```sh
+git log --all --format= --name-only -- \
+  ':(glob)infra/secrets/**/*.sops.yml' | sort -u
+```
 
 ```sh
 scripts/controller exec python infra/sops/rotation_plan.py \

@@ -21,7 +21,10 @@ SOPS_PATH_REGEX = (
 )
 AGE_RECIPIENT_RE = re.compile(r"^age1[023456789acdefghjklmnpqrstuvwxyz]{58}$")
 ENCRYPTED_VALUE_RE = re.compile(r"^ENC\[AES256_GCM,")
-ALLOWED_SECRET_METADATA = {"README.md", "catalog.yml"}
+ALLOWED_SECRET_METADATA = {
+    "infra/secrets/README.md",
+    "infra/secrets/catalog.yml",
+}
 SKIPPED_DIRECTORIES = {".artifacts", ".controller-cache", ".git", ".worktrees", "__pycache__"}
 
 
@@ -96,7 +99,7 @@ def repository_sops_files(root: Path) -> tuple[list[Path], list[str]]:
                     findings.append(f"{relative}: SOPS ciphertext is outside infra/secrets")
                 else:
                     files.append(path)
-            elif secret_root in path.parents and filename not in ALLOWED_SECRET_METADATA:
+            elif secret_root in path.parents and relative not in ALLOWED_SECRET_METADATA:
                 findings.append(f"{relative}: only catalog/docs or *.sops.yml may be tracked")
     return sorted(files), findings
 
@@ -275,6 +278,10 @@ def decrypt_in_memory_findings(root: Path, path: Path, environment: dict[str, st
     if not isinstance(document, dict):
         return [f"{label}: decrypted content must be a mapping"]
     findings = schema_findings(document, root / "infra/schemas/secret-values.schema.json", label)
+    suffix = ".sops.yml"
+    expected_set_id = path.name[: -len(suffix)]
+    if document.get("secret_set_id") != expected_set_id:
+        findings.append(f"{label}: decrypted secret_set_id differs from ciphertext filename")
     catalog, catalog_errors = catalog_findings(root)
     findings.extend(catalog_errors)
     if catalog is not None and not catalog_errors:

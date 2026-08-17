@@ -131,6 +131,15 @@ def test_generated_python_cache_is_ignored(tmp_path: Path) -> None:
     assert structural_findings(root) == []
 
 
+def test_nested_shadow_secret_metadata_fails(tmp_path: Path) -> None:
+    root = repo_copy(tmp_path)
+    write_yaml(root / "infra/secrets/shadow/catalog.yml", {"schema_version": 1})
+    (root / "infra/secrets/shadow/README.md").write_text("shadow docs\n", encoding="utf-8")
+    findings = structural_findings(root)
+    assert any("infra/secrets/shadow/catalog.yml: only catalog/docs" in item for item in findings)
+    assert any("infra/secrets/shadow/README.md: only catalog/docs" in item for item in findings)
+
+
 def test_unknown_catalog_principal_fails(tmp_path: Path) -> None:
     root = repo_copy(tmp_path)
     path = root / "infra/secrets/catalog.yml"
@@ -164,6 +173,8 @@ def test_leaked_recipient_rotates_every_affected_value_without_plaintext(tmp_pat
         "infra/secrets/publisher.sops.yml",
     ]
     assert plan["underlying_secret_ids_to_rotate"] == expected_ids
+    assert plan["scope"] == "current-working-tree"
+    assert plan["historical_ciphertext_review_required"] is True
     assert plan["reencryption_alone_is_sufficient"] is False
     assert plan["contains_plaintext"] is False
 
@@ -229,3 +240,32 @@ def test_in_memory_decrypt_mac_and_schema_validation(tmp_path: Path) -> None:
     environment["SOPS_AGE_KEY"] = private_one
     assert decrypt_in_memory_findings(root, ciphertext_path, environment) == []
     assert "ephemeral-test-value" not in ciphertext_path.read_text(encoding="utf-8")
+
+    wrong_set = yaml.safe_load(plaintext)
+    assert isinstance(wrong_set, dict)
+    wrong_set["secret_set_id"] = "publisher"
+    completed = subprocess.run(
+        [
+            "sops",
+            "--encrypt",
+            "--age",
+            f"{public_one},{public_two}",
+            "--input-type",
+            "yaml",
+            "--output-type",
+            "yaml",
+            "--filename-override",
+            "infra/secrets/core.sops.yml",
+            "/dev/stdin",
+        ],
+        input=yaml.safe_dump(wrong_set, sort_keys=False),
+        check=True,
+        capture_output=True,
+        text=True,
+        cwd=root,
+    )
+    ciphertext_path.write_text(completed.stdout, encoding="utf-8")
+    assert any(
+        "decrypted secret_set_id differs from ciphertext filename" in finding
+        for finding in decrypt_in_memory_findings(root, ciphertext_path, environment)
+    )

@@ -109,6 +109,13 @@ def validate_runtime_receipt(
     release: dict[str, Any],
     receipt: dict[str, Any],
 ) -> list[str]:
+    release_findings = schema_findings(
+        release,
+        root / "infra/schemas/release.schema.json",
+        "release",
+    )
+    if release_findings:
+        return sorted(set(release_findings))
     findings = schema_findings(
         receipt,
         root / "infra/schemas/runtime-receipt.schema.json",

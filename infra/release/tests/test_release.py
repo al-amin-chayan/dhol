@@ -114,3 +114,17 @@ def test_runtime_receipt_matches_release_and_rejects_plan_drift() -> None:
     assert "applied plan digest differs from approval" in "\n".join(
         validate_runtime_receipt(REPO_ROOT, release, drifted)
     )
+
+
+def test_schema_invalid_release_fails_receipt_validation_without_key_error() -> None:
+    release = yaml.safe_load(
+        (REPO_ROOT / "infra/release/examples/release.yml").read_text(encoding="utf-8")
+    )
+    receipt = yaml.safe_load(
+        (REPO_ROOT / "infra/release/examples/runtime-receipt.yml").read_text(encoding="utf-8")
+    )
+    assert isinstance(release, dict)
+    assert isinstance(receipt, dict)
+    release.pop("tag")
+    findings = validate_runtime_receipt(REPO_ROOT, release, receipt)
+    assert any("schema" in finding and "tag" in finding for finding in findings)
