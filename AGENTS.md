@@ -12,6 +12,25 @@ ambiguous calls, not the dispatcher.
 > symlink) every Claude Code session. Keep it lean — summary here, procedural
 > detail in `docs/agents/parallel-work.md`.
 
+## Final response EOF marker
+
+Every final response from Claude Code or Codex must end with exactly one
+plain-text EOF marker as its final line. Nothing may follow it.
+
+- Use the time in GMT+6 at the moment the final response is sent, but do not
+  include a timezone label. Format it as `MMM DD, YYYY | HH:MM AM/PM`.
+- Measure duration from receipt of the user request being answered through the
+  completed response. Use `Xs` below one minute and `Xm Ys` at one minute or
+  longer.
+- Set status to the current outcome: `DONE` when the request is complete,
+  `IN PROGRESS` when agent work remains, `BLOCKED` for a non-human blocker, or
+  `NEEDS HUMAN ACTION` when completion requires the user.
+- Use this exact marker format:
+
+  ```text
+  --- EOF @ [MMM DD, YYYY | HH:MM AM/PM] | Duration: [Xm Ys] | Status: [STATUS] ---
+  ```
+
 ## Founder constraints (read first)
 
 1. **Solo, self-funded founder.** Every paid line item is personal cash. This
