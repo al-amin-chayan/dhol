@@ -28,6 +28,13 @@ ambiguous calls, not the dispatcher.
 3. **Disk is the binding constraint** on the VPSDime host (§5 of `README.md`).
    Anything that grows unboundedly on disk is a bug.
 
+## Top-level response footer
+
+Every top-level interactive response to the founder ends with the EOF marker
+produced under `docs/agents/response-format.md`. The rule excludes subagent and
+workflow returns, structured output, repository content, commits, PRs, and
+reviews.
+
 ## Parallel work — lane discipline (the core rule here)
 
 Both agents may be running right now. Assume the other one is editing files you
