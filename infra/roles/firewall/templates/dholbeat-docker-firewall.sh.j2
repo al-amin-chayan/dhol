@@ -2,6 +2,7 @@
 set -eu
 
 chain=DHOLBEAT-DOCKER-INGRESS
+public_interface={{ firewall_public_interface | quote }}
 
 remove_policy() {
   while iptables -w -C DOCKER-USER -j "$chain" >/dev/null 2>&1; do
@@ -29,10 +30,10 @@ iptables -w -n -L DOCKER-USER >/dev/null 2>&1
 iptables -w -N "$chain" 2>/dev/null || true
 iptables -w -F "$chain"
 iptables -w -A "$chain" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-iptables -w -A "$chain" -i lo -j ACCEPT
 {% for cidr in firewall_docker_private_ingress_cidrs %}
-iptables -w -A "$chain" -s {{ cidr | quote }} -j ACCEPT
+iptables -w -A "$chain" -i "$public_interface" -s {{ cidr | quote }} -j ACCEPT
 {% endfor %}
-iptables -w -A "$chain" -j DROP
+iptables -w -A "$chain" -i "$public_interface" -j DROP
+iptables -w -A "$chain" -j RETURN
 iptables -w -C DOCKER-USER -j "$chain" >/dev/null 2>&1 || \
   iptables -w -I DOCKER-USER 1 -j "$chain"

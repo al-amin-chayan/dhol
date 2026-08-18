@@ -1,8 +1,14 @@
 ---
+- name: Remove the superseded late-sorting SSH baseline
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config.d/60-dholbeat-baseline.conf
+    state: absent
+  notify: Reload ssh
+
 - name: Stage key-only SSH hardening
   ansible.builtin.template:
     src: sshd-hardening.conf.j2
-    dest: /etc/ssh/sshd_config.d/60-dholbeat-baseline.conf
+    dest: /etc/ssh/sshd_config.d/01-dholbeat-baseline.conf
     owner: root
     group: root
     mode: "0644"

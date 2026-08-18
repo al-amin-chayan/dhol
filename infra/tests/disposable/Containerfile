@@ -16,11 +16,13 @@ RUN apt-get update \
     && mkdir -p /root/.ssh /run/sshd \
     && chmod 0700 /root/.ssh \
     && printf '%s\n' \
-      'PasswordAuthentication no' \
-      'KbdInteractiveAuthentication no' \
       'PermitRootLogin prohibit-password' \
       >/etc/ssh/sshd_config.d/10-disposable-bootstrap.conf
 
+RUN printf '%s\n' \
+      'PasswordAuthentication yes' \
+      'KbdInteractiveAuthentication yes' \
+      >/etc/ssh/sshd_config.d/50-cloud-init.conf
+
 STOPSIGNAL SIGRTMIN+3
 CMD ["/sbin/init"]
-

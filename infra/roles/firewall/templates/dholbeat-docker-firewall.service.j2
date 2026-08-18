@@ -1,14 +1,13 @@
 [Unit]
 Description=Dholbeat default-deny Docker ingress policy
 After=docker.service
-Requires=docker.service
+BindsTo=docker.service
 PartOf=docker.service
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/local/sbin/dholbeat-docker-firewall apply
-ExecStop=/usr/local/sbin/dholbeat-docker-firewall remove
 
 [Install]
 WantedBy=multi-user.target

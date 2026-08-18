@@ -12,6 +12,7 @@
       - baseline_second_connection_port is defined
       - baseline_second_connection_identity_file is defined
       - baseline_second_connection_known_hosts_file is defined
+      - baseline_public_interface is defined
       - baseline_managed_directories is defined
       - baseline_role_writable_paths is defined
     fail_msg: Baseline inventory is incomplete; refusing to mutate the target.
@@ -42,6 +43,18 @@
       - base_known_hosts_file.stat.isreg | default(false)
       - base_known_hosts_file.stat.readable | default(false)
     fail_msg: The second-connection identity and known-hosts files must be readable controller inputs.
+
+- name: Read the controller source address from the active SSH session
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - "import os; fields = os.environ.get('SSH_CONNECTION', '').split(); print(fields[0] if fields else '')"
+  become: false
+  changed_when: false
+  check_mode: false
+  register: base_controller_source
+  when: "'docker' not in (ansible_connection | default('ssh'))"
 
 - name: Inspect conflicting container packages without removing them
   ansible.builtin.command:
@@ -87,13 +100,19 @@
       break_glass: "{{ baseline_break_glass }}"
       ssh:
         allow_cidrs: "{{ baseline_ssh_allow_cidrs }}"
+        connection_transport: "{{ ansible_connection | default('ssh') }}"
+        controller_source: "{{ base_controller_source.stdout | default('') | trim }}"
         password_authentication: "{{ base_ssh_password_authentication }}"
         root_login: "{{ base_ssh_root_login }}"
         second_connection_required: "{{ base_second_connection_required }}"
       application_bindings: "{{ baseline_application_bindings }}"
+      firewall:
+        public_interface: "{{ baseline_public_interface }}"
       docker:
         apt_signing_checksum: "{{ docker_apt_signing_checksum }}"
         daemon_hosts: "{{ docker_daemon_hosts }}"
+        data_root: "{{ docker_data_root }}"
+        storage_driver: "{{ docker_storage_driver }}"
         live_restore: "{{ docker_live_restore }}"
         logging:
           driver: "{{ docker_log_driver }}"

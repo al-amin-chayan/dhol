@@ -20,6 +20,8 @@ key, and runs Ansible from the checksum-locked controller. It records:
 - a zero-change check-mode transcript;
 - exact resolved Docker package versions and bounded daemon facts;
 - default-deny firewall state; and
+- container egress, container-to-container connectivity, blocked unlisted
+  published ingress, and policy survival across a Docker restart; and
 - a negative run proving a failed second administrator connection stops before
   SSH handlers or firewall convergence and leaves bootstrap access usable.
 
@@ -38,14 +40,26 @@ The temporary key directory is removed on every exit. The fixture containers,
 network, and target image carry `io.dholbeat.fixture=wp05a`; cleanup addresses
 their exact generated names and never performs a global prune. `--keep-failed`
 keeps a failed target for local inspection and prints its exact names.
+Every evidence file is capped at 8 MiB and total retained WP-05A evidence is
+capped at 64 MiB. The target is built with a dedicated, digest-pinned BuildKit
+builder; normal cleanup removes that exact builder and its private cache rather
+than pruning shared cache.
+
+The committed inventory pair makes the connection transition explicit:
+`inventories/fixtures/hosts.bootstrap.yml` is used only for the first run, and
+`inventories/fixtures/hosts.yml` reconnects as the named administrator for the
+second run and check mode. Every direct `ansible-playbook` invocation must pass
+one of these inventories with `--inventory`; `ansible.cfg` intentionally has no
+default target.
 
 The systemd fixture exercises role behavior cheaply, including Docker-in-
-Docker and an isolated firewall namespace. Before production use, repeat the
-same `infra/playbooks/baseline.yml` convergence against an approved disposable
-Ubuntu 24.04 VM/VPS with at least 6 GB RAM and 30 GB disk. Supply its inventory
-values locally, retain provider-console access, run twice through
-`scripts/controller`, and attach the same redacted evidence fields. Never use a
-production hostname or IP for this test.
+Docker with the fixture-only `vfs` storage driver and an isolated firewall
+namespace. Production keeps Docker's default storage driver. Before production
+use, repeat the same `infra/playbooks/baseline.yml` convergence against an
+approved disposable Ubuntu 24.04 VM/VPS with at least 6 GB RAM and 30 GB disk.
+Supply its inventory values locally, retain provider-console access, run twice
+through `scripts/controller`, and attach the same redacted evidence fields.
+Never use a production hostname or IP for this test.
 
 ## Rollback and recovery
 
@@ -57,11 +71,14 @@ local rollback command:
 
 ```sh
 sudo systemctl disable --now dholbeat-docker-firewall.service
+sudo /usr/local/sbin/dholbeat-docker-firewall remove
 ```
 
-This removes only `DHOLBEAT-DOCKER-INGRESS`; it does not flush UFW, Docker, or
-unrelated iptables rules. Host baseline rollback on production belongs to the
-separately reviewed production-bootstrap issue and founder-confirmed window.
+The first command prevents reapplication without opening a policy gap during a
+normal Docker restart. The second removes only `DHOLBEAT-DOCKER-INGRESS`; it
+does not flush UFW, Docker, or unrelated iptables rules. Host baseline rollback
+on production belongs to the separately reviewed production-bootstrap issue
+and founder-confirmed window.
 
 ## Cost
 

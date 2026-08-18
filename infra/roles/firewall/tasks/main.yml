@@ -95,3 +95,23 @@
     argv: [iptables, -w, -C, DOCKER-USER, -j, DHOLBEAT-DOCKER-INGRESS]
   changed_when: false
   check_mode: false
+
+- name: Verify the Docker policy drops only public-interface ingress
+  ansible.builtin.command:
+    argv:
+      - iptables
+      - -w
+      - -C
+      - DHOLBEAT-DOCKER-INGRESS
+      - -i
+      - "{{ firewall_public_interface }}"
+      - -j
+      - DROP
+  changed_when: false
+  check_mode: false
+
+- name: Verify non-ingress Docker forwarding returns to Docker policy
+  ansible.builtin.command:
+    argv: [iptables, -w, -C, DHOLBEAT-DOCKER-INGRESS, -j, RETURN]
+  changed_when: false
+  check_mode: false

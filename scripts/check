@@ -110,6 +110,7 @@ if [ -d infra/tofu ]; then
 fi
 
 if [ -d infra/playbooks ] || [ -d infra/roles ]; then
+  # SOPS ciphertext is policy-validated separately and is not parseable Ansible YAML.
   run_step "Ansible lint" env ANSIBLE_CONFIG="$REPO_ROOT/infra/ansible.cfg" \
     ansible-lint --offline --exclude infra/secrets infra
 fi

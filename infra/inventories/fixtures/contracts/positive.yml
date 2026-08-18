@@ -23,14 +23,20 @@ break_glass:
   verification: docker exec is verified before fixture convergence
 ssh:
   allow_cidrs: [172.16.0.0/12]
+  connection_transport: community.docker.docker_api
+  controller_source: ""
   password_authentication: false
   root_login: "no"
   second_connection_required: true
 application_bindings:
   - {address: 127.0.0.1, port: 8080, protocol: tcp}
+firewall:
+  public_interface: eth0
 docker:
   apt_signing_checksum: 1500c1f56fa9e26b9b8f42452a553675796ade0807cdce11975eb98170b3a570
   daemon_hosts: [unix:///var/run/docker.sock]
+  data_root: /var/lib/docker
+  storage_driver: vfs
   live_restore: true
   logging: {driver: json-file, max_size: 10m, max_files: 3}
   packages:

@@ -32,6 +32,7 @@
 - name: Install exact Docker Engine and Compose packages
   ansible.builtin.apt:
     name: "{{ item.key }}={{ item.value }}"
+    allow_downgrade: true
     state: present
   loop: "{{ docker_packages | dict2items | sort(attribute='key') }}"
   loop_control:
@@ -93,6 +94,7 @@
     that:
       - (docker_info_result.stdout | from_json).LoggingDriver == docker_log_driver
       - (docker_info_result.stdout | from_json).LiveRestoreEnabled == docker_live_restore
+      - docker_storage_driver is none or (docker_info_result.stdout | from_json).Driver == docker_storage_driver
       - (docker_daemon_config.content | b64decode | from_json)['live-restore'] == docker_live_restore
       - (docker_daemon_config.content | b64decode | from_json)['log-driver'] == docker_log_driver
       - (docker_daemon_config.content | b64decode | from_json)['log-opts']['max-size'] == docker_log_max_size

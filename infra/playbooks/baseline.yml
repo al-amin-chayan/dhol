@@ -48,6 +48,12 @@
     - name: Apply pending SSH handlers only after the safety probes
       ansible.builtin.meta: flush_handlers
 
+    - name: Verify the effective SSH daemon policy
+      ansible.builtin.import_role:
+        name: base
+        tasks_from: ssh_verify
+      tags: [base, connection-safety]
+
     - name: Re-prove access after SSH hardening
       ansible.builtin.import_role:
         name: base

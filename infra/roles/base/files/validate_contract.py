@@ -16,6 +16,7 @@ SUPPORTED_ARCHITECTURES = {"aarch64", "x86_64"}
 SUPPORTED_CLASSIFICATIONS = {"ephemeral", "rebuildable", "retained"}
 SUPPORTED_DATA_CLASSES = {"internal", "confidential"}
 ADMIN_USER_RE = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
+INTERFACE_RE = re.compile(r"^[A-Za-z0-9_.-]{1,15}$")
 LOG_SIZE_RE = re.compile(r"^[1-9][0-9]{0,3}[kKmMgG]$")
 PUBLIC_KEY_RE = re.compile(
     r"^(?:ecdsa-sha2-nistp256|sk-ssh-ed25519@openssh\.com|ssh-ed25519|ssh-rsa) "
@@ -74,6 +75,8 @@ def validate_facts(document: dict[str, Any], findings: list[str]) -> None:
     for name in ("memory_mb", "disk_total_mb", "disk_free_mb"):
         if not positive_integer(limits.get(name)):
             findings.append(f"resource_minimums.{name} must be a positive integer")
+        if not positive_integer(facts.get(name)):
+            findings.append(f"facts.{name} must be a positive integer")
     comparisons = (
         ("memory_mb", "memory_mb", "host RAM is below the declared minimum"),
         ("disk_total_mb", "disk_total_mb", "host root disk is below the declared minimum"),
@@ -118,6 +121,7 @@ def validate_access(document: dict[str, Any], findings: list[str]) -> None:
 
     ssh = require_mapping(document.get("ssh"), "ssh", findings)
     allowlist = require_list(ssh.get("allow_cidrs"), "ssh.allow_cidrs", findings)
+    parsed_allowlist: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
     if not allowlist:
         findings.append("ssh.allow_cidrs must contain at least one explicit network")
     for network in allowlist:
@@ -126,8 +130,18 @@ def validate_access(document: dict[str, Any], findings: list[str]) -> None:
         except ValueError:
             findings.append(f"ssh.allow_cidrs contains an invalid network: {network}")
             continue
+        parsed_allowlist.append(parsed)
         if parsed.prefixlen == 0:
             findings.append("ssh.allow_cidrs must not expose SSH to the whole internet")
+    transport = ssh.get("connection_transport")
+    if not isinstance(transport, str) or not transport.strip():
+        findings.append("ssh.connection_transport must name the active Ansible transport")
+    elif "docker" not in transport:
+        controller_source = parse_address(ssh.get("controller_source"))
+        if controller_source is None:
+            findings.append("ssh.controller_source must be the address seen by the SSH target")
+        elif not any(controller_source in network for network in parsed_allowlist):
+            findings.append("controller source address is absent from ssh.allow_cidrs")
     if ssh.get("password_authentication") is not False:
         findings.append("SSH password authentication must be disabled")
     if ssh.get("root_login") != "no":
@@ -147,9 +161,36 @@ def validate_network_and_docker(document: dict[str, Any], findings: list[str]) -
         if binding.get("protocol") not in {"tcp", "udp"}:
             findings.append(f"application_bindings[{index}].protocol must be tcp or udp")
 
+    firewall = require_mapping(document.get("firewall"), "firewall", findings)
+    public_interface = firewall.get("public_interface")
+    if (
+        not isinstance(public_interface, str)
+        or INTERFACE_RE.fullmatch(public_interface) is None
+        or public_interface == "lo"
+    ):
+        findings.append("firewall.public_interface must be a specific non-loopback interface")
+
     docker = require_mapping(document.get("docker"), "docker", findings)
     if docker.get("daemon_hosts") != ["unix:///var/run/docker.sock"]:
         findings.append("Docker daemon must expose only its local Unix socket")
+    data_root = docker.get("data_root")
+    if not isinstance(data_root, str):
+        findings.append("docker.data_root must be a specific absolute path")
+    else:
+        parsed_data_root = PurePosixPath(data_root)
+        if (
+            not parsed_data_root.is_absolute()
+            or ".." in parsed_data_root.parts
+            or parsed_data_root == PurePosixPath("/")
+        ):
+            findings.append("docker.data_root must be a specific absolute path")
+    storage_driver = docker.get("storage_driver")
+    if storage_driver is not None and storage_driver not in {
+        "overlay2",
+        "overlayfs",
+        "vfs",
+    }:
+        findings.append("docker.storage_driver must be null or an explicitly supported driver")
     logging = require_mapping(docker.get("logging"), "docker.logging", findings)
     if logging.get("driver") != "json-file":
         findings.append("Docker logging driver must be json-file")
@@ -228,8 +269,17 @@ def validate_directories(document: dict[str, Any], findings: list[str]) -> None:
     required_entries = {
         "/etc/dholbeat": {"owner": "root", "group": "root", "mode": "0755"},
         "/var/log/dholbeat": {"owner": "root", "group": "adm", "mode": "0750"},
-        "/var/lib/docker": {"owner": "root", "group": "root", "mode": "0710"},
     }
+    docker = document.get("docker")
+    data_root = docker.get("data_root") if isinstance(docker, dict) else None
+    if isinstance(data_root, str):
+        parsed_data_root = PurePosixPath(data_root)
+        if (
+            parsed_data_root.is_absolute()
+            and ".." not in parsed_data_root.parts
+            and parsed_data_root != PurePosixPath("/")
+        ):
+            required_entries[data_root] = {"owner": "root", "group": "root", "mode": "0710"}
     if isinstance(username, str) and ADMIN_USER_RE.fullmatch(username) is not None:
         required_entries[f"/home/{username}"] = {
             "owner": username,

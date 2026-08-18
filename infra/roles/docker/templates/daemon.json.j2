@@ -1,5 +1,8 @@
 {
   "data-root": {{ docker_data_root | to_json }},
+{% if docker_storage_driver is not none %}
+  "storage-driver": {{ docker_storage_driver | to_json }},
+{% endif %}
   "live-restore": {{ docker_live_restore | to_json }},
   "log-driver": {{ docker_log_driver | to_json }},
   "log-opts": {
