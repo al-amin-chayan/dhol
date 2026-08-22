@@ -1,0 +1,22 @@
+---
+- name: Open a separate authenticated administrator connection
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ role_path }}/files/second_connection_probe.py"
+      - --host
+      - "{{ baseline_second_connection_host }}"
+      - --port
+      - "{{ baseline_second_connection_port }}"
+      - --user
+      - "{{ baseline_admin_user }}"
+      - --identity-file
+      - "{{ baseline_second_connection_identity_file }}"
+      - --known-hosts-file
+      - "{{ baseline_second_connection_known_hosts_file }}"
+  become: false
+  changed_when: false
+  check_mode: false
+  delegate_to: localhost
+  vars:
+    ansible_remote_tmp: /tmp/ansible-controller

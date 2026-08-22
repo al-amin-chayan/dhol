@@ -1,0 +1,2 @@
+docker:
+  logging: {driver: json-file, max_size: unlimited, max_files: 0}

@@ -50,6 +50,15 @@ def verify_python(lock: dict) -> None:
             fail(f"{package} expected {expected}, got {actual}")
 
 
+def verify_system_packages(lock: dict) -> None:
+    for package, expected in lock["system_packages"].items():
+        actual = command_output(
+            ["dpkg-query", "--show", "--showformat=${Version}", package]
+        )
+        if actual != str(expected):
+            fail(f"{package} expected {expected}, got {actual}")
+
+
 def verify_tools(lock: dict) -> None:
     for name, spec in lock["tools"].items():
         output = command_output(TOOL_COMMANDS[name])
@@ -74,6 +83,8 @@ def print_versions(lock: dict) -> None:
     print(f"python={lock['python']['version']}")
     for package, version in lock["python"]["direct_packages"].items():
         print(f"python-package.{package}={version}")
+    for package, version in lock["system_packages"].items():
+        print(f"system-package.{package}={version}")
     for name, spec in lock["ansible_collections"].items():
         print(f"ansible-collection.{name}={spec['version']}")
     for name, spec in lock["tools"].items():
@@ -86,6 +97,7 @@ def main() -> None:
     args = parser.parse_args()
     lock = load_lock()
     verify_python(lock)
+    verify_system_packages(lock)
     verify_tools(lock)
     verify_collections(lock)
     if not args.verify_only:
@@ -94,4 +106,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

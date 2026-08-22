@@ -1,0 +1,120 @@
+---
+- name: Install the host firewall package
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+
+- name: Read the current firewall policy
+  ansible.builtin.command: /usr/sbin/ufw status verbose
+  changed_when: false
+  check_mode: false
+  register: firewall_ufw_before
+
+- name: Set default-deny inbound policy
+  ansible.builtin.command: /usr/sbin/ufw default deny incoming
+  when: "'deny (incoming)' not in firewall_ufw_before.stdout"
+  changed_when: true
+
+- name: Allow outbound connections by default
+  ansible.builtin.command: /usr/sbin/ufw default allow outgoing
+  when: "'allow (outgoing)' not in firewall_ufw_before.stdout"
+  changed_when: true
+
+- name: Allow SSH only from declared controller networks
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/ufw
+      - allow
+      - from
+      - "{{ item }}"
+      - to
+      - any
+      - port
+      - "{{ firewall_ssh_port }}"
+      - proto
+      - tcp
+      - comment
+      - dholbeat-admin-ssh
+  loop: "{{ baseline_ssh_allow_cidrs }}"
+  register: firewall_ufw_ssh_rules
+  changed_when: "'Skipping adding existing rule' not in firewall_ufw_ssh_rules.stdout"
+
+- name: Enable the firewall after the successful administrator probe
+  ansible.builtin.command: /usr/sbin/ufw --force enable
+  when: "'Status: active' not in firewall_ufw_before.stdout"
+  changed_when: true
+
+- name: Install the bounded Docker ingress policy
+  ansible.builtin.template:
+    src: dholbeat-docker-firewall.sh.j2
+    dest: /usr/local/sbin/dholbeat-docker-firewall
+    owner: root
+    group: root
+    mode: "0755"
+  notify: Restart Dholbeat Docker firewall
+
+- name: Install the Docker ingress firewall unit
+  ansible.builtin.template:
+    src: dholbeat-docker-firewall.service.j2
+    dest: /etc/systemd/system/dholbeat-docker-firewall.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart Dholbeat Docker firewall
+
+- name: Apply firewall handlers before verification
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start the Docker ingress firewall
+  ansible.builtin.systemd_service:
+    name: dholbeat-docker-firewall.service
+    enabled: true
+    state: started
+
+- name: Read the converged firewall policy
+  ansible.builtin.command: /usr/sbin/ufw status verbose
+  changed_when: false
+  check_mode: false
+  register: firewall_ufw_after
+
+- name: Verify default deny and the explicit SSH allowlist
+  ansible.builtin.assert:
+    that:
+      - "'Status: active' in firewall_ufw_after.stdout"
+      - "'deny (incoming)' in firewall_ufw_after.stdout"
+      - "'allow (outgoing)' in firewall_ufw_after.stdout"
+      # UFW renders host routes as bare addresses instead of /32 or /128 CIDRs.
+      - >-
+        (item | regex_replace('/32$', '') | regex_replace('/128$', ''))
+        in firewall_ufw_after.stdout
+  loop: "{{ baseline_ssh_allow_cidrs }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Verify the Docker ingress chain is attached
+  ansible.builtin.command:
+    argv: [iptables, -w, -C, DOCKER-USER, -j, DHOLBEAT-DOCKER-INGRESS]
+  changed_when: false
+  check_mode: false
+
+- name: Verify the Docker policy drops only public-interface ingress
+  ansible.builtin.command:
+    argv:
+      - iptables
+      - -w
+      - -C
+      - DHOLBEAT-DOCKER-INGRESS
+      - -i
+      - "{{ firewall_public_interface }}"
+      - -j
+      - DROP
+  changed_when: false
+  check_mode: false
+
+- name: Verify non-ingress Docker forwarding returns to Docker policy
+  ansible.builtin.command:
+    argv: [iptables, -w, -C, DHOLBEAT-DOCKER-INGRESS, -j, RETURN]
+  changed_when: false
+  check_mode: false

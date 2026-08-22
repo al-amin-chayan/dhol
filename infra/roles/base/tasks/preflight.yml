@@ -1,0 +1,144 @@
+---
+- name: Require all inventory-owned baseline inputs
+  ansible.builtin.assert:
+    that:
+      - baseline_target_environment is defined
+      - baseline_admin_user is defined
+      - baseline_admin_uid is defined
+      - baseline_admin_authorized_keys is defined
+      - baseline_break_glass is defined
+      - baseline_ssh_allow_cidrs is defined
+      - baseline_second_connection_host is defined
+      - baseline_second_connection_port is defined
+      - baseline_second_connection_identity_file is defined
+      - baseline_second_connection_known_hosts_file is defined
+      - baseline_public_interface is defined
+      - baseline_managed_directories is defined
+      - baseline_role_writable_paths is defined
+    fail_msg: Baseline inventory is incomplete; refusing to mutate the target.
+
+- name: Inspect the controller-side second-connection identity
+  ansible.builtin.stat:
+    path: "{{ baseline_second_connection_identity_file }}"
+  become: false
+  delegate_to: localhost
+  register: base_identity_file
+  vars:
+    ansible_remote_tmp: /tmp/ansible-controller
+
+- name: Inspect the controller-side known-hosts file
+  ansible.builtin.stat:
+    path: "{{ baseline_second_connection_known_hosts_file }}"
+  become: false
+  delegate_to: localhost
+  register: base_known_hosts_file
+  vars:
+    ansible_remote_tmp: /tmp/ansible-controller
+
+- name: Require readable controller-side connection inputs
+  ansible.builtin.assert:
+    that:
+      - base_identity_file.stat.isreg | default(false)
+      - base_identity_file.stat.readable | default(false)
+      - base_known_hosts_file.stat.isreg | default(false)
+      - base_known_hosts_file.stat.readable | default(false)
+    fail_msg: The second-connection identity and known-hosts files must be readable controller inputs.
+
+- name: Read the controller source address from the active SSH session
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - "import os; fields = os.environ.get('SSH_CONNECTION', '').split(); print(fields[0] if fields else '')"
+  become: false
+  changed_when: false
+  check_mode: false
+  register: base_controller_source
+  when: "'docker' not in (ansible_connection | default('ssh'))"
+
+- name: Inspect conflicting container packages without removing them
+  ansible.builtin.command:
+    argv: "{{ ['dpkg-query', '--show', '--showformat=${db:Status-Abbrev}\\t${binary:Package}\\n'] + docker_conflicting_packages }}"
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  register: base_conflicting_packages
+
+- name: Refuse to remove or replace an undeclared container runtime
+  ansible.builtin.assert:
+    that:
+      - base_conflicting_packages.stdout_lines | select('match', '^ii') | list | length == 0
+    fail_msg: Conflicting container packages are installed; cleanup or adoption requires separate review.
+
+- name: Inspect root filesystem capacity without changing it
+  ansible.builtin.command:
+    argv: [df, "--output=size,avail", -BM, /]
+  changed_when: false
+  check_mode: false
+  register: base_root_disk
+
+- name: Build the normalized baseline contract payload
+  ansible.builtin.set_fact:
+    base_contract_payload:
+      schema_version: 1
+      target_environment: "{{ baseline_target_environment }}"
+      facts:
+        distribution: "{{ ansible_facts['distribution'] }}"
+        distribution_version: "{{ ansible_facts['distribution_version'] }}"
+        architecture: "{{ ansible_facts['architecture'] }}"
+        memory_mb: "{{ ansible_facts['memtotal_mb'] | int }}"
+        disk_total_mb: "{{ base_root_disk.stdout_lines[-1].split()[0] | regex_replace('M$', '') | int }}"
+        disk_free_mb: "{{ base_root_disk.stdout_lines[-1].split()[1] | regex_replace('M$', '') | int }}"
+      resource_minimums:
+        memory_mb: "{{ base_minimum_memory_mb | int }}"
+        disk_total_mb: "{{ base_minimum_disk_total_mb | int }}"
+        disk_free_mb: "{{ base_minimum_disk_free_mb | int }}"
+      admin:
+        user: "{{ baseline_admin_user }}"
+        uid: "{{ baseline_admin_uid | int }}"
+        authorized_keys: "{{ baseline_admin_authorized_keys }}"
+      break_glass: "{{ baseline_break_glass }}"
+      ssh:
+        allow_cidrs: "{{ baseline_ssh_allow_cidrs }}"
+        connection_transport: "{{ ansible_connection | default('ssh') }}"
+        controller_source: "{{ base_controller_source.stdout | default('') | trim }}"
+        port: "{{ base_ssh_port | int }}"
+        active_connection_port: "{{ ansible_port | default(22) | int }}"
+        password_authentication: "{{ base_ssh_password_authentication }}"
+        root_login: "{{ base_ssh_root_login }}"
+        second_connection_port: "{{ baseline_second_connection_port | int }}"
+        second_connection_required: "{{ base_second_connection_required }}"
+      application_bindings: "{{ baseline_application_bindings }}"
+      firewall:
+        public_interface: "{{ baseline_public_interface }}"
+        host_interfaces: "{{ ansible_facts['interfaces'] | default([]) }}"
+        default_interface: "{{ ansible_facts.get('default_ipv4', {}).get('interface', '') }}"
+      docker:
+        apt_signing_checksum: "{{ docker_apt_signing_checksum }}"
+        daemon_hosts: "{{ docker_daemon_hosts }}"
+        data_root: "{{ docker_data_root }}"
+        storage_driver: "{{ docker_storage_driver }}"
+        live_restore: "{{ docker_live_restore }}"
+        logging:
+          driver: "{{ docker_log_driver }}"
+          max_size: "{{ docker_log_max_size }}"
+          max_files: "{{ docker_log_max_files | int }}"
+        packages: "{{ docker_packages }}"
+      host_timezone: "{{ base_host_timezone }}"
+      managed_directories: "{{ baseline_managed_directories }}"
+      role_writable_paths: "{{ baseline_role_writable_paths }}"
+
+- name: Validate OS, resources, access, networking, Docker, and writable paths
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ role_path }}/files/validate_contract.py"
+      - --input
+      - "-"
+    stdin: "{{ base_contract_payload | to_json }}"
+  become: false
+  changed_when: false
+  check_mode: false
+  delegate_to: localhost
+  vars:
+    ansible_remote_tmp: /tmp/ansible-controller

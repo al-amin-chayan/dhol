@@ -1,0 +1,9 @@
+all:
+  children:
+    baseline_targets:
+      hosts:
+        disposable-baseline:
+          ansible_connection: community.docker.docker_api
+          ansible_host: wp05a-baseline-target
+          ansible_port: 22
+          ansible_user: root

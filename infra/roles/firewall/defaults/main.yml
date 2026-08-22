@@ -1,0 +1,6 @@
+---
+firewall_ssh_port: "{{ base_ssh_port }}"
+firewall_default_incoming: deny
+firewall_default_outgoing: allow
+firewall_public_interface: "{{ baseline_public_interface }}"
+firewall_docker_private_ingress_cidrs: []

@@ -1,0 +1,8 @@
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitEmptyPasswords no
+PermitRootLogin {{ base_ssh_root_login }}
+PubkeyAuthentication yes
+UsePAM yes
+X11Forwarding no
+AllowUsers {{ baseline_admin_user }}
