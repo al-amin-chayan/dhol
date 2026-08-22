@@ -9,7 +9,9 @@ baseline_break_glass:
   owner: platform-operations
   recovery_identity: disposable-container-console
   verification: container console checked before convergence
-baseline_ssh_allow_cidrs: [172.28.11.0/24]
+baseline_ssh_allow_cidrs:
+  - 172.28.11.0/24
+  - 203.0.113.10/32
 baseline_public_interface: eth0
 baseline_second_connection_host: wp05a-baseline-target
 baseline_second_connection_port: 22

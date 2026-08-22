@@ -85,7 +85,10 @@
       - "'Status: active' in firewall_ufw_after.stdout"
       - "'deny (incoming)' in firewall_ufw_after.stdout"
       - "'allow (outgoing)' in firewall_ufw_after.stdout"
-      - item in firewall_ufw_after.stdout
+      # UFW renders host routes as bare addresses instead of /32 or /128 CIDRs.
+      - >-
+        (item | regex_replace('/32$', '') | regex_replace('/128$', ''))
+        in firewall_ufw_after.stdout
   loop: "{{ baseline_ssh_allow_cidrs }}"
   loop_control:
     label: "{{ item }}"

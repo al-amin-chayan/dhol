@@ -48,6 +48,13 @@
     - name: Apply pending SSH handlers only after the safety probes
       ansible.builtin.meta: flush_handlers
 
+    - name: Continue through the proven administrator identity
+      ansible.builtin.set_fact:
+        ansible_user: "{{ baseline_admin_user }}"
+
+    - name: Reset the bootstrap connection after disabling root login
+      ansible.builtin.meta: reset_connection
+
     - name: Verify the effective SSH daemon policy
       ansible.builtin.import_role:
         name: base

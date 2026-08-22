@@ -5,6 +5,13 @@ same checksum-locked controller on native `linux/amd64` and `linux/arm64`, then
 runs every check with the repository mounted read-only, no network, no added
 capabilities and a bounded temporary filesystem.
 
+The default `exec` path remains network-isolated. A founder-approved disposable
+SSH target uses the explicit `exec-ssh` path, which still mounts the repository
+read-only, drops every capability, runs as the invoking user, copies only the
+declared `.artifacts/` known-hosts file into an ephemeral home, and requires the
+literal `--confirm disposable-host` guard. It never mounts an SSH agent or a
+provider credential.
+
 ## Clean-checkout workflow
 
 Prerequisites are Docker Engine with the buildx plugin and enough temporary
@@ -18,11 +25,23 @@ scripts/controller digest
 scripts/controller cache size
 ```
 
+For an approved disposable host, keep its inventory, identity, and known-hosts
+inputs under ignored `.artifacts/`, then invoke the locked controller with:
+
+```bash
+scripts/controller exec-ssh \
+  --known-hosts .artifacts/<known-hosts-file> \
+  --confirm disposable-host \
+  ansible-playbook --inventory /workspace/.artifacts/<inventory> \
+  /workspace/infra/playbooks/baseline.yml
+```
+
 The first command builds from `infra/controller/Containerfile` if the exact
 source-lock tag is absent. GHCR and laptop caches are not required: the build
-starts from the digest-pinned base and downloads only artifacts whose URLs and
-SHA-256 checksums are committed in `toolchain.lock.yml`. A future published
-controller is a convenience only and must be addressed by OCI digest.
+starts from the digest-pinned base, installs exact-version system packages, and
+downloads standalone artifacts only when their URLs and SHA-256 checksums are
+committed in `toolchain.lock.yml`. A future published controller is a
+convenience only and must be addressed by OCI digest.
 
 The build uses a dedicated, uniquely named BuildKit builder backed by the
 digest-pinned BuildKit image. That builder and its task cache are removed after
@@ -63,7 +82,9 @@ are outside its target.
    digest`, and the guarded cache cleanup test before review.
 
 Generated plans, evidence and decrypted output belong under ignored
-`.artifacts/` or a fresh temporary directory. The controller never connects to
-a host or provider and CI performs no apply. Software and standard repository
-CI add **$0/month**; any paid registry, runner or storage proposal requires a
-founder decision and a complete wallet table.
+`.artifacts/` or a fresh temporary directory. CI and normal controller commands
+never connect to a host or provider and perform no apply. The guarded
+`exec-ssh` command is operator-invoked only for a founder-approved disposable
+target. Software and standard repository CI add **$0/month**; any paid
+registry, runner or storage proposal requires a founder decision and a complete
+wallet table.

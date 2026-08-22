@@ -58,7 +58,12 @@ namespace. Production keeps Docker's default storage driver. Before production
 use, repeat the same `infra/playbooks/baseline.yml` convergence against an
 approved disposable Ubuntu 24.04 VM/VPS with at least 6 GB RAM and 30 GB disk.
 Supply its inventory values locally, retain provider-console access, run twice
-through `scripts/controller`, and attach the same redacted evidence fields.
+through the guarded `scripts/controller exec-ssh` command, and attach the same
+redacted evidence fields. Store the private identity, strict known-hosts file,
+and target-specific inventory only under ignored `.artifacts/`; never pass a
+password. The controller requires `--confirm disposable-host`, keeps the
+repository read-only, and copies only the declared known-hosts file into its
+ephemeral home.
 Never use a production hostname or IP for this test.
 
 ## Rollback and recovery
@@ -85,4 +90,4 @@ and founder-confirmed window.
 | Component | Monthly cost | Boundary |
 | --- | ---: | --- |
 | Ansible roles and local fixture | $0 | Open-source software on existing hardware |
-| Temporary VM/VPS | $0 unless separately approved | Do not purchase one from this runbook |
+| WP-05A disposable VPSDime Linux6GB | $7 for one month | Founder-approved on 2026-08-22; cancel after accepted evidence |

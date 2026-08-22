@@ -188,6 +188,8 @@ def test_playbook_orders_safety_probes_before_ssh_and_firewall_changes() -> None
     post_firewall_probe = names.index("Prove access after firewall convergence")
     ssh_hardening = names.index("Stage key-only SSH hardening after the firewall probe")
     flush = names.index("Apply pending SSH handlers only after the safety probes")
+    switch_user = names.index("Continue through the proven administrator identity")
+    reset = names.index("Reset the bootstrap connection after disabling root login")
     verify = names.index("Verify the effective SSH daemon policy")
     final_probe = names.index("Re-prove access after SSH hardening")
     assert (
@@ -196,6 +198,8 @@ def test_playbook_orders_safety_probes_before_ssh_and_firewall_changes() -> None
         < post_firewall_probe
         < ssh_hardening
         < flush
+        < switch_user
+        < reset
         < verify
         < final_probe
     )
@@ -226,6 +230,26 @@ def test_firewall_policy_is_directional_and_returns_other_forwarding() -> None:
     assert '-A "$chain" -j RETURN' in template
     assert '-A "$chain" -j DROP' not in template
     assert '-i lo -j ACCEPT' not in template
+
+
+def test_firewall_verification_covers_ufw_host_cidr_normalization() -> None:
+    tasks = load_yaml(ROOT / "infra/roles/firewall/tasks/main.yml")
+    assert isinstance(tasks, list)
+    verification = next(
+        task
+        for task in tasks
+        if task["name"] == "Verify default deny and the explicit SSH allowlist"
+    )
+    assertions = verification["ansible.builtin.assert"]["that"]
+    assert any("regex_replace('/32$', '')" in item for item in assertions)
+    assert any("regex_replace('/128$', '')" in item for item in assertions)
+
+    fixture_vars = load_yaml(
+        ROOT / "infra/inventories/fixtures/group_vars/baseline_targets.yml"
+    )
+    assert any(
+        cidr.endswith("/32") for cidr in fixture_vars["baseline_ssh_allow_cidrs"]
+    )
 
 
 def test_docker_firewall_survives_docker_restart_without_teardown_gap() -> None:
