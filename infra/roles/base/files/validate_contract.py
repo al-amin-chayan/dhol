@@ -46,6 +46,18 @@ def positive_integer(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
+def valid_port(value: Any) -> bool:
+    return positive_integer(value) and value <= 65535
+
+
+def valid_interface_name(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and INTERFACE_RE.fullmatch(value) is not None
+        and value not in {".", "..", "lo"}
+    )
+
+
 def parse_address(value: Any) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
     if not isinstance(value, str):
         return None
@@ -146,6 +158,16 @@ def validate_access(document: dict[str, Any], findings: list[str]) -> None:
         findings.append("SSH password authentication must be disabled")
     if ssh.get("root_login") != "no":
         findings.append("SSH root login must be disabled after the safety probe")
+    port_fields = ("port", "active_connection_port", "second_connection_port")
+    for field in port_fields:
+        if not valid_port(ssh.get(field)):
+            findings.append(f"ssh.{field} must be an integer between 1 and 65535")
+    if all(valid_port(ssh.get(field)) for field in port_fields) and len(
+        {ssh[field] for field in port_fields}
+    ) != 1:
+        findings.append(
+            "ssh.port, ssh.active_connection_port, and ssh.second_connection_port must match"
+        )
     if ssh.get("second_connection_required") is not True:
         findings.append("a second authenticated SSH connection must be required")
 
@@ -163,12 +185,28 @@ def validate_network_and_docker(document: dict[str, Any], findings: list[str]) -
 
     firewall = require_mapping(document.get("firewall"), "firewall", findings)
     public_interface = firewall.get("public_interface")
-    if (
-        not isinstance(public_interface, str)
-        or INTERFACE_RE.fullmatch(public_interface) is None
-        or public_interface == "lo"
-    ):
+    if not valid_interface_name(public_interface):
         findings.append("firewall.public_interface must be a specific non-loopback interface")
+    host_interfaces = require_list(
+        firewall.get("host_interfaces"), "firewall.host_interfaces", findings
+    )
+    if not host_interfaces or not all(
+        isinstance(interface, str) and interface for interface in host_interfaces
+    ):
+        findings.append("firewall.host_interfaces must contain target interface names")
+    elif valid_interface_name(public_interface) and public_interface not in host_interfaces:
+        findings.append("firewall.public_interface is not present on the target host")
+    default_interface = firewall.get("default_interface")
+    if not valid_interface_name(default_interface):
+        findings.append(
+            "firewall.default_interface must identify the target default-route interface"
+        )
+    elif default_interface not in host_interfaces:
+        findings.append("firewall.default_interface is not present on the target host")
+    elif valid_interface_name(public_interface) and public_interface != default_interface:
+        findings.append(
+            "firewall.public_interface must match the target default-route interface"
+        )
 
     docker = require_mapping(document.get("docker"), "docker", findings)
     if docker.get("daemon_hosts") != ["unix:///var/run/docker.sock"]:

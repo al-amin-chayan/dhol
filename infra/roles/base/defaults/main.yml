@@ -4,7 +4,7 @@ base_minimum_memory_mb: 5500
 base_minimum_disk_total_mb: 30000
 base_minimum_disk_free_mb: 8192
 base_admin_shell: /bin/bash
-base_ssh_port: 22
+base_ssh_port: "{{ ansible_port | default(22) | int }}"
 base_ssh_password_authentication: false
 base_ssh_root_login: "no"
 base_second_connection_required: true

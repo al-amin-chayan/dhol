@@ -64,6 +64,9 @@ and target-specific inventory only under ignored `.artifacts/`; never pass a
 password. The controller requires `--confirm disposable-host`, keeps the
 repository read-only, and copies only the declared known-hosts file into its
 ephemeral home.
+The inventory's `ansible_port` and `baseline_second_connection_port` must name
+the same active SSH listener; preflight rejects a mismatch, and the firewall
+opens that exact port from the declared controller networks.
 Never use a production hostname or IP for this test.
 
 ## Rollback and recovery

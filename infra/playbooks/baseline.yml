@@ -51,6 +51,7 @@
     - name: Continue through the proven administrator identity
       ansible.builtin.set_fact:
         ansible_user: "{{ baseline_admin_user }}"
+        ansible_private_key_file: "{{ baseline_second_connection_identity_file }}"
 
     - name: Reset the bootstrap connection after disabling root login
       ansible.builtin.meta: reset_connection

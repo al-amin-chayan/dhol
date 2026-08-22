@@ -61,6 +61,8 @@ def test_positive_baseline_contract() -> None:
         ("unbounded-docker-log.yml", "Docker log max_size"),
         ("undeclared-writable-path.yml", "absent from the directory catalog"),
         ("controller-source-not-allowed.yml", "controller source address is absent"),
+        ("absent-public-interface.yml", "public_interface is not present on the target host"),
+        ("ssh-port-mismatch.yml", "ssh.second_connection_port must match"),
     ],
 )
 def test_negative_contracts_fail_closed(fixture: str, expected: str) -> None:
@@ -153,6 +155,32 @@ def test_contract_rejects_loopback_firewall_interface() -> None:
     assert any("specific non-loopback interface" in finding for finding in findings)
 
 
+@pytest.mark.parametrize("interface", [".", ".."])
+def test_contract_rejects_dot_segment_firewall_interfaces(interface: str) -> None:
+    document = load_yaml(FIXTURE_ROOT / "positive.yml")
+    assert isinstance(document, dict)
+    document["firewall"]["public_interface"] = interface
+    findings = CONTRACT.validate_contract(document)
+    assert any("specific non-loopback interface" in finding for finding in findings)
+
+
+def test_contract_requires_firewall_interface_to_match_default_route() -> None:
+    document = load_yaml(FIXTURE_ROOT / "positive.yml")
+    assert isinstance(document, dict)
+    document["firewall"]["host_interfaces"].append("ens3")
+    document["firewall"]["public_interface"] = "ens3"
+    findings = CONTRACT.validate_contract(document)
+    assert any("must match the target default-route interface" in finding for finding in findings)
+
+
+def test_contract_requires_firewall_port_to_match_active_ssh_port() -> None:
+    document = load_yaml(FIXTURE_ROOT / "positive.yml")
+    assert isinstance(document, dict)
+    document["ssh"]["port"] = 443
+    findings = CONTRACT.validate_contract(document)
+    assert any("ssh.active_connection_port" in finding for finding in findings)
+
+
 def test_connection_probe_fails_closed_without_identity(tmp_path: Path) -> None:
     result = subprocess.run(
         [
@@ -203,6 +231,18 @@ def test_playbook_orders_safety_probes_before_ssh_and_firewall_changes() -> None
         < verify
         < final_probe
     )
+    switch_task = tasks[switch_user]["ansible.builtin.set_fact"]
+    assert switch_task["ansible_user"] == "{{ baseline_admin_user }}"
+    assert switch_task["ansible_private_key_file"] == (
+        "{{ baseline_second_connection_identity_file }}"
+    )
+
+
+def test_firewall_ssh_port_follows_the_active_ansible_connection() -> None:
+    base_defaults = load_yaml(ROOT / "infra/roles/base/defaults/main.yml")
+    firewall_defaults = load_yaml(ROOT / "infra/roles/firewall/defaults/main.yml")
+    assert base_defaults["base_ssh_port"] == "{{ ansible_port | default(22) | int }}"
+    assert firewall_defaults["firewall_ssh_port"] == "{{ base_ssh_port }}"
 
 
 def test_preflight_tasks_do_not_use_mutating_modules() -> None:

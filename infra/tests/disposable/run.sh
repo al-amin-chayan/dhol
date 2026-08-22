@@ -354,8 +354,7 @@ run_logged "$ARTIFACT_ROOT/failed-second-connection.log" \
   ansible-playbook --inventory "$BOOTSTRAP_INVENTORY" playbooks/baseline.yml \
   --extra-vars @/run/dholbeat-fixture/vars.json \
   --extra-vars "ansible_host=$NEGATIVE_CONTAINER" \
-  --extra-vars "baseline_second_connection_host=$NEGATIVE_ALIAS" \
-  --extra-vars baseline_second_connection_port=9
+  --extra-vars "baseline_second_connection_host=${NEGATIVE_ALIAS}-unreachable"
 NEGATIVE_STATUS=$?
 set -e
 [ "$NEGATIVE_STATUS" -ne 0 ] || die "failed second-connection fixture unexpectedly converged"
