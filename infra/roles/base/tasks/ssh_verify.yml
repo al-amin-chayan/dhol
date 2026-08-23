@@ -1,0 +1,16 @@
+---
+- name: Read the effective SSH daemon configuration
+  ansible.builtin.command: /usr/sbin/sshd -T
+  changed_when: false
+  check_mode: false
+  register: base_sshd_effective
+
+- name: Verify key-only SSH is actually in effect
+  ansible.builtin.assert:
+    that:
+      - "'passwordauthentication no' in (base_sshd_effective.stdout | lower)"
+      - "'kbdinteractiveauthentication no' in (base_sshd_effective.stdout | lower)"
+      - "'permitrootlogin no' in (base_sshd_effective.stdout | lower)"
+      - "'pubkeyauthentication yes' in (base_sshd_effective.stdout | lower)"
+      - "'allowusers ' ~ baseline_admin_user in (base_sshd_effective.stdout | lower)"
+    fail_msg: Effective sshd configuration does not match the declared key-only contract.

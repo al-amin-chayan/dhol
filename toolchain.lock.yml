@@ -28,9 +28,24 @@ python:
     ansible-core: 2.21.3
     ansible-lint: 26.8.0
     check-jsonschema: 0.38.0
+    paramiko: 5.0.0
     pip: 26.2.1
     pytest: 9.1.1
     yamllint: 1.38.0
+
+system_packages:
+  libbsd0: 0.11.7-2
+  libcbor0.8: 0.8.0-2+b1
+  libedit2: 3.1-20221030-2
+  libfido2-1: 1.12.0-2+b1
+  libgssapi-krb5-2: 1.20.1-2+deb12u5
+  libk5crypto3: 1.20.1-2+deb12u5
+  libkeyutils1: 1.6.3-2
+  libkrb5-3: 1.20.1-2+deb12u5
+  libkrb5support0: 1.20.1-2+deb12u5
+  libssl3: 3.0.20-1~deb12u2
+  openssh-client: 1:9.2p1-2+deb12u10
+  openssl: 3.0.20-1~deb12u2
 
 ansible_collections:
   community.library_inventory_filtering_v1:

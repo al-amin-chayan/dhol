@@ -1,0 +1,10 @@
+---
+- name: Refresh Docker apt metadata
+  ansible.builtin.apt:
+    update_cache: true
+
+- name: Restart Docker
+  ansible.builtin.systemd_service:
+    name: docker.service
+    enabled: true
+    state: restarted

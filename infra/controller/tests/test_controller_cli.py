@@ -106,6 +106,44 @@ def test_cache_cleanup_targets_only_labelled_image(tmp_path: Path) -> None:
     assert "unrelated" not in calls
 
 
+def test_exec_ssh_rejects_known_hosts_outside_artifacts(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [
+            CONTROLLER,
+            "exec-ssh",
+            "--known-hosts",
+            "/etc/ssh/ssh_known_hosts",
+            "--confirm",
+            "disposable-host",
+            "true",
+        ],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode != 0
+    assert "relative .artifacts/ path" in result.stderr
+
+
+def test_exec_ssh_requires_exact_confirmation(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [
+            CONTROLLER,
+            "exec-ssh",
+            "--known-hosts",
+            ".artifacts/known-hosts",
+            "--confirm",
+            "production-host",
+            "true",
+        ],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode != 0
+    assert "confirmation must be exactly: disposable-host" in result.stderr
+
+
 def agent_environment(**updates: str) -> dict[str, str]:
     environment = {
         key: value

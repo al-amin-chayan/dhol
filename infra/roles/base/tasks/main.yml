@@ -1,0 +1,137 @@
+---
+- name: Update the Ubuntu package index within the bounded cache window
+  ansible.builtin.apt:
+    cache_valid_time: "{{ base_apt_cache_valid_seconds }}"
+    update_cache: true
+
+- name: Install baseline operating-system packages
+  ansible.builtin.apt:
+    name: "{{ base_packages }}"
+    state: present
+
+- name: Create the named administrator without an implicit home directory
+  ansible.builtin.user:
+    name: "{{ baseline_admin_user }}"
+    uid: "{{ baseline_admin_uid }}"
+    groups: sudo
+    append: true
+    create_home: false
+    password_lock: true
+    shell: "{{ base_admin_shell }}"
+    state: present
+
+- name: Create only catalogued baseline writable directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop: "{{ baseline_managed_directories }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Install the administrator authorized-key set exclusively
+  ansible.builtin.template:
+    src: authorized_keys.j2
+    dest: "/home/{{ baseline_admin_user }}/.ssh/authorized_keys"
+    owner: "{{ baseline_admin_user }}"
+    group: "{{ baseline_admin_user }}"
+    mode: "0600"
+
+- name: Permit the named administrator to use sudo
+  ansible.builtin.template:
+    src: sudoers.j2
+    dest: "/etc/sudoers.d/60-dholbeat-{{ baseline_admin_user }}"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: /usr/sbin/visudo -cf %s
+
+- name: Set the host timezone file
+  ansible.builtin.copy:
+    content: "{{ base_host_timezone }}\n"
+    dest: /etc/timezone
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Point localtime at the UTC zone database
+  ansible.builtin.file:
+    src: "/usr/share/zoneinfo/{{ base_host_timezone }}"
+    dest: /etc/localtime
+    state: link
+    force: true
+    owner: root
+    group: root
+
+- name: Configure automatic security updates
+  ansible.builtin.template:
+    src: 20auto-upgrades.j2
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Configure the declared unattended reboot policy
+  ansible.builtin.template:
+    src: 52dholbeat-unattended-upgrades.j2
+    dest: /etc/apt/apt.conf.d/52dholbeat-unattended-upgrades
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Bound persistent and runtime journal storage
+  ansible.builtin.file:
+    path: /etc/systemd/journald.conf.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install bounded persistent and runtime journal settings
+  ansible.builtin.template:
+    src: journald-bounds.conf.j2
+    dest: /etc/systemd/journald.conf.d/60-dholbeat-bounds.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart systemd-journald
+
+- name: Bound Dholbeat text logs
+  ansible.builtin.template:
+    src: logrotate.j2
+    dest: /etc/logrotate.d/dholbeat-baseline
+    owner: root
+    group: root
+    mode: "0644"
+    validate: /usr/sbin/logrotate --debug %s
+
+- name: Record the non-secret writable-directory catalog on the host
+  ansible.builtin.template:
+    src: managed-directories.yml.j2
+    dest: /etc/dholbeat/managed-directories.yml
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Record the non-secret break-glass contract on the host
+  ansible.builtin.template:
+    src: break-glass.yml.j2
+    dest: /etc/dholbeat/break-glass.yml
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Enable and start time synchronization
+  ansible.builtin.systemd_service:
+    name: chrony.service
+    enabled: true
+    state: started
+
+
+- name: Enable unattended upgrade scheduling
+  ansible.builtin.systemd_service:
+    name: unattended-upgrades.service
+    enabled: true
+    state: started

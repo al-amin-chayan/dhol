@@ -1,0 +1,110 @@
+---
+- name: Create the Docker apt keyring directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the checksum-pinned Docker repository key
+  ansible.builtin.get_url:
+    url: "{{ docker_apt_key_url }}"
+    dest: /etc/apt/keyrings/docker.asc
+    checksum: "sha256:{{ docker_apt_signing_checksum }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Refresh Docker apt metadata
+
+- name: Configure the stable Docker apt repository
+  ansible.builtin.template:
+    src: docker.sources.j2
+    dest: /etc/apt/sources.list.d/docker.sources
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Refresh Docker apt metadata
+
+- name: Refresh apt metadata when repository inputs change
+  ansible.builtin.meta: flush_handlers
+
+- name: Install exact Docker Engine and Compose packages
+  ansible.builtin.apt:
+    name: "{{ item.key }}={{ item.value }}"
+    allow_downgrade: true
+    state: present
+  loop: "{{ docker_packages | dict2items | sort(attribute='key') }}"
+  loop_control:
+    label: "{{ item.key }}={{ item.value }}"
+
+- name: Hold the reviewed Docker package versions
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop: "{{ docker_packages.keys() | list | sort }}"
+
+- name: Configure bounded local-only Docker daemon defaults
+  ansible.builtin.template:
+    src: daemon.json.j2
+    dest: /etc/docker/daemon.json
+    owner: root
+    group: root
+    mode: "0644"
+    validate: /usr/bin/dockerd --validate --config-file=%s
+  notify: Restart Docker
+
+- name: Apply Docker configuration before firewall convergence
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start Docker Engine
+  ansible.builtin.systemd_service:
+    name: docker.service
+    enabled: true
+    state: started
+
+- name: Read the effective Docker daemon information
+  ansible.builtin.command: /usr/bin/docker info --format json
+  changed_when: false
+  check_mode: false
+  register: docker_info_result
+
+- name: Read the Docker systemd command line
+  ansible.builtin.command:
+    argv: [systemctl, show, docker.service, --property=ExecStart, --value]
+  changed_when: false
+  check_mode: false
+  register: docker_exec_start_result
+
+- name: Inspect TCP listeners for an exposed Docker daemon
+  ansible.builtin.command:
+    argv: [ss, --listening, --numeric, --tcp]
+  changed_when: false
+  check_mode: false
+  register: docker_tcp_listeners
+
+- name: Read the bounded Docker daemon configuration
+  ansible.builtin.slurp:
+    src: /etc/docker/daemon.json
+  check_mode: false
+  register: docker_daemon_config
+
+- name: Verify Docker logging, Compose, and local socket boundaries
+  ansible.builtin.assert:
+    that:
+      - (docker_info_result.stdout | from_json).LoggingDriver == docker_log_driver
+      - (docker_info_result.stdout | from_json).LiveRestoreEnabled == docker_live_restore
+      - docker_storage_driver is none or (docker_info_result.stdout | from_json).Driver == docker_storage_driver
+      - (docker_daemon_config.content | b64decode | from_json)['live-restore'] == docker_live_restore
+      - (docker_daemon_config.content | b64decode | from_json)['log-driver'] == docker_log_driver
+      - (docker_daemon_config.content | b64decode | from_json)['log-opts']['max-size'] == docker_log_max_size
+      - (docker_daemon_config.content | b64decode | from_json)['log-opts']['max-file'] == (docker_log_max_files | string)
+      - "'tcp://' not in docker_exec_start_result.stdout"
+      - "':2375' not in docker_tcp_listeners.stdout"
+      - "':2376' not in docker_tcp_listeners.stdout"
+    fail_msg: Docker effective configuration violates the bounded local-only contract.
+
+- name: Verify the Compose plugin is available
+  ansible.builtin.command: /usr/bin/docker compose version --short
+  changed_when: false
+  check_mode: false

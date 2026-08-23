@@ -1,0 +1,26 @@
+---
+docker_apt_repository_url: https://download.docker.com/linux/ubuntu
+docker_apt_key_url: https://download.docker.com/linux/ubuntu/gpg
+docker_apt_signing_checksum: 1500c1f56fa9e26b9b8f42452a553675796ade0807cdce11975eb98170b3a570
+docker_apt_suite: noble
+docker_packages:
+  containerd.io: 2.3.3-1~ubuntu.24.04~noble
+  docker-buildx-plugin: 0.36.1-1~ubuntu.24.04~noble
+  docker-ce: 5:29.7.2-1~ubuntu.24.04~noble
+  docker-ce-cli: 5:29.7.2-1~ubuntu.24.04~noble
+  docker-compose-plugin: 5.4.0-1~ubuntu.24.04~noble
+docker_daemon_hosts: [unix:///var/run/docker.sock]
+docker_data_root: /var/lib/docker
+docker_storage_driver: null
+docker_live_restore: true
+docker_log_driver: json-file
+docker_log_max_size: 10m
+docker_log_max_files: 3
+docker_conflicting_packages:
+  - containerd
+  - docker-compose
+  - docker-compose-v2
+  - docker-doc
+  - docker.io
+  - podman-docker
+  - runc
