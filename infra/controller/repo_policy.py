@@ -425,7 +425,12 @@ def check_executable_entrypoints(root: Path) -> list[str]:
         "scripts/github-app-gh",
         "scripts/github-app-git",
         "scripts/github-app-token.sh",
+        "scripts/infra-apply",
+        "scripts/infra-plan",
+        "scripts/infra-verify",
         "infra/controller/entrypoint.sh",
+        "infra/inventories/host_baseline.py",
+        "infra/playbooks/files/verify_public_listeners.py",
     ):
         path = root / rel
         if not path.is_file():

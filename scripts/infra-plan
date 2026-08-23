@@ -1,0 +1,271 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)"
+# shellcheck source=scripts/lib/common.sh
+source "$SCRIPT_DIR/lib/common.sh"
+REPO_ROOT="$(dholbeat_repo_root "$SCRIPT_PATH")"
+
+CONTROLLER_IDENTITY=/tmp/controller-home/.ssh/id_target
+CONTROLLER_KNOWN_HOSTS=/tmp/controller-home/.ssh/known_hosts
+CONTROLLER_INPUTS=/tmp/controller-inputs
+LOG_LIMIT_BYTES=8388608
+
+LIMIT=""
+ADDRESS=""
+IDENTITY_FILE=""
+KNOWN_HOSTS_FILE=""
+RELEASE_DOCUMENT=""
+STAGE=bootstrap
+REHEARSAL=false
+ARTIFACT_SUFFIX=""
+TEMP_ROOT=""
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/infra-plan --limit <host> --address <ip> --identity-file <path>
+                          --known-hosts-file <path>
+                          [--stage bootstrap|converged]
+                          [--release-document <path>] [--rehearsal]
+
+Produce a redacted, reproducible plan for exactly one production host.
+
+The command reads live state only. It runs every read-only repository check,
+renders the operator inventory from committed manifests plus the address you
+supply, decrypts nothing to disk, runs Ansible in check/diff mode against the
+named host, and writes a normalized plan document whose SHA-256 is the digest a
+release must approve.
+
+Required arguments:
+  --limit             exact host ID that also owns a committed baseline contract
+  --address           literal IP address of that host; never committed to Git
+  --identity-file     private key for this connection; must live outside the
+                      repository
+  --known-hosts-file  pre-verified host key; a new key is never auto-trusted
+
+Options:
+  --stage             bootstrap connects as the provider bootstrap identity;
+                      converged connects as the named administrator
+                      (default: bootstrap)
+  --release-document  plan infra/playbooks/site.yml, including the release
+                      receipt, against this reviewed release document
+  --rehearsal         allow a commit that is not yet reachable from main. The
+                      plan is marked rehearsal and scripts/infra-apply refuses
+                      it.
+  --artifact-suffix   distinguish this run's evidence directory from an earlier
+                      plan for the same host, stage, and commit
+
+Evidence is written under .artifacts/ and is never a repository input.
+EOF
+}
+
+cleanup() {
+  if [ -n "$TEMP_ROOT" ] && [ -d "$TEMP_ROOT" ]; then
+    rm -rf -- "$TEMP_ROOT"
+  fi
+}
+trap cleanup EXIT INT TERM
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --limit) [ "$#" -ge 2 ] || dholbeat_die "--limit requires a host ID"; LIMIT="$2"; shift 2 ;;
+    --address) [ "$#" -ge 2 ] || dholbeat_die "--address requires an IP address"; ADDRESS="$2"; shift 2 ;;
+    --identity-file) [ "$#" -ge 2 ] || dholbeat_die "--identity-file requires a path"; IDENTITY_FILE="$2"; shift 2 ;;
+    --known-hosts-file) [ "$#" -ge 2 ] || dholbeat_die "--known-hosts-file requires a path"; KNOWN_HOSTS_FILE="$2"; shift 2 ;;
+    --release-document) [ "$#" -ge 2 ] || dholbeat_die "--release-document requires a path"; RELEASE_DOCUMENT="$2"; shift 2 ;;
+    --stage) [ "$#" -ge 2 ] || dholbeat_die "--stage requires bootstrap or converged"; STAGE="$2"; shift 2 ;;
+    --rehearsal) REHEARSAL=true; shift ;;
+    --artifact-suffix) [ "$#" -ge 2 ] || dholbeat_die "--artifact-suffix requires a slug"; ARTIFACT_SUFFIX="$2"; shift 2 ;;
+    *) dholbeat_die "unexpected argument: $1" ;;
+  esac
+done
+
+[ -n "$LIMIT" ] || dholbeat_die "--limit is required and must name exactly one host"
+[ -n "$ADDRESS" ] || dholbeat_die "--address is required; addresses are never committed"
+[ -n "$IDENTITY_FILE" ] || dholbeat_die "--identity-file is required"
+[ -n "$KNOWN_HOSTS_FILE" ] || dholbeat_die "--known-hosts-file is required; host keys are never auto-trusted"
+case "$STAGE" in
+  bootstrap|converged) ;;
+  *) dholbeat_die "--stage must be bootstrap or converged" ;;
+esac
+[ -z "${GITHUB_ACTIONS:-}${CI:-}" ] \
+  || dholbeat_die "planning against a production host is never permitted in CI"
+
+case "$IDENTITY_FILE" in
+  "$REPO_ROOT"/*) dholbeat_die "the connection identity must live outside the repository" ;;
+esac
+[ -f "$IDENTITY_FILE" ] || dholbeat_die "identity file is unavailable: $IDENTITY_FILE"
+[ -f "$KNOWN_HOSTS_FILE" ] || dholbeat_die "known-hosts file is unavailable: $KNOWN_HOSTS_FILE"
+[ -s "$KNOWN_HOSTS_FILE" ] || dholbeat_die "known-hosts file is empty; verify the host key first"
+
+BASELINE_RELATIVE="infra/inventories/production/baseline/$LIMIT.yml"
+[ -f "$REPO_ROOT/$BASELINE_RELATIVE" ] \
+  || dholbeat_die "no committed baseline contract for host: $LIMIT"
+HOST_ROLE="$(awk '$1 == "host_role:" {print $2; exit}' "$REPO_ROOT/$BASELINE_RELATIVE")"
+[ -n "$HOST_ROLE" ] || dholbeat_die "baseline contract declares no host_role: $BASELINE_RELATIVE"
+
+dholbeat_require_command git
+git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+  || dholbeat_die "scripts/infra-plan must run inside the repository checkout"
+[ -z "$(git -C "$REPO_ROOT" status --porcelain)" ] \
+  || dholbeat_die "refusing to plan from a dirty worktree; commit or stash first"
+WORKTREE_CLEAN=true
+
+GIT_COMMIT="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+REACHABLE_FROM_MAIN=true
+if ! git -C "$REPO_ROOT" merge-base --is-ancestor "$GIT_COMMIT" refs/heads/main >/dev/null 2>&1; then
+  REACHABLE_FROM_MAIN=false
+fi
+if [ "$REACHABLE_FROM_MAIN" != true ] && [ "$REHEARSAL" != true ]; then
+  dholbeat_die "commit $GIT_COMMIT is not reachable from protected main; use --rehearsal for a non-authorizing plan"
+fi
+
+PLAYBOOK_LABEL="playbooks/bootstrap.yml"
+if [ -n "$RELEASE_DOCUMENT" ]; then
+  [ -f "$RELEASE_DOCUMENT" ] || dholbeat_die "release document is unavailable: $RELEASE_DOCUMENT"
+  PLAYBOOK_LABEL="playbooks/site.yml"
+fi
+
+case "$ARTIFACT_SUFFIX" in
+  "") ;;
+  *[!a-z0-9-]*) dholbeat_die "--artifact-suffix must be lowercase letters, digits, and hyphens" ;;
+esac
+ARTIFACT_NAME="infra-plan-$LIMIT-$STAGE-${GIT_COMMIT:0:12}${ARTIFACT_SUFFIX:+-$ARTIFACT_SUFFIX}"
+ARTIFACT_ROOT="$REPO_ROOT/.artifacts/$ARTIFACT_NAME"
+[ ! -L "$REPO_ROOT/.artifacts" ] || dholbeat_die ".artifacts must not be a symbolic link"
+[ ! -e "$ARTIFACT_ROOT" ] \
+  || dholbeat_die "plan evidence already exists; inspect and remove: .artifacts/$ARTIFACT_NAME"
+mkdir -p "$ARTIFACT_ROOT"
+chmod 0700 "$ARTIFACT_ROOT"
+TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/dholbeat-infra-plan.XXXXXX")"
+chmod 0700 "$TEMP_ROOT"
+mkdir -p "$TEMP_ROOT/inputs"
+chmod 0700 "$TEMP_ROOT/inputs"
+install -m 0600 "$KNOWN_HOSTS_FILE" "$ARTIFACT_ROOT/known_hosts"
+
+cat >"$TEMP_ROOT/inputs/run-ansible.sh" <<'RUNNER'
+#!/bin/sh
+# Run Ansible from the infra tree so the committed roles_path resolves.
+set -eu
+cd /workspace/infra
+exec ansible-playbook "$@"
+RUNNER
+chmod 0700 "$TEMP_ROOT/inputs/run-ansible.sh"
+
+printf '\n==> read-only repository checks\n'
+"$SCRIPT_DIR/check"
+
+printf '\n==> locked controller identity\n'
+"$SCRIPT_DIR/controller" digest >"$ARTIFACT_ROOT/controller-digest.txt"
+CONTROLLER_IMAGE_ID="$(awk -F= '$1 == "image_id" {print $2}' "$ARTIFACT_ROOT/controller-digest.txt")"
+CONTROLLER_SOURCE_LOCK="$(awk -F= '$1 == "source_lock_sha256" {print $2}' "$ARTIFACT_ROOT/controller-digest.txt")"
+{ [ -n "$CONTROLLER_IMAGE_ID" ] && [ -n "$CONTROLLER_SOURCE_LOCK" ]; } \
+  || dholbeat_die "could not resolve the locked controller identity"
+
+printf '\n==> offline baseline contract for %s\n' "$LIMIT"
+"$SCRIPT_DIR/controller" exec python3 infra/inventories/host_baseline.py \
+  --root /workspace contract --limit "$LIMIT" >"$ARTIFACT_ROOT/contract.json"
+chmod 0600 "$ARTIFACT_ROOT/contract.json"
+
+printf '\n==> operator inventory (the address stays local)\n'
+"$SCRIPT_DIR/controller" exec python3 infra/inventories/host_baseline.py \
+  --root /workspace render \
+  --limit "$LIMIT" \
+  --address "$ADDRESS" \
+  --stage "$STAGE" \
+  --identity-file "$CONTROLLER_IDENTITY" \
+  --known-hosts-file "$CONTROLLER_KNOWN_HOSTS" \
+  --output - >"$TEMP_ROOT/inputs/inventory.yml"
+chmod 0600 "$TEMP_ROOT/inputs/inventory.yml"
+
+SOPS_CANARY=skipped-no-key
+if [ -n "${SOPS_AGE_KEY:-}" ]; then
+  printf '\n==> in-memory SOPS decryption canary\n'
+  "$SCRIPT_DIR/controller" exec bash -c \
+    'sops --decrypt --output-type json infra/secrets/canary.sops.yml | python3 -c "import json,sys; json.load(sys.stdin)"' \
+    >/dev/null \
+    || dholbeat_die "the SOPS decryption canary failed; refusing to plan with unusable secret roots"
+  SOPS_CANARY=verified
+fi
+
+ANSIBLE_ARGS=(
+  --inventory "$CONTROLLER_INPUTS/inventory.yml"
+  --limit "$LIMIT"
+  --check
+  --diff
+  --extra-vars "dholbeat_expected_host=$LIMIT"
+  --extra-vars "dholbeat_expected_role=$HOST_ROLE"
+)
+if [ -n "$RELEASE_DOCUMENT" ]; then
+  "$SCRIPT_DIR/controller" exec python3 scripts/lib/release_vars.py \
+    <"$RELEASE_DOCUMENT" >"$TEMP_ROOT/inputs/release-vars.yml"
+  chmod 0600 "$TEMP_ROOT/inputs/release-vars.yml"
+  install -m 0600 "$RELEASE_DOCUMENT" "$ARTIFACT_ROOT/release.yml"
+  ANSIBLE_ARGS+=(--extra-vars "@$CONTROLLER_INPUTS/release-vars.yml")
+fi
+ANSIBLE_ARGS+=("$PLAYBOOK_LABEL")
+
+printf '\n==> Ansible check/diff against %s\n' "$LIMIT"
+set +e
+"$SCRIPT_DIR/controller" exec-ssh \
+  --known-hosts ".artifacts/$ARTIFACT_NAME/known_hosts" \
+  --identity "$IDENTITY_FILE" \
+  --inputs "$TEMP_ROOT/inputs" \
+  --confirm production-host \
+  sh "$CONTROLLER_INPUTS/run-ansible.sh" "${ANSIBLE_ARGS[@]}" \
+  >"$TEMP_ROOT/ansible-check.raw" 2>&1
+ANSIBLE_STATUS=$?
+set -e
+
+RAW_BYTES="$(wc -c <"$TEMP_ROOT/ansible-check.raw" | tr -d ' ')"
+if [ "$RAW_BYTES" -gt "$LOG_LIMIT_BYTES" ]; then
+  head -c "$LOG_LIMIT_BYTES" "$TEMP_ROOT/ansible-check.raw" >"$TEMP_ROOT/ansible-check.trimmed"
+  printf '\n[transcript truncated at %s bytes]\n' "$LOG_LIMIT_BYTES" >>"$TEMP_ROOT/ansible-check.trimmed"
+  mv -- "$TEMP_ROOT/ansible-check.trimmed" "$TEMP_ROOT/ansible-check.raw"
+fi
+
+"$SCRIPT_DIR/controller" exec python3 scripts/lib/plan_document.py redact \
+  --redact "$ADDRESS" \
+  --redact "$IDENTITY_FILE" \
+  --redact "$KNOWN_HOSTS_FILE" \
+  <"$TEMP_ROOT/ansible-check.raw" >"$ARTIFACT_ROOT/ansible-check.log"
+chmod 0600 "$ARTIFACT_ROOT/ansible-check.log"
+
+printf '\n==> redacted plan document\n'
+"$SCRIPT_DIR/controller" exec python3 scripts/lib/plan_document.py render \
+  --root /workspace \
+  --limit "$LIMIT" \
+  --playbook "$PLAYBOOK_LABEL" \
+  --stage "$STAGE" \
+  --git-commit "$GIT_COMMIT" \
+  --worktree-clean "$WORKTREE_CLEAN" \
+  --reachable-from-main "$REACHABLE_FROM_MAIN" \
+  --rehearsal "$REHEARSAL" \
+  --controller-image-id "$CONTROLLER_IMAGE_ID" \
+  --controller-source-lock "$CONTROLLER_SOURCE_LOCK" \
+  --contract "/workspace/.artifacts/$ARTIFACT_NAME/contract.json" \
+  --ansible-log "/workspace/.artifacts/$ARTIFACT_NAME/ansible-check.log" \
+  --ansible-status "$ANSIBLE_STATUS" \
+  --sops-canary "$SOPS_CANARY" \
+  >"$ARTIFACT_ROOT/plan.yml"
+chmod 0600 "$ARTIFACT_ROOT/plan.yml"
+
+PLAN_DIGEST="$(dholbeat_sha256_path "$ARTIFACT_ROOT/plan.yml")"
+printf '%s\n' "$PLAN_DIGEST" >"$ARTIFACT_ROOT/plan.sha256"
+
+printf '\n'
+printf 'plan host            : %s (%s)\n' "$LIMIT" "$HOST_ROLE"
+printf 'plan playbook        : %s\n' "$PLAYBOOK_LABEL"
+printf 'plan commit          : %s\n' "$GIT_COMMIT"
+printf 'reachable from main  : %s\n' "$REACHABLE_FROM_MAIN"
+printf 'rehearsal only       : %s\n' "$REHEARSAL"
+printf 'ansible check status : %s\n' "$ANSIBLE_STATUS"
+printf 'approved_plan_sha256 : %s\n' "$PLAN_DIGEST"
+printf 'evidence             : .artifacts/%s\n' "$ARTIFACT_NAME"
+printf '\nReview .artifacts/%s/plan.yml before recording this digest in a release.\n' "$ARTIFACT_NAME"
+
+if [ "$ANSIBLE_STATUS" -ne 0 ]; then
+  printf '\nThe Ansible check run did not complete cleanly; the plan records that status.\n' >&2
+fi
