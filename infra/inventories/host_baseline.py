@@ -480,7 +480,9 @@ def main() -> None:
     render.add_argument("--stage", choices=["bootstrap", "converged"], required=True)
     render.add_argument("--identity-file", required=True)
     render.add_argument("--known-hosts-file", required=True)
-    render.add_argument("--output", type=Path, required=True)
+    render.add_argument(
+        "--output", type=Path, required=True, help="destination path, or - to stream to stdout"
+    )
 
     contract = subparsers.add_parser("contract", help="print the offline baseline contract payload")
     contract.add_argument("--limit", required=True)
@@ -517,6 +519,11 @@ def main() -> None:
         arguments.identity_file,
         arguments.known_hosts_file,
     )
+    if str(arguments.output) == "-":
+        # The controller mounts the workspace read-only, so the inventory is
+        # streamed and captured by the caller rather than written in place.
+        yaml.safe_dump(inventory, sys.stdout, default_flow_style=False, sort_keys=True)
+        return
     arguments.output.parent.mkdir(parents=True, exist_ok=True)
     with arguments.output.open("w", encoding="utf-8") as handle:
         yaml.safe_dump(inventory, handle, default_flow_style=False, sort_keys=True)
