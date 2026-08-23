@@ -50,6 +50,10 @@ scripts/infra-verify --limit <host> --address <ip> --identity-file <key> \
                      --known-hosts-file <known_hosts>
 ```
 
+There is no OpenTofu plan adapter yet, so committed declarations under
+`infra/tofu` make `scripts/infra-plan` fail closed rather than accept an
+operator-supplied file as an external-state delta. That adapter is WP-06.
+
 `--stage` selects only the identity used for first contact, never the desired
 state. `bootstrap` connects as the provider login on a host whose named
 administrator does not exist yet and plans the read-only preflight, because a
@@ -70,7 +74,14 @@ known-hosts file. Operational host-key material lives in a session directory tha
 is removed on exit; only a redacted fingerprint receipt is retained, and each
 command asserts the address appears in no retained evidence file.
 
-`--identity-file` must resolve outside the repository. The check dereferences
+`--identity-file` is the provider bootstrap key; `--admin-identity-file` is the
+named administrator's key when it differs. First contact uses the bootstrap key,
+every later connection uses the administrator key, and the second-connection
+probe always authenticates as the administrator. After convergence hardens SSH,
+`scripts/infra-apply` renders a second converged inventory and proves the
+administrator can reconnect before relying on that path.
+
+Both identity paths must resolve outside the repository. The check dereferences
 symlinked parents and relative paths, so neither `.artifacts/id_target` nor a
 symlinked directory can smuggle private key material into the checkout.
 

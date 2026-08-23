@@ -83,8 +83,17 @@ scripts/infra-plan \
   --stage bootstrap \
   --address <address> \
   --identity-file ~/.dholbeat/publish-1-bootstrap \
+  --admin-identity-file ~/.dholbeat/publish-1-admin \
   --known-hosts-file ~/.dholbeat/publish-1.known_hosts
 ```
+
+Two keys are modelled explicitly. `--identity-file` is the provider bootstrap
+key, valid only until convergence disables root login. `--admin-identity-file`
+authenticates the named administrator whose public key the committed contract
+installs; omit it only when one key does both. The second-connection probe
+always authenticates as the administrator, so a mismatched administrator key
+fails the probe **before** the firewall or SSH hardening closes the current
+path.
 
 `--stage bootstrap` connects as the provider bootstrap identity and runs the
 read-only preflight: the declared contract validated against the host's **real**
@@ -126,6 +135,7 @@ scripts/infra-apply \
   --release infra-prod-YYYYMMDD-N \
   --address <address> \
   --identity-file ~/.dholbeat/publish-1-bootstrap \
+  --admin-identity-file ~/.dholbeat/publish-1-admin \
   --known-hosts-file ~/.dholbeat/publish-1.known_hosts \
   --approved-plan .artifacts/infra-plan-publish-1-bootstrap-<commit>/plan.yml
 ```
@@ -147,8 +157,15 @@ The run proves a second administrator connection **before** the firewall or SSH
 hardening can close the current path. A failed probe aborts with bootstrap access
 and the unapplied firewall intact — that is the interlock working, not a bug.
 
-Afterwards the command re-reads `/etc/dholbeat-release` independently, validates
-it against the reviewed release, and runs `scripts/infra-verify`.
+Convergence disables root login and restricts `AllowUsers` to the named
+administrator, and Ansible's in-play identity switch cannot cross a process
+boundary. So once `site.yml` succeeds, the command renders a **second, converged
+inventory** and proves the administrator can reconnect before relying on that
+path. Only then does it re-read `/etc/dholbeat-release` independently, validate
+it against the reviewed release, and run `scripts/infra-verify`.
+
+If that reconnect fails, the host is converged but unverified: recover through
+the provider console, then re-run the reviewed plan and apply.
 
 ## 7. Prove idempotence and closure
 
@@ -177,7 +194,11 @@ Docker package versions, bounded daemon logging including `log-opts` limits and
 Unix-socket-only access, an active default-deny firewall with the declared
 allowlist, the attached Docker ingress chain, catalogued directory ownership and
 modes, effective key-only SSH, a working second administrator connection, and
-that no undeclared protocol/port pair answers on a public address.
+that no undeclared protocol/port pair answers on a public address. It also
+proves the Docker daemon is reachable only over its declared Unix socket,
+rejecting every non-Unix host declaration and any TCP socket the daemon owns —
+including a loopback binding on a nonstandard port, which the public-listener
+probe deliberately ignores.
 
 From here on, ordinary changes are: plan with `--stage converged`, review, tag,
 apply with `--stage converged`.
