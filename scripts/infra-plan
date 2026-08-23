@@ -8,6 +8,7 @@ source "$SCRIPT_DIR/lib/common.sh"
 REPO_ROOT="$(dholbeat_repo_root "$SCRIPT_PATH")"
 
 CONTROLLER_IDENTITY=/tmp/controller-home/.ssh/id_target
+CONTROLLER_ADMIN_IDENTITY=/tmp/controller-home/.ssh/id_admin
 CONTROLLER_KNOWN_HOSTS=/tmp/controller-home/.ssh/known_hosts
 CONTROLLER_INPUTS=/tmp/controller-inputs
 LOG_LIMIT_BYTES=8388608
@@ -16,8 +17,8 @@ APPLIED_PLAYBOOK="playbooks/site.yml"
 LIMIT=""
 ADDRESS=""
 IDENTITY_FILE=""
+ADMIN_IDENTITY_FILE=""
 KNOWN_HOSTS_FILE=""
-OPENTOFU_PLAN=""
 STAGE=bootstrap
 REHEARSAL=false
 ARTIFACT_SUFFIX=""
@@ -29,7 +30,7 @@ usage() {
 Usage: scripts/infra-plan --limit <host> --address <ip> --identity-file <path>
                           --known-hosts-file <path>
                           [--stage bootstrap|converged]
-                          [--opentofu-plan <path>] [--rehearsal]
+                          [--admin-identity-file <path>] [--rehearsal]
                           [--artifact-suffix <slug>]
 
 Produce a redacted, reproducible plan for exactly one production host.
@@ -63,7 +64,10 @@ Required arguments:
                       Only a redacted fingerprint receipt is retained.
 
 Options:
-  --opentofu-plan     saved OpenTofu plan to bind when infra/tofu exists
+  --admin-identity-file
+                      key authenticating the named administrator, if it differs
+                      from the bootstrap key. The second-connection probe always
+                      authenticates as the administrator.
   --rehearsal         allow a commit that is not yet reachable from main. The
                       plan is marked rehearsal and scripts/infra-apply refuses
                       it.
@@ -91,7 +95,7 @@ while [ "$#" -gt 0 ]; do
     --address) [ "$#" -ge 2 ] || dholbeat_die "--address requires an IP address"; ADDRESS="$2"; shift 2 ;;
     --identity-file) [ "$#" -ge 2 ] || dholbeat_die "--identity-file requires a path"; IDENTITY_FILE="$2"; shift 2 ;;
     --known-hosts-file) [ "$#" -ge 2 ] || dholbeat_die "--known-hosts-file requires a path"; KNOWN_HOSTS_FILE="$2"; shift 2 ;;
-    --opentofu-plan) [ "$#" -ge 2 ] || dholbeat_die "--opentofu-plan requires a path"; OPENTOFU_PLAN="$2"; shift 2 ;;
+    --admin-identity-file) [ "$#" -ge 2 ] || dholbeat_die "--admin-identity-file requires a path"; ADMIN_IDENTITY_FILE="$2"; shift 2 ;;
     --stage) [ "$#" -ge 2 ] || dholbeat_die "--stage requires bootstrap or converged"; STAGE="$2"; shift 2 ;;
     --rehearsal) REHEARSAL=true; shift ;;
     --artifact-suffix) [ "$#" -ge 2 ] || dholbeat_die "--artifact-suffix requires a slug"; ARTIFACT_SUFFIX="$2"; shift 2 ;;
@@ -116,6 +120,11 @@ esac
   || dholbeat_die "planning against a production host is never permitted in CI"
 
 IDENTITY_FILE="$(dholbeat_assert_outside_repository "$REPO_ROOT" "$IDENTITY_FILE" "connection identity")"
+if [ -n "$ADMIN_IDENTITY_FILE" ]; then
+  ADMIN_IDENTITY_FILE="$(dholbeat_assert_outside_repository "$REPO_ROOT" "$ADMIN_IDENTITY_FILE" "administrator identity")"
+else
+  ADMIN_IDENTITY_FILE="$IDENTITY_FILE"
+fi
 KNOWN_HOSTS_FILE="$(dholbeat_canonical_path "$KNOWN_HOSTS_FILE")"
 [ ! -L "$KNOWN_HOSTS_FILE" ] || dholbeat_die "the known-hosts file must not be a symbolic link"
 [ -f "$KNOWN_HOSTS_FILE" ] || dholbeat_die "known-hosts file is unavailable: $KNOWN_HOSTS_FILE"
@@ -196,6 +205,7 @@ printf '\n==> operator inventory (the address stays local)\n'
   --address "$ADDRESS" \
   --stage "$STAGE" \
   --identity-file "$CONTROLLER_IDENTITY" \
+  --admin-identity-file "$CONTROLLER_ADMIN_IDENTITY" \
   --known-hosts-file "$CONTROLLER_KNOWN_HOSTS" \
   --output - >"$TEMP_ROOT/inputs/inventory.yml"
 chmod 0600 "$TEMP_ROOT/inputs/inventory.yml"
@@ -227,18 +237,13 @@ done <<EOF
 $COMPOSE_STACKS
 EOF
 
-OPENTOFU_ARGS=()
+# There is no OpenTofu plan adapter yet. Hashing an operator-supplied file
+# would let a zero-byte or unrelated file satisfy the external-state gate, so
+# committed declarations fail closed until WP-06 implements a real adapter that
+# renders and binds a deterministic redacted change representation.
 if [ -d "$REPO_ROOT/infra/tofu" ]; then
-  printf '\n==> OpenTofu scope\n'
-  "$SCRIPT_DIR/controller" exec tofu fmt -check -recursive infra/tofu \
-    || dholbeat_die "committed OpenTofu declarations are not formatted"
-  [ -n "$OPENTOFU_PLAN" ] \
-    || dholbeat_die "infra/tofu exists; supply --opentofu-plan so the external-state delta is bound"
-  OPENTOFU_PLAN="$(dholbeat_canonical_path "$OPENTOFU_PLAN")"
-  [ -f "$OPENTOFU_PLAN" ] || dholbeat_die "OpenTofu plan is unavailable: $OPENTOFU_PLAN"
-  OPENTOFU_ARGS+=(--opentofu-plan-sha256 "$(dholbeat_sha256_path "$OPENTOFU_PLAN")")
-elif [ -n "$OPENTOFU_PLAN" ]; then
-  dholbeat_die "--opentofu-plan was supplied but no OpenTofu declarations are committed"
+  dholbeat_die "committed OpenTofu declarations exist but no plan adapter is implemented; \
+the external-state delta cannot be bound, so no approvable plan is produced (WP-06)"
 fi
 
 SOPS_CANARY=skipped-no-key
@@ -269,6 +274,7 @@ set +e
 "$SCRIPT_DIR/controller" exec-ssh \
   --known-hosts ".artifacts/$SESSION_NAME/known_hosts" \
   --identity "$IDENTITY_FILE" \
+  --admin-identity "$ADMIN_IDENTITY_FILE" \
   --inputs "$TEMP_ROOT/inputs" \
   --confirm production-host \
   sh "$CONTROLLER_INPUTS/run-ansible.sh" "${ANSIBLE_ARGS[@]}" \
@@ -286,6 +292,7 @@ fi
 "$SCRIPT_DIR/controller" exec python3 scripts/lib/plan_document.py redact \
   --redact "$ADDRESS" \
   --redact "$IDENTITY_FILE" \
+  --redact "$ADMIN_IDENTITY_FILE" \
   --redact "$KNOWN_HOSTS_FILE" \
   <"$TEMP_ROOT/ansible.raw" >"$ARTIFACT_ROOT/ansible-run.log"
 chmod 0600 "$ARTIFACT_ROOT/ansible-run.log"
@@ -294,6 +301,7 @@ chmod 0600 "$ARTIFACT_ROOT/ansible-run.log"
 "$SCRIPT_DIR/controller" exec-ssh \
   --known-hosts ".artifacts/$SESSION_NAME/known_hosts" \
   --identity "$IDENTITY_FILE" \
+  --admin-identity "$ADMIN_IDENTITY_FILE" \
   --inputs "$TEMP_ROOT/inputs" \
   --confirm production-host \
   ssh-keygen -lf "$CONTROLLER_KNOWN_HOSTS" \
@@ -319,12 +327,12 @@ printf '\n==> redacted plan document\n'
   --ansible-status "$ANSIBLE_STATUS" \
   --sops-canary "$SOPS_CANARY" \
   ${COMPOSE_RENDER_ARGS[@]+"${COMPOSE_RENDER_ARGS[@]}"} \
-  ${OPENTOFU_ARGS[@]+"${OPENTOFU_ARGS[@]}"} \
   >"$ARTIFACT_ROOT/plan.yml" \
   || dholbeat_die "the plan authorizes nothing; see .artifacts/$ARTIFACT_NAME/ansible-run.log"
 chmod 0600 "$ARTIFACT_ROOT/plan.yml"
 
-dholbeat_assert_absent_from_evidence "$ARTIFACT_ROOT" "$ADDRESS" "$IDENTITY_FILE" "$KNOWN_HOSTS_FILE"
+dholbeat_assert_absent_from_evidence "$ARTIFACT_ROOT" "$ADDRESS" "$IDENTITY_FILE" \
+  "$ADMIN_IDENTITY_FILE" "$KNOWN_HOSTS_FILE"
 
 PLAN_DIGEST="$(dholbeat_sha256_path "$ARTIFACT_ROOT/plan.yml")"
 printf '%s\n' "$PLAN_DIGEST" >"$ARTIFACT_ROOT/plan.sha256"

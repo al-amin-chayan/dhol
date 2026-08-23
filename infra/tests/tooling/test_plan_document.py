@@ -251,7 +251,11 @@ def test_an_owned_stack_without_a_rendered_config_fails_closed(tmp_path: Path) -
     assert any("was not rendered for this plan" in finding for finding in findings)
 
 
-def test_committed_opentofu_without_a_bound_plan_fails_closed(tmp_path: Path) -> None:
+def test_committed_opentofu_always_fails_closed_until_an_adapter_exists(
+    tmp_path: Path,
+) -> None:
+    """No operator-supplied file can satisfy the external-state gate."""
+
     import json
     import shutil
 
@@ -277,13 +281,15 @@ def test_committed_opentofu_without_a_bound_plan_fails_closed(tmp_path: Path) ->
     contract.write_text(json.dumps({"schema_version": 1}), encoding="utf-8")
 
     _, findings = PLAN.build_plan(build_arguments(root, log, contract))
-    assert any("must be planned before apply" in finding for finding in findings)
+    assert any("no plan adapter is implemented" in finding for finding in findings)
 
-    arguments = build_arguments(root, log, contract)
-    arguments.opentofu_plan_sha256 = "a" * 64
-    plan, findings = PLAN.build_plan(arguments)
-    assert findings == []
-    assert plan["opentofu"]["plan_sha256"] == "a" * 64
+
+def test_the_plan_document_carries_no_opentofu_digest_field() -> None:
+    """A digest field would invite an operator-supplied file to satisfy the gate."""
+
+    assert "opentofu_plan_sha256" not in (ROOT / "scripts/lib/plan_document.py").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_host_secret_scope_marks_uncommitted_ciphertext() -> None:
@@ -309,7 +315,6 @@ def build_arguments(root: Path, log: Path, contract: Path) -> types.SimpleNamesp
         ansible_status=0,
         sops_canary="verified",
         compose_render=[],
-        opentofu_plan_sha256="",
         redact=[],
         applied_playbook="playbooks/site.yml",
         plan_kind="check-diff",

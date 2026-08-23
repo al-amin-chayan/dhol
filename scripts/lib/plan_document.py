@@ -254,7 +254,10 @@ def opentofu_scope(root: Path) -> dict[str, Any]:
             "state": "absent",
             "reason": "no OpenTofu declarations are committed yet; the external control plane is WP-06",
         }
-    return {"state": "present", "reason": "committed OpenTofu declarations require a reviewed plan"}
+    return {
+        "state": "present",
+        "reason": "committed OpenTofu declarations require the WP-06 plan adapter before apply",
+    }
 
 
 def build_plan(arguments: argparse.Namespace) -> tuple[dict[str, Any], list[str]]:
@@ -280,13 +283,12 @@ def build_plan(arguments: argparse.Namespace) -> tuple[dict[str, Any], list[str]
     findings.extend(check_findings(summary, arguments.ansible_status, arguments.plan_kind))
 
     tofu = opentofu_scope(root)
-    if tofu["state"] == "present" and not arguments.opentofu_plan_sha256:
+    if tofu["state"] == "present":
         findings.append(
-            "infra/tofu: committed OpenTofu declarations exist but no reviewed plan digest "
-            "was bound; the external-state delta must be planned before apply"
+            "infra/tofu: committed OpenTofu declarations exist but no plan adapter is "
+            "implemented; the external-state delta cannot be bound, so this plan "
+            "authorizes nothing (WP-06)"
         )
-    if arguments.opentofu_plan_sha256:
-        tofu = dict(tofu, plan_sha256=arguments.opentofu_plan_sha256)
 
     plan = {
         "schema_version": 1,
@@ -367,7 +369,6 @@ def main() -> None:
     render.add_argument("--ansible-status", type=int, required=True)
     render.add_argument("--sops-canary", required=True)
     render.add_argument("--compose-render", action="append", default=[])
-    render.add_argument("--opentofu-plan-sha256", default="")
     render.add_argument("--redact", action="append", default=[])
 
     scope = subparsers.add_parser(
