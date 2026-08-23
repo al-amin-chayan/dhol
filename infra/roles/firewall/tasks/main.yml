@@ -92,6 +92,83 @@
     enabled: true
     state: started
 
+# ufw allow is additive, so converging a narrower contract would otherwise leave
+# the previous, broader rule in place. Reconciliation runs only after the
+# administrator connection has already been proven above, so removing a path can
+# never be the step that locks the operator out.
+- name: Build the complete set of firewall rules this repository owns
+  ansible.builtin.set_fact:
+    firewall_desired_rules: >-
+      {{
+        (
+          baseline_ssh_allow_cidrs
+          | map('regex_replace', '/32$', '')
+          | map('regex_replace', '/128$', '')
+          | map('regex_replace', '^(.*)$', (base_ssh_port | int | string) ~ '/tcp|\1|dholbeat-admin-ssh')
+          | list
+        )
+        + (
+          [(firewall_vpn_port | int | string) ~ '/udp|Anywhere|dholbeat-wireguard']
+          if firewall_vpn_mode == 'wireguard' else []
+        )
+      }}
+
+- name: Read the numbered firewall rules
+  ansible.builtin.command: /usr/sbin/ufw status numbered
+  changed_when: false
+  check_mode: false
+  register: firewall_ufw_numbered
+
+- name: Identify owned firewall rules that are no longer declared
+  ansible.builtin.command:
+    argv: >-
+      {{
+        ['python3', role_path ~ '/files/reconcile_ufw_rules.py',
+         '--owned-comment', 'dholbeat-admin-ssh',
+         '--owned-comment', 'dholbeat-wireguard']
+        + (firewall_desired_rules | map('regex_replace', '^', '--desired=') | list)
+      }}
+    stdin: "{{ firewall_ufw_numbered.stdout }}"
+  become: false
+  changed_when: false
+  check_mode: false
+  delegate_to: localhost
+  register: firewall_obsolete_rules
+  vars:
+    ansible_remote_tmp: /tmp/ansible-controller
+
+- name: Remove owned firewall rules that are no longer declared
+  ansible.builtin.command:
+    argv: [/usr/sbin/ufw, --force, delete, "{{ item }}"]
+  loop: "{{ firewall_obsolete_rules.stdout_lines | default([]) }}"
+  changed_when: true
+
+- name: Re-read the numbered firewall rules after reconciliation
+  ansible.builtin.command: /usr/sbin/ufw status numbered
+  changed_when: false
+  check_mode: false
+  register: firewall_ufw_reconciled
+
+- name: Prove the owned rule set is exactly what the contract declares
+  ansible.builtin.command:
+    argv: >-
+      {{
+        ['python3', role_path ~ '/files/reconcile_ufw_rules.py', '--require-complete',
+         '--owned-comment', 'dholbeat-admin-ssh',
+         '--owned-comment', 'dholbeat-wireguard']
+        + (firewall_desired_rules | map('regex_replace', '^', '--desired=') | list)
+      }}
+    stdin: "{{ firewall_ufw_reconciled.stdout }}"
+  become: false
+  changed_when: false
+  check_mode: false
+  delegate_to: localhost
+  register: firewall_closure
+  failed_when:
+    - firewall_closure.rc != 0 or (firewall_closure.stdout | trim | length) > 0
+  vars:
+    ansible_remote_tmp: /tmp/ansible-controller
+
 - name: Read the converged firewall policy
   ansible.builtin.command: /usr/sbin/ufw status verbose
   changed_when: false
