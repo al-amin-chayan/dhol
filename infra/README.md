@@ -22,7 +22,7 @@ or Python installation is never used.
 | `services/` | Service, image, domain, route, volume, and backup-adapter registries |
 | `secrets/` | SOPS+age ciphertext and the values-free catalog |
 | `release/` | Release identity, plan digest, and host receipt contract |
-| `playbooks/` | `baseline.yml`, `bootstrap.yml`, `site.yml`, `verify.yml` |
+| `playbooks/` | `baseline.yml`, `preflight.yml`, `bootstrap.yml`, `site.yml`, `verify.yml` |
 | `roles/` | `base`, `docker`, `firewall`, `release_receipt` |
 | `tests/disposable/` | The disposable Ubuntu convergence harness |
 | `tests/tooling/` | Fail-closed coverage for the plan, apply, and verify gates |
@@ -40,14 +40,25 @@ host baseline contracts, SOPS policy, and every test suite. It contacts nothing.
 ## Host commands
 
 ```sh
-scripts/infra-plan   --limit <host> --address <ip> --identity-file <key> \
-                     --known-hosts-file <known_hosts>
-scripts/infra-apply  --limit <host> --release <tag> --address <ip> \
-                     --identity-file <key> --known-hosts-file <known_hosts> \
+scripts/infra-plan   --limit <host> --stage bootstrap|converged --address <ip> \
+                     --identity-file <key> --known-hosts-file <known_hosts>
+scripts/infra-apply  --limit <host> --stage bootstrap|converged --release <tag> \
+                     --address <ip> --identity-file <key> \
+                     --known-hosts-file <known_hosts> \
                      --approved-plan .artifacts/<plan>/plan.yml
 scripts/infra-verify --limit <host> --address <ip> --identity-file <key> \
                      --known-hosts-file <known_hosts>
 ```
+
+`--stage` selects only the identity used for first contact, never the desired
+state. `bootstrap` connects as the provider login on a host whose named
+administrator does not exist yet and plans the read-only preflight, because a
+bare host cannot produce a meaningful check-mode diff. `converged` connects as
+that administrator and plans a real check/diff whose every hunk is bound into
+the plan document. Both apply the same `playbooks/site.yml`.
+
+A plan fails closed: a nonzero run, an unreachable host, a failed task, or a
+missing play recap yields no approvable digest.
 
 `--address` is the local override described in
 `inventories/production/group_vars/all.yml`. It is supplied on the command line,
@@ -55,7 +66,13 @@ never committed, and redacted out of every artifact.
 
 `--known-hosts-file` must already contain the verified host key. No command here
 trusts a new key, and `scripts/controller exec-ssh` refuses an empty or symlinked
-known-hosts file.
+known-hosts file. Operational host-key material lives in a session directory that
+is removed on exit; only a redacted fingerprint receipt is retained, and each
+command asserts the address appears in no retained evidence file.
+
+`--identity-file` must resolve outside the repository. The check dereferences
+symlinked parents and relative paths, so neither `.artifacts/id_target` nor a
+symlinked directory can smuggle private key material into the checkout.
 
 Generated plans, receipts, rendered inventories, and transcripts live under
 gitignored `.artifacts/`. They are evidence, never repository inputs.

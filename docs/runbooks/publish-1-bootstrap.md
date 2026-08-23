@@ -73,23 +73,36 @@ the writable-directory catalog — without contacting anything.
 
 ## 4. Generate the reviewed plan
 
+A bare host cannot produce a meaningful Ansible check-mode diff: `ufw`, Docker,
+and `chrony` are not installed yet, so the probes those roles depend on cannot
+run. First contact therefore has its own plan kind.
+
 ```sh
 scripts/infra-plan \
   --limit publish-1 \
+  --stage bootstrap \
   --address <address> \
   --identity-file ~/.dholbeat/publish-1-bootstrap \
   --known-hosts-file ~/.dholbeat/publish-1.known_hosts
 ```
 
-The plan runs every read-only repository check, renders the operator inventory,
-verifies the SOPS decryption canary in memory when `SOPS_AGE_KEY` is loaded, and
-runs Ansible in check/diff mode. It writes redacted evidence under
-`.artifacts/infra-plan-publish-1-bootstrap-<commit>/` and prints
-`approved_plan_sha256`.
+`--stage bootstrap` connects as the provider bootstrap identity and runs the
+read-only preflight: the declared contract validated against the host's **real**
+facts, plus the current package, directory, listener, and firewall state. That
+is the reviewable delta for a machine that has nothing on it yet.
 
-Read `plan.yml` before trusting it. A plan generated from a commit that is not
-yet reachable from protected `main` requires `--rehearsal`, is marked as such,
-and `scripts/infra-apply` refuses it.
+The plan fails closed. A nonzero run, an unreachable host, a failed task, or a
+missing play recap produces no approvable digest, so a repeatable failure can
+never reach founder confirmation.
+
+Evidence lands in `.artifacts/infra-plan-publish-1-bootstrap-<commit>/`. Only a
+redacted host-key fingerprint receipt is retained; the operational `known_hosts`
+lives in a session directory that is removed when the command exits. The command
+then asserts that the address appears in no retained file.
+
+Read `plan.yml` before trusting it. A commit not yet reachable from protected
+`main` requires `--rehearsal`, is marked as such, and `scripts/infra-apply`
+refuses it.
 
 ## 5. Cross-review, tag, and authorize
 
@@ -109,12 +122,20 @@ Release documents live under gitignored `.artifacts/`. They are never committed.
 ```sh
 scripts/infra-apply \
   --limit publish-1 \
+  --stage bootstrap \
   --release infra-prod-YYYYMMDD-N \
   --address <address> \
   --identity-file ~/.dholbeat/publish-1-bootstrap \
   --known-hosts-file ~/.dholbeat/publish-1.known_hosts \
   --approved-plan .artifacts/infra-plan-publish-1-bootstrap-<commit>/plan.yml
 ```
+
+`--stage` must match the stage the approved plan was generated with. It selects
+only the identity used for **first contact** — the provider bootstrap login,
+because the named administrator does not exist yet. Both stages converge the
+same `infra/playbooks/site.yml`, so the reviewed desired state never differs
+between them, and the pre-apply plan regenerated here is byte-comparable with
+the one you approved.
 
 Before touching the host the command requires a clean worktree, `HEAD` equal to
 the annotated tag's commit, reachability from protected `main`, a passing
@@ -131,24 +152,35 @@ it against the reviewed release, and runs `scripts/infra-verify`.
 
 ## 7. Prove idempotence and closure
 
+The host now has a named administrator, so every later run uses
+`--stage converged`, which connects as that administrator and produces a real
+check-mode diff.
+
 ```sh
-scripts/infra-plan --limit publish-1 --address <address> \
-  --identity-file ~/.dholbeat/publish-1-bootstrap \
+scripts/infra-plan --limit publish-1 --stage converged --address <address> \
+  --identity-file ~/.dholbeat/publish-1-admin \
   --known-hosts-file ~/.dholbeat/publish-1.known_hosts \
-  --stage converged --artifact-suffix second-run
+  --artifact-suffix second-run
 
 scripts/infra-verify --limit publish-1 --address <address> \
-  --identity-file ~/.dholbeat/publish-1-bootstrap \
+  --identity-file ~/.dholbeat/publish-1-admin \
   --known-hosts-file ~/.dholbeat/publish-1.known_hosts \
   --release-tag infra-prod-YYYYMMDD-N --artifact-suffix idempotence
 ```
 
-The second plan must report no changed tasks. Verification asserts the declared
-operating system and resources, the exact held Docker package versions, bounded
-daemon logging, an active default-deny firewall with the declared allowlist, the
-attached Docker ingress chain, catalogued directory ownership and modes,
-effective key-only SSH, a working second administrator connection, and that no
-undeclared service answers on a public address.
+The converged plan must report no changed tasks and bind no diff hunks. Because
+every `--diff` hunk is bound into `plan.yml`, a host that drifts cannot
+reproduce an earlier digest even when the changed task names are identical.
+
+Verification asserts the declared operating system and resources, the exact held
+Docker package versions, bounded daemon logging including `log-opts` limits and
+Unix-socket-only access, an active default-deny firewall with the declared
+allowlist, the attached Docker ingress chain, catalogued directory ownership and
+modes, effective key-only SSH, a working second administrator connection, and
+that no undeclared protocol/port pair answers on a public address.
+
+From here on, ordinary changes are: plan with `--stage converged`, review, tag,
+apply with `--stage converged`.
 
 ## 8. Break-glass
 

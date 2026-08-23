@@ -117,9 +117,13 @@ if [ -d infra/tofu ]; then
 fi
 
 if [ -d infra/playbooks ] || [ -d infra/roles ]; then
-  # SOPS ciphertext is policy-validated separately and is not parseable Ansible YAML.
+  # Run from the infra tree so the committed roles_path resolves. Linting from
+  # the repository root classified only 9 of 57 files as Ansible content and
+  # silently skipped every playbook and role; from here the same command covers
+  # them all. SOPS ciphertext is policy-validated separately and is not
+  # parseable Ansible YAML.
   run_step "Ansible lint" env ANSIBLE_CONFIG="$REPO_ROOT/infra/ansible.cfg" \
-    ansible-lint --offline --exclude infra/secrets infra
+    sh -c 'cd infra && exec ansible-lint --offline --exclude secrets playbooks roles'
 fi
 
 printf '\nall repository checks passed\n'
