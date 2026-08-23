@@ -1,0 +1,104 @@
+# Synthetic production-shaped host baseline. It names no real host, uses only
+# RFC 5737 documentation networks, and carries fixture-only public key material.
+schema_version: 1
+host_id: fixture-1
+host_role: publisher
+target_environment: production
+provider:
+  vendor: fixture-provider
+  plan: Linux6GB
+  account_boundary: existing-founder-account
+  datacenter: fixture-datacenter
+  purchase_receipt_location: provider-console
+  monthly_cost_usd: 7
+expected_host:
+  os_image: ubuntu-24.04
+  distribution: Ubuntu
+  distribution_version: "24.04"
+  architecture: x86_64
+  memory_mb: 6144
+  disk_total_mb: 30720
+  disk_free_mb: 24576
+  public_interface: eth0
+bootstrap:
+  identity: root
+  authentication: public-key-only
+  address_source: operator-extra-vars
+  address_variable: fixture_1_address
+  known_hosts_source: operator-verified-console-fingerprint
+admin:
+  user: dholbeat-admin
+  uid: 1100
+  authorized_keys:
+    - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixtureOnlyPublicKeyMaterial000000 fixture@dholbeat
+break_glass:
+  method: provider-console
+  owner: founder
+  recovery_identity: fixture-provider-control-panel
+  verification: console session opened and closed before convergence
+ssh:
+  port: 22
+  allow_cidrs:
+    - 203.0.113.0/24
+application_bindings: []
+managed_directories:
+  - path: /home/dholbeat-admin
+    owner: dholbeat-admin
+    group: dholbeat-admin
+    mode: "0750"
+    classification: rebuildable
+    data_classification: internal
+    size_limit_mb: 64
+    retention:
+      max_age_days: 3650
+      purge_events: [account-removed]
+      owner: platform-operations
+    backup: {required: false, owner: platform-operations}
+  - path: /home/dholbeat-admin/.ssh
+    owner: dholbeat-admin
+    group: dholbeat-admin
+    mode: "0700"
+    classification: rebuildable
+    data_classification: confidential
+    size_limit_mb: 1
+    retention:
+      max_age_days: 3650
+      purge_events: [key-rotated, account-removed]
+      owner: platform-operations
+    backup: {required: false, owner: platform-operations}
+  - path: /etc/dholbeat
+    owner: root
+    group: root
+    mode: "0755"
+    classification: rebuildable
+    data_classification: internal
+    size_limit_mb: 16
+    retention:
+      max_age_days: 3650
+      purge_events: [release-replaced]
+      owner: platform-operations
+    backup: {required: false, owner: platform-operations}
+  - path: /var/log/dholbeat
+    owner: root
+    group: adm
+    mode: "0750"
+    classification: ephemeral
+    data_classification: internal
+    size_limit_mb: 64
+    retention:
+      max_age_days: 7
+      purge_events: [logrotate]
+      owner: platform-operations
+    backup: {required: false, owner: platform-operations}
+  - path: /var/lib/docker
+    owner: root
+    group: root
+    mode: "0710"
+    classification: rebuildable
+    data_classification: internal
+    size_limit_mb: 8192
+    retention:
+      max_age_days: 30
+      purge_events: [reviewed-cache-cleanup, host-rebuilt]
+      owner: platform-operations
+    backup: {required: false, owner: platform-operations}
