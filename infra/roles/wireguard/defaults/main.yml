@@ -1,0 +1,10 @@
+---
+# wireguard-tools comes from the Ubuntu archive, so it is unpinned for the same
+# reason base_packages are: the distro rotates old versions out of the archive
+# and an exact pin would break convergence on a security update. Third-party
+# repositories that retain old versions, such as Docker's, stay exactly pinned.
+wireguard_packages:
+  - wireguard-tools
+wireguard_config_dir: /etc/wireguard
+wireguard_config_mode: "0600"
+wireguard_config_dir_mode: "0700"

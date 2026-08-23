@@ -1,0 +1,13 @@
+# Rendered by infra/roles/wireguard. Do not edit on the host: the next
+# convergence overwrites it, and a live edit is drift, not desired state.
+[Interface]
+Address = {{ baseline_vpn.host_address }}
+ListenPort = {{ baseline_vpn.listen_port | int }}
+PrivateKey = {{ wireguard_server_private_key }}
+{% for peer in baseline_vpn.peers %}
+
+[Peer]
+# {{ peer.id }}
+PublicKey = {{ peer.public_key }}
+AllowedIPs = {{ peer.allowed_ips | join(', ') }}
+{% endfor %}

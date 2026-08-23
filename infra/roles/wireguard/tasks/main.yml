@@ -1,0 +1,63 @@
+---
+- name: Require a complete VPN declaration before configuring administration
+  ansible.builtin.assert:
+    that:
+      - baseline_vpn is defined
+      - baseline_vpn is mapping
+      - baseline_vpn.mode | default('none') == 'wireguard'
+      - baseline_vpn.interface is defined
+      - baseline_vpn.listen_port is defined
+      - baseline_vpn.subnet is defined
+      - baseline_vpn.host_address is defined
+      - baseline_vpn.peers is defined
+      - baseline_vpn.peers | length > 0
+    fail_msg: >-
+      Refusing to configure WireGuard: the host contract must declare the
+      interface, listen port, subnet, host address, and at least one peer.
+
+- name: Require the reviewed server private key from its secret store
+  ansible.builtin.assert:
+    that:
+      - wireguard_server_private_key is defined
+      - wireguard_server_private_key | length > 0
+    fail_msg: >-
+      Refusing to configure WireGuard: the server private key must be supplied
+      from SOPS. The role never generates a key on the host, because a key that
+      exists only there is hidden state whose recovery is "copy the old server".
+  no_log: true
+
+- name: Install WireGuard userspace tools
+  ansible.builtin.apt:
+    name: "{{ wireguard_packages }}"
+    state: present
+
+- name: Create the WireGuard configuration directory
+  ansible.builtin.file:
+    path: "{{ wireguard_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ wireguard_config_dir_mode }}"
+
+- name: Install the WireGuard interface configuration
+  ansible.builtin.template:
+    src: wireguard.conf.j2
+    dest: "{{ wireguard_config_dir }}/{{ baseline_vpn.interface }}.conf"
+    owner: root
+    group: root
+    mode: "{{ wireguard_config_mode }}"
+  no_log: true
+  notify: Restart WireGuard
+
+- name: Apply pending WireGuard configuration before the tunnel is relied upon
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start the WireGuard interface
+  ansible.builtin.systemd_service:
+    name: "wg-quick@{{ baseline_vpn.interface }}.service"
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Verify the effective WireGuard contract
+  ansible.builtin.import_tasks: verify.yml

@@ -39,6 +39,25 @@
   register: firewall_ufw_ssh_rules
   changed_when: "'Skipping adding existing rule' not in firewall_ufw_ssh_rules.stdout"
 
+- name: Allow the WireGuard listener from any source when administration is tunnel-only
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/ufw
+      - allow
+      - proto
+      - udp
+      - from
+      - any
+      - to
+      - any
+      - port
+      - "{{ firewall_vpn_port | int }}"
+      - comment
+      - dholbeat-wireguard
+  when: firewall_vpn_mode == 'wireguard'
+  register: firewall_ufw_vpn_rule
+  changed_when: "'Skipping adding existing rule' not in firewall_ufw_vpn_rule.stdout"
+
 - name: Enable the firewall after the successful administrator probe
   ansible.builtin.command: /usr/sbin/ufw --force enable
   when: "'Status: active' not in firewall_ufw_before.stdout"
@@ -92,6 +111,16 @@
   loop: "{{ baseline_ssh_allow_cidrs }}"
   loop_control:
     label: "{{ item }}"
+
+- name: Verify the WireGuard listener is admitted and SSH is tunnel-scoped
+  ansible.builtin.assert:
+    that:
+      - "(firewall_vpn_port | int | string) in firewall_ufw_after.stdout"
+      - "'dholbeat-wireguard' in firewall_ufw_after.stdout"
+    fail_msg: >-
+      The firewall does not admit the declared WireGuard listener, so closing
+      public SSH would leave no administrative path.
+  when: firewall_vpn_mode == 'wireguard'
 
 - name: Verify the Docker ingress chain is attached
   ansible.builtin.command:

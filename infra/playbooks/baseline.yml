@@ -17,6 +17,12 @@
         name: base
       tags: [base]
 
+    - name: Establish the administrative tunnel before any path can close
+      ansible.builtin.import_role:
+        name: wireguard
+      when: baseline_vpn is defined and baseline_vpn.mode | default('none') == 'wireguard'
+      tags: [wireguard, connection-safety]
+
     - name: Prove the named administrator can open a second connection
       ansible.builtin.import_role:
         name: base
@@ -48,10 +54,13 @@
     - name: Apply pending SSH handlers only after the safety probes
       ansible.builtin.meta: flush_handlers
 
-    - name: Continue through the proven administrator identity
+    - name: Continue through the proven administrator identity and path
       ansible.builtin.set_fact:
         ansible_user: "{{ baseline_admin_user }}"
         ansible_private_key_file: "{{ baseline_second_connection_identity_file }}"
+        # Once the firewall scopes SSH to the VPN subnet, the public address is
+        # no longer reachable. Reconnect over the address the probe just proved.
+        ansible_host: "{{ baseline_second_connection_host }}"
 
     - name: Reset the bootstrap connection after disabling root login
       ansible.builtin.meta: reset_connection
