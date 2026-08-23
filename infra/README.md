@@ -23,7 +23,7 @@ or Python installation is never used.
 | `secrets/` | SOPS+age ciphertext and the values-free catalog |
 | `release/` | Release identity, plan digest, and host receipt contract |
 | `playbooks/` | `baseline.yml`, `preflight.yml`, `bootstrap.yml`, `site.yml`, `verify.yml` |
-| `roles/` | `base`, `docker`, `firewall`, `release_receipt` |
+| `roles/` | `base`, `docker`, `firewall`, `wireguard`, `release_receipt` |
 | `tests/disposable/` | The disposable Ubuntu convergence harness |
 | `tests/tooling/` | Fail-closed coverage for the plan, apply, and verify gates |
 
@@ -48,7 +48,14 @@ scripts/infra-apply  --limit <host> --stage bootstrap|converged --release <tag> 
                      --approved-plan .artifacts/<plan>/plan.yml
 scripts/infra-verify --limit <host> --address <ip> --identity-file <key> \
                      --known-hosts-file <known_hosts>
+scripts/wireguard-peer-config --peer-id <id> --address <10.99.0.2/32> \
+                     --subnet <10.99.0.0/24> --output <path outside the repo>
 ```
+
+`wireguard-peer-config` writes one administrative peer's private half once,
+outside the checkout, and prints only the public key to commit. Move the file
+into the password manager and delete the local copy; that is the same custody
+rule the age keys and provider recovery logins already follow.
 
 There is no OpenTofu plan adapter yet, so committed declarations under
 `infra/tofu` make `scripts/infra-plan` fail closed rather than accept an

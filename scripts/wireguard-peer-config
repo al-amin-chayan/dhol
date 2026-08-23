@@ -30,16 +30,19 @@ KEYS = load_keys()
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def render(peer_address: str, subnet: str, server_public_key: str, endpoint: str,
-           private_key: str, keepalive: int) -> str:
+def render_interface(peer_address: str, private_key: str) -> str:
     return (
         "# Dholbeat administrative peer. Store this file in the password manager\n"
         "# and delete the local copy. It contains a private key.\n"
         "[Interface]\n"
         f"PrivateKey = {private_key}\n"
         f"Address = {peer_address}\n"
-        "\n"
-        "[Peer]\n"
+    )
+
+
+def render_peer(subnet: str, server_public_key: str, endpoint: str, keepalive: int) -> str:
+    return (
+        "\n[Peer]\n"
         f"PublicKey = {server_public_key}\n"
         f"Endpoint = {endpoint}\n"
         f"AllowedIPs = {subnet}\n"
@@ -61,13 +64,17 @@ def validate(arguments: argparse.Namespace) -> list[str]:
         findings.append("--address must be a single address, such as 10.99.0.2/32")
     if address.network_address not in network:
         findings.append("--address is outside --subnet")
-    try:
-        KEYS.decode(arguments.server_public_key)
-    except (ValueError, Exception):  # noqa: BLE001 - any decode failure is a finding
-        findings.append("--server-public-key is not a valid WireGuard key")
-    host, separator, port = arguments.endpoint.rpartition(":")
-    if not separator or not host or not port.isdigit():
-        findings.append("--endpoint must be <host>:<port>")
+    if arguments.server_public_key:
+        try:
+            KEYS.decode(arguments.server_public_key)
+        except Exception:  # noqa: BLE001 - any decode failure is a finding
+            findings.append("--server-public-key is not a valid WireGuard key")
+    if arguments.endpoint:
+        host, separator, port = arguments.endpoint.rpartition(":")
+        if not separator or not host or not port.isdigit():
+            findings.append("--endpoint must be <host>:<port>")
+    if bool(arguments.server_public_key) != bool(arguments.endpoint):
+        findings.append("--server-public-key and --endpoint must be supplied together")
     return findings
 
 
@@ -76,8 +83,17 @@ def main() -> None:
     parser.add_argument("--peer-id", required=True, help="identifier recorded in the host contract")
     parser.add_argument("--address", required=True, help="this peer's tunnel address, such as 10.99.0.2/32")
     parser.add_argument("--subnet", required=True, help="the VPN subnet the peer may reach")
-    parser.add_argument("--server-public-key", required=True)
-    parser.add_argument("--endpoint", required=True, help="<public-address-or-hostname>:<port>")
+    parser.add_argument(
+        "--server-public-key",
+        default="",
+        help=(
+            "the host's WireGuard public key. Omit it before the first convergence: "
+            "the key does not exist yet, and the [Peer] block to append is printed instead."
+        ),
+    )
+    parser.add_argument(
+        "--endpoint", default="", help="<public-address-or-hostname>:<port>; pairs with --server-public-key"
+    )
     parser.add_argument("--keepalive", type=int, default=25)
     parser.add_argument("--output", type=Path, required=True, help="path outside the repository")
     arguments = parser.parse_args()
@@ -98,14 +114,15 @@ def main() -> None:
         raise SystemExit(f"peer configuration failure: refusing to overwrite {destination}")
 
     private_key = KEYS.generate_private_key()
-    body = render(
-        arguments.address,
-        arguments.subnet,
-        arguments.server_public_key,
-        arguments.endpoint,
-        KEYS.encode(private_key),
-        arguments.keepalive,
-    )
+    body = render_interface(arguments.address, KEYS.encode(private_key))
+    complete = bool(arguments.server_public_key)
+    if complete:
+        body += render_peer(
+            arguments.subnet,
+            arguments.server_public_key,
+            arguments.endpoint,
+            arguments.keepalive,
+        )
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(body, encoding="utf-8")
     destination.chmod(0o600)
@@ -117,6 +134,13 @@ def main() -> None:
     print(f"  - id: {arguments.peer_id}")
     print(f"    public_key: {KEYS.encode(KEYS.public_key(private_key))}")
     print(f"    allowed_ips: [{arguments.address}]")
+    if not complete:
+        print()
+        print("The host has no WireGuard key until it first converges. Afterwards the")
+        print("convergence reports wireguard_server_public_key; append this block to the")
+        print("saved file, filling in that key and the host's public endpoint:")
+        print(render_peer(arguments.subnet, "<server-public-key>", "<host>:<port>",
+                          arguments.keepalive).rstrip())
 
 
 if __name__ == "__main__":

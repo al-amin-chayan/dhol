@@ -134,6 +134,32 @@ def test_the_helper_refuses_to_overwrite_an_existing_file(tmp_path: Path) -> Non
     assert "refusing to overwrite" in completed.stderr + completed.stdout
 
 
+def test_the_helper_omits_the_peer_block_before_the_host_has_a_key(tmp_path: Path) -> None:
+    """The server key does not exist until the first convergence."""
+
+    output = tmp_path / "peer.conf"
+    completed = run_helper(
+        "--peer-id", "founder-laptop", "--address", "10.99.0.2/32",
+        "--subnet", "10.99.0.0/24", "--output", str(output),
+    )
+    assert completed.returncode == 0, completed.stderr
+    body = output.read_text(encoding="utf-8")
+    assert "[Interface]" in body
+    assert "[Peer]" not in body
+    assert "public_key:" in completed.stdout
+    assert "<server-public-key>" in completed.stdout
+
+
+def test_the_helper_requires_the_endpoint_and_server_key_together(tmp_path: Path) -> None:
+    completed = run_helper(
+        "--peer-id", "founder-laptop", "--address", "10.99.0.2/32",
+        "--subnet", "10.99.0.0/24", "--server-public-key", SERVER_PUBLIC,
+        "--output", str(tmp_path / "peer.conf"),
+    )
+    assert completed.returncode != 0
+    assert "must be supplied together" in completed.stderr
+
+
 @pytest.mark.parametrize(
     ("flag", "value", "expected"),
     [

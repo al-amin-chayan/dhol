@@ -58,6 +58,13 @@
         tasks_from: verify
       tags: [docker]
 
+    - name: Verify the administrative tunnel still matches its contract
+      ansible.builtin.import_role:
+        name: wireguard
+        tasks_from: verify
+      when: baseline_vpn is defined and baseline_vpn.mode | default('none') == 'wireguard'
+      tags: [wireguard, connection-safety]
+
     - name: Read the converged firewall policy
       ansible.builtin.command: /usr/sbin/ufw status verbose
       changed_when: false
@@ -98,11 +105,18 @@
       changed_when: false
       tags: [firewall]
 
+    # sshd binds every interface regardless of policy, so tcp/22 stays declared:
+    # the firewall is what scopes it to the VPN subnet, and that is asserted
+    # separately above. Tunnel mode adds the WireGuard listener, which is the one
+    # entry point that must answer publicly.
     - name: Verify no undeclared service answers on a public address
       ansible.builtin.script:
         cmd: >-
           files/verify_public_listeners.py
           --allow-public tcp/{{ base_ssh_port | int }}
+          {% if baseline_vpn is defined and baseline_vpn.mode | default('none') == 'wireguard' %}
+          --allow-public udp/{{ baseline_vpn.listen_port | int }}
+          {% endif %}
       args:
         executable: /usr/bin/python3
       changed_when: false
