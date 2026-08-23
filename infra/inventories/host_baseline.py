@@ -43,6 +43,10 @@ VPN_MODES = {"none", "wireguard"}
 # is admitted, so "public" brings the tunnel up alongside the existing path and
 # "tunnel" only then closes that path.
 VPN_ADMINISTRATION = {"public", "tunnel"}
+# Which path is reachable *now* is not the same question as which path the
+# contract wants next. A rollback re-adds the public rule while only the tunnel
+# is currently live, so the transport must be selectable independently.
+TRANSPORTS = {"auto", "public", "tunnel"}
 # The same ranges infra/roles/base/files/validate_contract.py treats as private.
 # ipaddress.is_private is too permissive here: it accepts documentation ranges
 # such as 203.0.113.0/24, which are not usable private address space.
@@ -290,6 +294,35 @@ def is_wireguard_key(value: str) -> bool:
         return len(base64.b64decode(value, validate=True)) == 32
     except (ValueError, binascii.Error):
         return False
+
+
+def resolve_connection_address(
+    vpn: dict[str, Any], address: str, stage: str, transport: str = "auto"
+) -> str:
+    """Decide which address this run actually connects over.
+
+    ``auto`` follows the contract: the tunnel once administration has moved onto
+    it, the supplied address otherwise. An explicit transport overrides that, so
+    a reverse cutover can connect over the still-live tunnel while the desired
+    document already re-adds the public rule.
+    """
+
+    if transport not in TRANSPORTS:
+        raise ValueError(f"transport must be one of {sorted(TRANSPORTS)}")
+    is_wireguard = vpn.get("mode") == "wireguard"
+    tunnel_address = (
+        str(ipaddress.ip_interface(str(vpn["host_address"])).ip) if is_wireguard else ""
+    )
+    if transport == "tunnel":
+        if not tunnel_address:
+            raise ValueError("transport tunnel requires a wireguard contract")
+        if stage == "bootstrap":
+            raise ValueError("first contact cannot use a tunnel that does not exist yet")
+        return tunnel_address
+    if transport == "public":
+        return address
+    tunnel_only = is_wireguard and vpn.get("administration") == "tunnel"
+    return tunnel_address if (tunnel_only and stage != "bootstrap") else address
 
 
 def vpn_findings(document: dict[str, Any], label: str) -> list[str]:
@@ -606,6 +639,7 @@ def render_inventory(
     identity_file: str,
     known_hosts_file: str,
     admin_identity_file: str | None = None,
+    transport: str = "auto",
 ) -> dict[str, Any]:
     """Render the operator inventory for one connection phase.
 
@@ -638,14 +672,10 @@ def render_inventory(
     # address entirely. First contact still uses the public address, because the
     # tunnel does not exist yet; every later connection uses the tunnel.
     vpn = document.get("vpn") or {}
-    tunnel_only = vpn.get("mode") == "wireguard" and vpn.get("administration") == "tunnel"
-    tunnel_address = (
-        str(ipaddress.ip_interface(str(vpn["host_address"])).ip)
-        if vpn.get("mode") == "wireguard"
-        else ""
-    )
-    connection_address = tunnel_address if (tunnel_only and not bootstrap_stage) else address
-    second_connection_host = tunnel_address if tunnel_only else address
+    connection_address = resolve_connection_address(vpn, address, stage, transport)
+    # The probe must prove the path that is actually carrying this run, so it
+    # follows the transport rather than the desired administration state.
+    second_connection_host = connection_address
 
     host_vars: dict[str, Any] = {
         "ansible_host": connection_address,
@@ -713,6 +743,7 @@ def main() -> None:
     resolved.add_argument("--limit", required=True)
     resolved.add_argument("--address", required=True)
     resolved.add_argument("--stage", choices=["bootstrap", "converged"], required=True)
+    resolved.add_argument("--transport", choices=sorted(TRANSPORTS), default="auto")
 
     arguments = parser.parse_args()
     root = repository_root(arguments.root)
@@ -730,11 +761,11 @@ def main() -> None:
     if arguments.command == "connection-address":
         document = load_yaml(baseline_path(root, arguments.limit))
         vpn = (document or {}).get("vpn") or {}
-        if vpn.get("mode") == "wireguard" and vpn.get("administration") == "tunnel" \
-                and arguments.stage != "bootstrap":
-            print(str(ipaddress.ip_interface(str(vpn["host_address"])).ip))
-        else:
-            print(arguments.address)
+        print(
+            resolve_connection_address(
+                vpn, arguments.address, arguments.stage, arguments.transport
+            )
+        )
         return
 
     if arguments.command == "contract":
@@ -756,6 +787,7 @@ def main() -> None:
         arguments.identity_file,
         arguments.known_hosts_file,
         arguments.admin_identity_file,
+        arguments.transport,
     )
     if str(arguments.output) == "-":
         # The controller mounts the workspace read-only, so the inventory is

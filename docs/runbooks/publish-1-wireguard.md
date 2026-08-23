@@ -139,43 +139,100 @@ peer is allowed a single address rather than a range, and the only public
 listeners are the WireGuard port and SSH — which the firewall now scopes to the
 tunnel.
 
-## Key custody and rotation
+## Key custody, escrow, and rotation
 
 The server key is generated on the host once and never overwritten, because a
 second convergence must not silently invalidate peer configurations already
-saved. There is deliberately no second path that could install a different key.
+saved.
 
-**Escrow it.** Over your administrator session:
+### Escrow, with a confirmation you can act on
+
+Over your administrator session:
 
 ```sh
-ssh dholbeat-admin@10.99.0.1 'sudo cat /etc/wireguard/wg0.key'
+ssh dholbeat-admin@10.99.0.1 'sudo cat /etc/wireguard/wg0.key' >~/publish-1-wg0.key
+chmod 600 ~/publish-1-wg0.key
+scripts/controller exec python3 scripts/lib/wireguard_keys.py --public-of - <~/publish-1-wg0.key
 ```
 
-Store the output in the password manager beside the peer files. Confirm the
-escrowed copy is the right one by deriving its public half and comparing it with
-the committed `vpn.server_public_key`; they must be identical. That comparison is
-the postcondition — an escrowed key that does not match is not a backup.
+The last command prints the public half and never echoes the private key. **It
+must equal the committed `vpn.server_public_key`.** That equality is the
+postcondition: an escrowed key that does not derive to the committed value is not
+a backup of this host.
 
-Rotate when a key is exposed, a device is lost, or the peer set changes:
+Store `~/publish-1-wg0.key` in the password manager beside the peer files, then
+delete the local copy. Record the printed public key as the receipt; it is
+non-secret and already in Git.
+
+### Restore onto a rebuilt host
+
+Export the key from the password manager to a path outside the repository, then:
+
+```sh
+scripts/infra-apply --limit publish-1 --release <tag> --address <address> \
+  --identity-file ~/.dholbeat/publish-1-admin \
+  --known-hosts-file ~/.dholbeat/publish-1.known_hosts \
+  --approved-plan .artifacts/<plan>/plan.yml \
+  --wireguard-key-file ~/publish-1-wg0.key
+```
+
+The key is copied into the run's bounded inputs directory, never logged, and
+removed with that directory when the command exits. The interface is restarted
+deliberately so disk and runtime cannot diverge, convergence then asserts the
+running identity equals `vpn.server_public_key`, and the evidence directory keeps
+only `wireguard-restore-receipt.yml` containing the public half. Delete the
+exported file afterwards.
+
+Because the identity is preserved, every peer configuration keeps working.
+
+### Rotation
 
 - **A peer:** remove it from `vpn.peers` and converge. Verification fails if the
   peer is still present on the host, so removal is proven rather than assumed.
-- **The server key:** delete `/etc/wireguard/wg0.key` over the console, converge
-  to regenerate, update `vpn.server_public_key`, and reissue every peer file.
-  Every peer loses access until reissued, so schedule it.
+- **The server key:** generate a new one, escrow it, update
+  `vpn.server_public_key`, and converge with `--wireguard-key-file` pointing at
+  the new key. This runs entirely through the reviewed plan and apply path — no
+  console session and no hand-deleted host file. Every peer needs its `PublicKey`
+  updated afterwards, so schedule it.
 
-If the host is rebuilt, its server key changes and every peer needs its
-`PublicKey` updated. That is the accepted cost of not holding a second live copy
-of the key on the controller. Restoring the escrowed key onto a rebuilt host
-avoids it.
+```sh
+scripts/controller exec python3 -c 'import sys; sys.path.insert(0, "scripts/lib"); \
+  import wireguard_keys as k; p = k.generate_private_key(); \
+  print(k.encode(p)); print(k.encode(k.public_key(p)), file=sys.stderr)' \
+  >~/publish-1-wg0.key.new
+```
+
+The private half goes to the file, the public half to the terminal for the
+contract.
 
 ## Rollback
 
-Set `vpn.administration` back to `public`, restore the office CIDR in
-`ssh.allow_cidrs`, and converge: the reconciler re-adds the public rule and the
-tunnel keeps working. Setting `vpn.mode` to `none` additionally removes the
-WireGuard rule. Reach the host through the provider console if the tunnel is the
-thing that broke.
+Rollback is a reverse cutover, and it has the same ordering problem forwards had:
+at the moment you want the public path back, only the tunnel is reachable. So the
+transport is stated explicitly rather than derived from the document you are
+moving towards.
+
+1. Set `vpn.administration` back to `public` and restore the office CIDR in
+   `ssh.allow_cidrs`, keeping the VPN subnet.
+2. Plan and apply with `--transport tunnel`:
+
+```sh
+scripts/infra-plan --limit publish-1 --stage converged --transport tunnel \
+  --address <public-address> \
+  --identity-file ~/.dholbeat/publish-1-admin \
+  --known-hosts-file ~/.dholbeat/publish-1.known_hosts
+```
+
+The run connects over the still-live tunnel while the reconciler re-adds the
+public rule. Confirm public SSH works before going further.
+
+3. Only then, if you want WireGuard gone entirely, set `vpn.mode` to `none` and
+   converge normally over the public path. The reconciler removes the WireGuard
+   rule.
+
+Doing step 3 first would try to reach a host over a path the same release is
+removing. Reach the host through the provider console only if the tunnel itself
+is what broke; that is break-glass, not the reproducible rollback.
 
 ## Monthly cost
 

@@ -98,12 +98,33 @@ def main() -> None:
         action="store_true",
         help="fail when a desired rule is absent, used for the closure assertion",
     )
+    parser.add_argument(
+        "--report",
+        action="store_true",
+        help=(
+            "print the planned add and delete set without asserting closure. Check mode "
+            "deliberately does not apply the rules, so the plan describes the delta instead "
+            "of failing on state it did not create."
+        ),
+    )
     arguments = parser.parse_args()
 
     desired, desired_findings = desired_tuples(arguments.desired)
     obsolete, missing, findings = reconcile(
         sys.stdin.read(), set(arguments.owned_comment), desired
     )
+    if arguments.report:
+        for problem in sorted(set(desired_findings + findings)):
+            print(f"firewall reconciliation failure: {problem}", file=sys.stderr)
+        if desired_findings or findings:
+            raise SystemExit(1)
+        for entry in missing:
+            print(f"planned add: {entry.split(': ', 1)[1]}")
+        for index in obsolete:
+            print(f"planned delete: rule {index}")
+        if not missing and not obsolete:
+            print("planned change: none")
+        return
     problems = desired_findings + findings + (missing if arguments.require_complete else [])
     if problems:
         for problem in sorted(set(problems)):

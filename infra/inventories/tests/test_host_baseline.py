@@ -457,3 +457,56 @@ def test_a_non_vpn_host_still_connects_over_its_public_address(rendering_root: P
     variables = host_vars(rendered(rendering_root, "converged"))
     assert variables["ansible_host"] == "203.0.113.20"
     assert variables["baseline_second_connection_host"] == "203.0.113.20"
+
+
+# --- Transport is the live path, not the desired one (PR44-B01) ---
+
+def resolved(document: dict, stage: str, transport: str) -> str:
+    return HOST_BASELINE.resolve_connection_address(
+        document["vpn"], "203.0.113.20", stage, transport
+    )
+
+
+def test_auto_follows_the_contract_in_both_phases() -> None:
+    assert resolved(public_phase_document(), "converged", "auto") == "203.0.113.20"
+    assert resolved(tunnel_document(), "converged", "auto") == "10.99.0.1"
+
+
+def test_a_reverse_cutover_connects_over_the_still_live_tunnel() -> None:
+    """Rolling back to public must not aim at a rule the same release re-adds."""
+
+    assert resolved(public_phase_document(), "converged", "tunnel") == "10.99.0.1"
+
+
+def test_an_explicit_public_transport_overrides_a_tunnel_contract() -> None:
+    assert resolved(tunnel_document(), "converged", "public") == "203.0.113.20"
+
+
+def test_first_contact_can_never_be_forced_onto_a_tunnel() -> None:
+    with pytest.raises(ValueError):
+        resolved(tunnel_document(), "bootstrap", "tunnel")
+
+
+def test_a_tunnel_transport_requires_a_wireguard_contract() -> None:
+    with pytest.raises(ValueError):
+        HOST_BASELINE.resolve_connection_address({"mode": "none"}, "203.0.113.20", "converged", "tunnel")
+
+
+def test_an_unknown_transport_is_refused() -> None:
+    with pytest.raises(ValueError):
+        resolved(tunnel_document(), "converged", "sideways")
+
+
+def test_the_probe_always_follows_the_transport(tmp_path: Path) -> None:
+    """The probe proves the path carrying this run, not the one being adopted."""
+
+    document = public_phase_document()
+    root = vpn_root(tmp_path, document)
+    for transport, expected in (("public", "203.0.113.20"), ("tunnel", "10.99.0.1")):
+        inventory = HOST_BASELINE.render_inventory(
+            root, document["host_id"], "203.0.113.20", "converged",
+            "/tmp/id", "/tmp/kh", "/tmp/ka", transport,
+        )
+        variables = host_vars(inventory)
+        assert variables["ansible_host"] == expected
+        assert variables["baseline_second_connection_host"] == expected

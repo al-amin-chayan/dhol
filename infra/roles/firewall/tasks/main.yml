@@ -134,20 +134,50 @@
   check_mode: false
   delegate_to: localhost
   register: firewall_obsolete_rules
+  when: not ansible_check_mode
   vars:
     ansible_remote_tmp: /tmp/ansible-controller
+
+# Check mode deliberately does not apply the ufw rules above, so asserting
+# closure against unchanged live state would fail every plan. Describe the delta
+# instead: that is what a reviewer needs from a plan.
+- name: Report the planned firewall delta
+  ansible.builtin.command:
+    argv: >-
+      {{
+        ['python3', role_path ~ '/files/reconcile_ufw_rules.py', '--report',
+         '--owned-comment', 'dholbeat-admin-ssh',
+         '--owned-comment', 'dholbeat-wireguard']
+        + (firewall_desired_rules | map('regex_replace', '^', '--desired=') | list)
+      }}
+    stdin: "{{ firewall_ufw_numbered.stdout }}"
+  become: false
+  changed_when: false
+  check_mode: false
+  delegate_to: localhost
+  register: firewall_planned_delta
+  when: ansible_check_mode
+  vars:
+    ansible_remote_tmp: /tmp/ansible-controller
+
+- name: Show the planned firewall delta
+  ansible.builtin.debug:
+    msg: "{{ firewall_planned_delta.stdout_lines | default([]) }}"
+  when: ansible_check_mode
 
 - name: Remove owned firewall rules that are no longer declared
   ansible.builtin.command:
     argv: [/usr/sbin/ufw, --force, delete, "{{ item }}"]
   loop: "{{ firewall_obsolete_rules.stdout_lines | default([]) }}"
   changed_when: true
+  when: not ansible_check_mode
 
 - name: Re-read the numbered firewall rules after reconciliation
   ansible.builtin.command: /usr/sbin/ufw status numbered
   changed_when: false
   check_mode: false
   register: firewall_ufw_reconciled
+  when: not ansible_check_mode
 
 - name: Prove the owned rule set is exactly what the contract declares
   ansible.builtin.command:
@@ -164,8 +194,10 @@
   check_mode: false
   delegate_to: localhost
   register: firewall_closure
+  when: not ansible_check_mode
   failed_when:
-    - firewall_closure.rc != 0 or (firewall_closure.stdout | trim | length) > 0
+    - not ansible_check_mode
+    - firewall_closure.rc | default(0) != 0 or (firewall_closure.stdout | default('') | trim | length) > 0
   vars:
     ansible_remote_tmp: /tmp/ansible-controller
 

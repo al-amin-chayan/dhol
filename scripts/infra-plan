@@ -20,6 +20,8 @@ IDENTITY_FILE=""
 ADMIN_IDENTITY_FILE=""
 KNOWN_HOSTS_FILE=""
 STAGE=bootstrap
+TRANSPORT=auto
+WIREGUARD_KEY_FILE=""
 REHEARSAL=false
 ARTIFACT_SUFFIX=""
 TEMP_ROOT=""
@@ -71,6 +73,10 @@ Options:
   --rehearsal         allow a commit that is not yet reachable from main. The
                       plan is marked rehearsal and scripts/infra-apply refuses
                       it.
+  --transport         which path this run connects over: auto follows the
+                      contract, public and tunnel override it. Use --transport
+                      tunnel to roll administration back onto the public path,
+                      because only the tunnel is reachable at that moment.
   --artifact-suffix   distinguish this run's evidence from an earlier plan for
                       the same host, stage, and commit
 
@@ -97,6 +103,8 @@ while [ "$#" -gt 0 ]; do
     --known-hosts-file) [ "$#" -ge 2 ] || dholbeat_die "--known-hosts-file requires a path"; KNOWN_HOSTS_FILE="$2"; shift 2 ;;
     --admin-identity-file) [ "$#" -ge 2 ] || dholbeat_die "--admin-identity-file requires a path"; ADMIN_IDENTITY_FILE="$2"; shift 2 ;;
     --stage) [ "$#" -ge 2 ] || dholbeat_die "--stage requires bootstrap or converged"; STAGE="$2"; shift 2 ;;
+    --transport) [ "$#" -ge 2 ] || dholbeat_die "--transport requires auto, public, or tunnel"; TRANSPORT="$2"; shift 2 ;;
+    --wireguard-key-file) [ "$#" -ge 2 ] || dholbeat_die "--wireguard-key-file requires a path"; WIREGUARD_KEY_FILE="$2"; shift 2 ;;
     --rehearsal) REHEARSAL=true; shift ;;
     --artifact-suffix) [ "$#" -ge 2 ] || dholbeat_die "--artifact-suffix requires a slug"; ARTIFACT_SUFFIX="$2"; shift 2 ;;
     *) dholbeat_die "unexpected argument: $1" ;;
@@ -116,10 +124,17 @@ case "$ARTIFACT_SUFFIX" in
   "") ;;
   *[!a-z0-9-]*) dholbeat_die "--artifact-suffix must be lowercase letters, digits, and hyphens" ;;
 esac
+case "$TRANSPORT" in
+  auto|public|tunnel) ;;
+  *) dholbeat_die "--transport must be auto, public, or tunnel" ;;
+esac
 [ -z "${GITHUB_ACTIONS:-}${CI:-}" ] \
   || dholbeat_die "planning against a production host is never permitted in CI"
 
 IDENTITY_FILE="$(dholbeat_assert_outside_repository "$REPO_ROOT" "$IDENTITY_FILE" "connection identity")"
+if [ -n "$WIREGUARD_KEY_FILE" ]; then
+  WIREGUARD_KEY_FILE="$(dholbeat_assert_outside_repository "$REPO_ROOT" "$WIREGUARD_KEY_FILE" "WireGuard key export")"
+fi
 if [ -n "$ADMIN_IDENTITY_FILE" ]; then
   ADMIN_IDENTITY_FILE="$(dholbeat_assert_outside_repository "$REPO_ROOT" "$ADMIN_IDENTITY_FILE" "administrator identity")"
 else
@@ -204,6 +219,7 @@ printf '\n==> operator inventory (the address stays local)\n'
   --limit "$LIMIT" \
   --address "$ADDRESS" \
   --stage "$STAGE" \
+  --transport "$TRANSPORT" \
   --identity-file "$CONTROLLER_IDENTITY" \
   --admin-identity-file "$CONTROLLER_ADMIN_IDENTITY" \
   --known-hosts-file "$CONTROLLER_KNOWN_HOSTS" \
@@ -215,7 +231,7 @@ chmod 0600 "$TEMP_ROOT/inputs/inventory.yml"
 # assuming, so a tunnel-only host can still be planned.
 EXPECTED_ADDRESS="$("$SCRIPT_DIR/controller" exec python3 infra/inventories/host_baseline.py \
   --root /workspace connection-address \
-  --limit "$LIMIT" --address "$ADDRESS" --stage "$STAGE")"
+  --limit "$LIMIT" --address "$ADDRESS" --stage "$STAGE" --transport "$TRANSPORT")"
 grep -q "ansible_host: $EXPECTED_ADDRESS" "$TEMP_ROOT/inputs/inventory.yml" \
   || dholbeat_die "the rendered inventory does not target the resolved connection address"
 

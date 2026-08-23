@@ -179,3 +179,46 @@ def test_the_helper_validates_its_inputs(
     assert completed.returncode != 0
     assert expected in completed.stderr
     assert not (tmp_path / "peer.conf").exists()
+
+
+# --- Escrow confirmation by derivation (PR44-R04) ---
+
+MODULE = ROOT / "scripts/lib/wireguard_keys.py"
+
+
+def derive(material: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(MODULE), "--public-of", "-"],
+        input=material, capture_output=True, text=True,
+    )
+
+
+def test_an_escrowed_key_derives_to_its_committed_public_half() -> None:
+    """This equality is the escrow postcondition, not a nicety."""
+
+    private_key = KEYS.generate_private_key()
+    completed = derive(KEYS.encode(private_key))
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == KEYS.encode(KEYS.public_key(private_key))
+
+
+def test_the_private_key_is_never_echoed_back() -> None:
+    private_key = KEYS.encode(KEYS.generate_private_key())
+    completed = derive(private_key)
+    assert private_key not in completed.stdout
+    assert private_key not in completed.stderr
+
+
+def test_trailing_whitespace_in_an_export_is_tolerated() -> None:
+    private_key = KEYS.generate_private_key()
+    assert derive(KEYS.encode(private_key) + "\n\n").stdout.strip() == KEYS.encode(
+        KEYS.public_key(private_key)
+    )
+
+
+@pytest.mark.parametrize("material", ["not-a-key", "", "AAAA"])
+def test_a_bad_export_fails_without_echoing_it(material: str) -> None:
+    completed = derive(material)
+    assert completed.returncode != 0
+    if material:
+        assert material not in completed.stderr

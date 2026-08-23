@@ -77,3 +77,32 @@ def decode(value: str) -> bytes:
     if len(material) != 32:
         raise ValueError("a WireGuard key must be 32 bytes")
     return material
+
+
+def _main() -> None:
+    """Derive the public half of an escrowed key, so a backup can be confirmed.
+
+    The private key is read and never echoed. Only the public half is printed,
+    which is the value committed as vpn.server_public_key.
+    """
+
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(description=_main.__doc__)
+    parser.add_argument(
+        "--public-of", required=True, help="file holding one base64 private key, or - for stdin"
+    )
+    arguments = parser.parse_args()
+    source = sys.stdin if arguments.public_of == "-" else open(arguments.public_of, encoding="utf-8")
+    with source as handle:
+        material = handle.read().strip()
+    try:
+        private_key = decode(material)
+    except Exception:  # noqa: BLE001 - any decode failure is fatal and must not echo input
+        raise SystemExit("wireguard key failure: input is not a base64 WireGuard key") from None
+    print(encode(public_key(private_key)))
+
+
+if __name__ == "__main__":
+    _main()

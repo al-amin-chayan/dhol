@@ -128,3 +128,60 @@ def test_a_malformed_desired_specification_is_rejected() -> None:
 def test_header_lines_are_not_mistaken_for_rules() -> None:
     _, _, findings = reconcile({TUNNEL, LISTENER, OFFICE})
     assert findings == []
+
+
+# --- Check mode reports the delta rather than asserting closure (PR44-B02) ---
+
+import subprocess  # noqa: E402
+import sys  # noqa: E402
+
+
+def report(desired: list[str], text: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(MODULE_PATH), "--report",
+         "--owned-comment", "dholbeat-admin-ssh", "--owned-comment", "dholbeat-wireguard",
+         *[f"--desired={entry}" for entry in desired]],
+        input=text, capture_output=True, text=True,
+    )
+
+
+LIVE_INTERIM = "[ 1] 22/tcp   ALLOW IN    203.0.113.0/24   # dholbeat-admin-ssh\n"
+PHASE_ONE = [
+    "22/tcp|203.0.113.0/24|dholbeat-admin-ssh",
+    "22/tcp|10.99.0.0/24|dholbeat-admin-ssh",
+    "51820/udp|Anywhere|dholbeat-wireguard",
+]
+PHASE_TWO = ["22/tcp|10.99.0.0/24|dholbeat-admin-ssh", "51820/udp|Anywhere|dholbeat-wireguard"]
+
+
+def test_phase_one_check_mode_reports_planned_adds_instead_of_failing() -> None:
+    completed = report(PHASE_ONE, LIVE_INTERIM)
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.count("planned add:") == 2
+    assert "planned delete:" not in completed.stdout
+
+
+def test_phase_two_check_mode_reports_the_planned_deletion() -> None:
+    live = LIVE_INTERIM + (
+        "[ 2] 22/tcp   ALLOW IN 10.99.0.0/24 # dholbeat-admin-ssh\n"
+        "[ 3] 51820/udp ALLOW IN Anywhere    # dholbeat-wireguard\n"
+    )
+    completed = report(PHASE_TWO, live)
+    assert completed.returncode == 0, completed.stderr
+    assert "planned delete: rule 1" in completed.stdout
+
+
+def test_a_converged_host_reports_no_planned_change() -> None:
+    live = (
+        "[ 1] 22/tcp   ALLOW IN 10.99.0.0/24 # dholbeat-admin-ssh\n"
+        "[ 2] 51820/udp ALLOW IN Anywhere    # dholbeat-wireguard\n"
+    )
+    completed = report(PHASE_TWO, live)
+    assert completed.returncode == 0
+    assert "planned change: none" in completed.stdout
+
+
+def test_report_mode_still_fails_on_an_unparseable_row() -> None:
+    completed = report(PHASE_TWO, "[ 1] nonsense\n")
+    assert completed.returncode != 0
+    assert "could not be parsed" in completed.stderr

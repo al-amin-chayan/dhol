@@ -10,3 +10,7 @@ wireguard_config_mode: "0600"
 wireguard_config_dir_mode: "0700"
 wireguard_key_path: "{{ wireguard_config_dir }}/{{ baseline_vpn.interface }}.key"
 wireguard_key_mode: "0600"
+# Path, inside the controller's mounted operator inputs, to a key exported from
+# the password manager. Supplied only by scripts/infra-apply --wireguard-key-file
+# so a rebuild can restore the previous identity. Never a literal key value.
+wireguard_restore_key_path: ""
