@@ -1,0 +1,197 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)"
+# shellcheck source=scripts/lib/common.sh
+source "$SCRIPT_DIR/lib/common.sh"
+REPO_ROOT="$(dholbeat_repo_root "$SCRIPT_PATH")"
+
+CONTROLLER_IDENTITY=/tmp/controller-home/.ssh/id_target
+CONTROLLER_ADMIN_IDENTITY=/tmp/controller-home/.ssh/id_admin
+CONTROLLER_KNOWN_HOSTS=/tmp/controller-home/.ssh/known_hosts
+CONTROLLER_INPUTS=/tmp/controller-inputs
+LOG_LIMIT_BYTES=8388608
+
+LIMIT=""
+ADDRESS=""
+IDENTITY_FILE=""
+ADMIN_IDENTITY_FILE=""
+KNOWN_HOSTS_FILE=""
+RELEASE_TAG=""
+ARTIFACT_SUFFIX=""
+TEMP_ROOT=""
+SESSION_ROOT=""
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/infra-verify --limit <host> --address <ip> --identity-file <path>
+                            --known-hosts-file <path> [--release-tag <tag>]
+                            [--artifact-suffix <slug>]
+
+Probe one converged host without changing desired state.
+
+The command asserts the declared operating system, resources, exact Docker
+package versions, bounded daemon logging, default-deny firewall with its SSH
+allowlist, the Docker ingress chain, catalogued directory ownership, effective
+key-only SSH policy, a working second administrator connection, and that no
+undeclared service answers on a public address. With --release-tag it also
+requires the host runtime receipt to identify that exact release.
+
+--admin-identity-file names the key authenticating the named administrator when it
+differs from the bootstrap key.
+
+Evidence is redacted and written under .artifacts/.
+EOF
+}
+
+cleanup() {
+  if [ -n "$SESSION_ROOT" ] && [ -d "$SESSION_ROOT" ]; then
+    rm -rf -- "$SESSION_ROOT"
+  fi
+  if [ -n "$TEMP_ROOT" ] && [ -d "$TEMP_ROOT" ]; then
+    rm -rf -- "$TEMP_ROOT"
+  fi
+}
+trap cleanup EXIT INT TERM
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --limit) [ "$#" -ge 2 ] || dholbeat_die "--limit requires a host ID"; LIMIT="$2"; shift 2 ;;
+    --address) [ "$#" -ge 2 ] || dholbeat_die "--address requires an IP address"; ADDRESS="$2"; shift 2 ;;
+    --identity-file) [ "$#" -ge 2 ] || dholbeat_die "--identity-file requires a path"; IDENTITY_FILE="$2"; shift 2 ;;
+    --admin-identity-file) [ "$#" -ge 2 ] || dholbeat_die "--admin-identity-file requires a path"; ADMIN_IDENTITY_FILE="$2"; shift 2 ;;
+    --known-hosts-file) [ "$#" -ge 2 ] || dholbeat_die "--known-hosts-file requires a path"; KNOWN_HOSTS_FILE="$2"; shift 2 ;;
+    --release-tag) [ "$#" -ge 2 ] || dholbeat_die "--release-tag requires a tag"; RELEASE_TAG="$2"; shift 2 ;;
+    --artifact-suffix) [ "$#" -ge 2 ] || dholbeat_die "--artifact-suffix requires a slug"; ARTIFACT_SUFFIX="$2"; shift 2 ;;
+    *) dholbeat_die "unexpected argument: $1" ;;
+  esac
+done
+
+[ -n "$LIMIT" ] || dholbeat_die "--limit is required and must name exactly one host"
+[ -n "$ADDRESS" ] || dholbeat_die "--address is required; addresses are never committed"
+[ -n "$IDENTITY_FILE" ] || dholbeat_die "--identity-file is required"
+[ -n "$KNOWN_HOSTS_FILE" ] || dholbeat_die "--known-hosts-file is required; host keys are never auto-trusted"
+case "$ARTIFACT_SUFFIX" in
+  "") ;;
+  *[!a-z0-9-]*) dholbeat_die "--artifact-suffix must be lowercase letters, digits, and hyphens" ;;
+esac
+[ -z "${GITHUB_ACTIONS:-}${CI:-}" ] \
+  || dholbeat_die "probing a production host is never permitted in CI"
+
+IDENTITY_FILE="$(dholbeat_assert_outside_repository "$REPO_ROOT" "$IDENTITY_FILE" "connection identity")"
+if [ -n "$ADMIN_IDENTITY_FILE" ]; then
+  ADMIN_IDENTITY_FILE="$(dholbeat_assert_outside_repository "$REPO_ROOT" "$ADMIN_IDENTITY_FILE" "administrator identity")"
+else
+  ADMIN_IDENTITY_FILE="$IDENTITY_FILE"
+fi
+KNOWN_HOSTS_FILE="$(dholbeat_canonical_path "$KNOWN_HOSTS_FILE")"
+[ ! -L "$KNOWN_HOSTS_FILE" ] || dholbeat_die "the known-hosts file must not be a symbolic link"
+[ -s "$KNOWN_HOSTS_FILE" ] || dholbeat_die "known-hosts file is missing or empty: $KNOWN_HOSTS_FILE"
+
+BASELINE_RELATIVE="infra/inventories/production/baseline/$LIMIT.yml"
+[ -f "$REPO_ROOT/$BASELINE_RELATIVE" ] \
+  || dholbeat_die "no committed baseline contract for host: $LIMIT"
+HOST_ROLE="$(awk '$1 == "host_role:" {print $2; exit}' "$REPO_ROOT/$BASELINE_RELATIVE")"
+[ -n "$HOST_ROLE" ] || dholbeat_die "baseline contract declares no host_role: $BASELINE_RELATIVE"
+
+ARTIFACT_NAME="infra-verify-$LIMIT${ARTIFACT_SUFFIX:+-$ARTIFACT_SUFFIX}"
+ARTIFACT_ROOT="$REPO_ROOT/.artifacts/$ARTIFACT_NAME"
+[ ! -L "$REPO_ROOT/.artifacts" ] || dholbeat_die ".artifacts must not be a symbolic link"
+[ ! -e "$ARTIFACT_ROOT" ] \
+  || dholbeat_die "verification evidence already exists; inspect and remove: .artifacts/$ARTIFACT_NAME"
+mkdir -p "$ARTIFACT_ROOT"
+chmod 0700 "$ARTIFACT_ROOT"
+
+SESSION_NAME="session-verify-$$"
+SESSION_ROOT="$REPO_ROOT/.artifacts/$SESSION_NAME"
+[ ! -e "$SESSION_ROOT" ] || dholbeat_die "a stale verify session directory exists: .artifacts/$SESSION_NAME"
+mkdir -p "$SESSION_ROOT"
+chmod 0700 "$SESSION_ROOT"
+install -m 0600 "$KNOWN_HOSTS_FILE" "$SESSION_ROOT/known_hosts"
+TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/dholbeat-infra-verify.XXXXXX")"
+chmod 0700 "$TEMP_ROOT"
+mkdir -p "$TEMP_ROOT/inputs"
+chmod 0700 "$TEMP_ROOT/inputs"
+
+cat >"$TEMP_ROOT/inputs/run-ansible.sh" <<'RUNNER'
+#!/bin/sh
+# Run Ansible from the infra tree so the committed roles_path resolves.
+set -eu
+cd /workspace/infra
+exec ansible-playbook "$@"
+RUNNER
+chmod 0700 "$TEMP_ROOT/inputs/run-ansible.sh"
+
+"$SCRIPT_DIR/controller" exec python3 infra/inventories/host_baseline.py \
+  --root /workspace render \
+  --limit "$LIMIT" \
+  --address "$ADDRESS" \
+  --stage converged \
+  --identity-file "$CONTROLLER_IDENTITY" \
+  --admin-identity-file "$CONTROLLER_ADMIN_IDENTITY" \
+  --known-hosts-file "$CONTROLLER_KNOWN_HOSTS" \
+  --output - >"$TEMP_ROOT/inputs/inventory.yml"
+chmod 0600 "$TEMP_ROOT/inputs/inventory.yml"
+
+ANSIBLE_ARGS=(
+  --inventory "$CONTROLLER_INPUTS/inventory.yml"
+  --limit "$LIMIT"
+  --extra-vars "dholbeat_expected_host=$LIMIT"
+  --extra-vars "dholbeat_expected_role=$HOST_ROLE"
+)
+if [ -n "$RELEASE_TAG" ]; then
+  ANSIBLE_ARGS+=(--extra-vars "dholbeat_expected_release_tag=$RELEASE_TAG")
+fi
+ANSIBLE_ARGS+=(playbooks/verify.yml)
+
+printf '\n==> verifying %s without changing desired state\n' "$LIMIT"
+set +e
+"$SCRIPT_DIR/controller" exec-ssh \
+  --known-hosts ".artifacts/$SESSION_NAME/known_hosts" \
+  --identity "$IDENTITY_FILE" \
+  --admin-identity "$ADMIN_IDENTITY_FILE" \
+  --inputs "$TEMP_ROOT/inputs" \
+  --confirm production-host \
+  sh "$CONTROLLER_INPUTS/run-ansible.sh" "${ANSIBLE_ARGS[@]}" \
+  >"$TEMP_ROOT/verify.raw" 2>&1
+VERIFY_STATUS=$?
+set -e
+
+RAW_BYTES="$(wc -c <"$TEMP_ROOT/verify.raw" | tr -d ' ')"
+if [ "$RAW_BYTES" -gt "$LOG_LIMIT_BYTES" ]; then
+  head -c "$LOG_LIMIT_BYTES" "$TEMP_ROOT/verify.raw" >"$TEMP_ROOT/verify.trimmed"
+  printf '\n[transcript truncated at %s bytes]\n' "$LOG_LIMIT_BYTES" >>"$TEMP_ROOT/verify.trimmed"
+  mv -- "$TEMP_ROOT/verify.trimmed" "$TEMP_ROOT/verify.raw"
+fi
+
+"$SCRIPT_DIR/controller" exec python3 scripts/lib/plan_document.py redact \
+  --redact "$ADDRESS" \
+  --redact "$IDENTITY_FILE" \
+  --redact "$ADMIN_IDENTITY_FILE" \
+  --redact "$KNOWN_HOSTS_FILE" \
+  <"$TEMP_ROOT/verify.raw" >"$ARTIFACT_ROOT/verify.log"
+chmod 0600 "$ARTIFACT_ROOT/verify.log"
+
+CHANGED="$(sed -n 's/.*changed=\([0-9][0-9]*\).*/\1/p' "$ARTIFACT_ROOT/verify.log" | tail -n 1)"
+printf '%s\n' \
+  'schema_version: 1' \
+  'document_type: infra-verify' \
+  "target_host_id: $LIMIT" \
+  "target_host_role: $HOST_ROLE" \
+  "release_tag: ${RELEASE_TAG:-none}" \
+  "exit_status: $VERIFY_STATUS" \
+  "reported_changed: ${CHANGED:-unknown}" \
+  >"$ARTIFACT_ROOT/summary.yml"
+dholbeat_assert_absent_from_evidence "$ARTIFACT_ROOT" "$ADDRESS" "$IDENTITY_FILE" \
+  "$ADMIN_IDENTITY_FILE" "$KNOWN_HOSTS_FILE"
+
+printf 'verification evidence: .artifacts/%s\n' "$ARTIFACT_NAME"
+if [ "$VERIFY_STATUS" -ne 0 ]; then
+  dholbeat_die "host verification failed for $LIMIT; see .artifacts/$ARTIFACT_NAME/verify.log"
+fi
+if [ -n "$CHANGED" ] && [ "$CHANGED" != "0" ]; then
+  dholbeat_die "verification is read-only but reported $CHANGED change(s); investigate before trusting this host"
+fi
+printf 'host verification passed: %s\n' "$LIMIT"

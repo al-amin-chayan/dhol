@@ -1,0 +1,14 @@
+---
+- ansible.builtin.import_playbook: bootstrap.yml
+
+- name: Record the reviewed release identity on the converged host
+  hosts: baseline_targets
+  become: true
+  gather_facts: false
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+    - name: Write and verify the redacted host runtime receipt
+      ansible.builtin.import_role:
+        name: release_receipt
+      tags: [release, receipt]

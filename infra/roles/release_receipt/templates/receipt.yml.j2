@@ -1,0 +1,17 @@
+# Redacted host runtime receipt written by scripts/infra-apply.
+# It records release identity and digests only: no credential, private address
+# override, decrypted value, database state, or plan body.
+schema_version: 1
+receipt_type: host-runtime
+release_id: {{ dholbeat_release.release_id | to_json }}
+git_commit: {{ dholbeat_release.git_commit | to_json }}
+tag: {{ dholbeat_release.tag | to_json }}
+host_id: {{ dholbeat_host_id | to_json }}
+host_role: {{ dholbeat_host_role | to_json }}
+applied_at: {{ release_receipt_applied_at | to_json }}
+toolchain_lock_sha256: {{ dholbeat_release.toolchain_lock_sha256 | to_json }}
+approved_plan_sha256: {{ dholbeat_release.approved_plan_sha256 | to_json }}
+applied_plan_sha256: {{ dholbeat_applied_plan_sha256 | to_json }}
+required_backup_snapshot_id: {{ dholbeat_release.required_backup_snapshot_id | to_json }}
+schema_versions: {{ dholbeat_release.schema_versions | to_json }}
+images: {{ dholbeat_release.images | to_json }}

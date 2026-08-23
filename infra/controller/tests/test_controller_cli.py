@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 import subprocess
 
+import pytest
+
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CONTROLLER = REPO_ROOT / "scripts/controller"
@@ -125,7 +127,10 @@ def test_exec_ssh_rejects_known_hosts_outside_artifacts(tmp_path: Path) -> None:
     assert "relative .artifacts/ path" in result.stderr
 
 
-def test_exec_ssh_requires_exact_confirmation(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "confirmation", ["", "host", "disposable", "production", "any-host", "DISPOSABLE-HOST"]
+)
+def test_exec_ssh_requires_a_declared_target_class(tmp_path: Path, confirmation: str) -> None:
     result = subprocess.run(
         [
             CONTROLLER,
@@ -133,7 +138,7 @@ def test_exec_ssh_requires_exact_confirmation(tmp_path: Path) -> None:
             "--known-hosts",
             ".artifacts/known-hosts",
             "--confirm",
-            "production-host",
+            confirmation,
             "true",
         ],
         cwd=tmp_path,
@@ -141,7 +146,51 @@ def test_exec_ssh_requires_exact_confirmation(tmp_path: Path) -> None:
         capture_output=True,
     )
     assert result.returncode != 0
-    assert "confirmation must be exactly: disposable-host" in result.stderr
+    assert "--confirm disposable-host or --confirm production-host" in result.stderr
+
+
+def test_exec_ssh_refuses_an_unknown_flag(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [CONTROLLER, "exec-ssh", "--known-hosts", ".artifacts/known-hosts", "--bogus", "true"],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode != 0
+    assert "unexpected exec-ssh argument: --bogus" in result.stderr
+
+
+def test_exec_ssh_requires_a_confirmation_at_all(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [CONTROLLER, "exec-ssh", "--known-hosts", ".artifacts/known-hosts", "true"],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode != 0
+    assert "--confirm disposable-host or --confirm production-host" in result.stderr
+
+
+@pytest.mark.parametrize("target_class", ["disposable-host", "production-host"])
+def test_exec_ssh_still_refuses_an_unavailable_known_hosts_file(
+    tmp_path: Path, target_class: str
+) -> None:
+    result = subprocess.run(
+        [
+            CONTROLLER,
+            "exec-ssh",
+            "--known-hosts",
+            ".artifacts/known-hosts",
+            "--confirm",
+            target_class,
+            "true",
+        ],
+        cwd=tmp_path,
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode != 0
+    assert "known-hosts file is unavailable" in result.stderr
 
 
 def agent_environment(**updates: str) -> dict[str, str]:
