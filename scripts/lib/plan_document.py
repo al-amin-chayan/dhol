@@ -94,20 +94,58 @@ def redact(text: str, literals: list[str]) -> str:
     return redacted
 
 
+DIFF_START_RE = re.compile(r"^(?:--- before|\+\+\+ after|@@ )")
+DIFF_BODY_RE = re.compile(r"^[-+ @\\]")
+
+
 def summarize_transcript(text: str) -> dict[str, Any]:
-    """Reduce an Ansible transcript to the ordered task outcomes that matter."""
+    """Reduce an Ansible transcript to the outcomes and diffs that must be reviewed.
+
+    Task names and counts alone are not an authorization: two different file,
+    package, or firewall deltas can hide under the same changed task. Every
+    ``--diff`` hunk is therefore captured verbatim (already redacted by the
+    caller) and bound to its task, so a changed host cannot reproduce an earlier
+    plan digest.
+    """
 
     current_task = ""
     changed_tasks: list[str] = []
     failed_tasks: list[str] = []
     unreachable_tasks: list[str] = []
+    diffs: list[dict[str, Any]] = []
+    diff_lines: list[str] = []
+    in_diff = False
+
+    def flush_diff() -> None:
+        nonlocal diff_lines, in_diff
+        if diff_lines:
+            diffs.append({"task": current_task, "hunk": list(diff_lines)})
+        diff_lines = []
+        in_diff = False
+
     for raw_line in text.splitlines():
         line = raw_line.rstrip()
-        header = TASK_HEADER_RE.match(line.strip())
+        stripped = line.strip()
+
+        header = TASK_HEADER_RE.match(stripped)
         if header is not None:
+            flush_diff()
             current_task = header.group("name")
             continue
-        status = STATUS_LINE_RE.match(line.strip())
+
+        if DIFF_START_RE.match(line):
+            if not in_diff:
+                flush_diff()
+            in_diff = True
+            diff_lines.append(line)
+            continue
+        if in_diff:
+            if stripped and DIFF_BODY_RE.match(line):
+                diff_lines.append(line)
+                continue
+            flush_diff()
+
+        status = STATUS_LINE_RE.match(stripped)
         if status is None or not current_task:
             continue
         outcome = status.group("status")
@@ -117,20 +155,45 @@ def summarize_transcript(text: str) -> dict[str, Any]:
             failed_tasks.append(current_task)
         elif outcome == "unreachable" and current_task not in unreachable_tasks:
             unreachable_tasks.append(current_task)
+    flush_diff()
 
     recap: dict[str, int] = {}
+    saw_recap = False
     for raw_line in text.splitlines():
         match = RECAP_RE.match(raw_line.strip())
         if match is None:
             continue
+        saw_recap = True
         for field in ("ok", "changed", "unreachable", "failed", "skipped", "rescued", "ignored"):
             recap[field] = recap.get(field, 0) + int(match.group(field))
     return {
         "recap": recap,
+        "recap_present": saw_recap,
         "changed_tasks": changed_tasks,
         "failed_tasks": failed_tasks,
         "unreachable_tasks": unreachable_tasks,
+        "diffs": sorted(diffs, key=lambda entry: (entry["task"], "\n".join(entry["hunk"]))),
     }
+
+
+def check_findings(summary: dict[str, Any], exit_status: int, plan_kind: str) -> list[str]:
+    """Reject a plan that cannot authorize anything.
+
+    A nonzero run, an unreachable host, a failed task, or a missing recap all
+    mean the reviewed delta is unknown. Approving such a plan would let a
+    repeatable failure reach founder confirmation.
+    """
+
+    findings: list[str] = []
+    if exit_status != 0:
+        findings.append(f"the {plan_kind} run exited {exit_status}; a failed plan authorizes nothing")
+    if not summary["recap_present"]:
+        findings.append("the transcript carries no play recap; the run did not complete")
+    if summary["unreachable_tasks"] or summary["recap"].get("unreachable", 0):
+        findings.append("the host was unreachable during the run")
+    if summary["failed_tasks"] or summary["recap"].get("failed", 0):
+        findings.append(f"tasks failed during the run: {summary['failed_tasks']}")
+    return findings
 
 
 def host_secret_scope(root: Path, host_id: str) -> list[dict[str, Any]]:
@@ -214,6 +277,16 @@ def build_plan(arguments: argparse.Namespace) -> tuple[dict[str, Any], list[str]
             )
 
     contract_payload = json.loads(arguments.contract.read_text(encoding="utf-8"))
+    findings.extend(check_findings(summary, arguments.ansible_status, arguments.plan_kind))
+
+    tofu = opentofu_scope(root)
+    if tofu["state"] == "present" and not arguments.opentofu_plan_sha256:
+        findings.append(
+            "infra/tofu: committed OpenTofu declarations exist but no reviewed plan digest "
+            "was bound; the external-state delta must be planned before apply"
+        )
+    if arguments.opentofu_plan_sha256:
+        tofu = dict(tofu, plan_sha256=arguments.opentofu_plan_sha256)
 
     plan = {
         "schema_version": 1,
@@ -221,7 +294,9 @@ def build_plan(arguments: argparse.Namespace) -> tuple[dict[str, Any], list[str]
         "target_host_id": arguments.limit,
         "target_host_role": baseline["host_role"],
         "target_environment": baseline["target_environment"],
-        "playbook": arguments.playbook,
+        "plan_kind": arguments.plan_kind,
+        "planned_playbook": arguments.playbook,
+        "applied_playbook": arguments.applied_playbook,
         "stage": arguments.stage,
         "reviewed_input": {
             "git_commit": arguments.git_commit,
@@ -248,14 +323,18 @@ def build_plan(arguments: argparse.Namespace) -> tuple[dict[str, Any], list[str]
             "decrypted_to_disk": False,
         },
         "compose_stacks": stacks,
-        "opentofu": opentofu_scope(root),
-        "ansible_check": {
-            "mode": "check-diff",
+        "opentofu": tofu,
+        "ansible_run": {
+            "mode": arguments.plan_kind,
             "exit_status": arguments.ansible_status,
             "recap": summary["recap"],
             "changed_tasks": summary["changed_tasks"],
             "failed_tasks": summary["failed_tasks"],
             "unreachable_tasks": summary["unreachable_tasks"],
+            "diffs": summary["diffs"],
+            "transcript_sha256": sha256_text(
+                arguments.ansible_log.read_text(encoding="utf-8", errors="replace")
+            ),
         },
         "cost": {
             "monthly_usd": baseline["provider"]["monthly_cost_usd"],
@@ -274,6 +353,8 @@ def main() -> None:
     render.add_argument("--root", type=Path, required=True)
     render.add_argument("--limit", required=True)
     render.add_argument("--playbook", required=True)
+    render.add_argument("--applied-playbook", required=True)
+    render.add_argument("--plan-kind", required=True, choices=["bootstrap-preflight", "check-diff"])
     render.add_argument("--stage", required=True)
     render.add_argument("--git-commit", required=True)
     render.add_argument("--worktree-clean", type=lambda value: value == "true", required=True)
@@ -286,12 +367,29 @@ def main() -> None:
     render.add_argument("--ansible-status", type=int, required=True)
     render.add_argument("--sops-canary", required=True)
     render.add_argument("--compose-render", action="append", default=[])
+    render.add_argument("--opentofu-plan-sha256", default="")
     render.add_argument("--redact", action="append", default=[])
+
+    scope = subparsers.add_parser(
+        "compose-scope", help="list the Compose stacks this host owns, failing on an unowned stack"
+    )
+    scope.add_argument("--root", type=Path, required=True)
+    scope.add_argument("--limit", required=True)
 
     scrub = subparsers.add_parser("redact", help="redact a captured transcript in place")
     scrub.add_argument("--redact", action="append", default=[])
 
     arguments = parser.parse_args()
+
+    if arguments.command == "compose-scope":
+        stacks, findings = compose_scope(arguments.root.resolve(), arguments.limit)
+        if findings:
+            for finding in findings:
+                print(f"plan failure: {finding}", file=sys.stderr)
+            raise SystemExit(1)
+        for stack in stacks:
+            print(stack["stack_id"])
+        return
 
     if arguments.command == "redact":
         sys.stdout.write(redact(sys.stdin.read(), arguments.redact))

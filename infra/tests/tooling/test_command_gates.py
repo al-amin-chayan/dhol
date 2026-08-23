@@ -254,3 +254,175 @@ def test_verify_refuses_an_unsafe_artifact_suffix(suffix: str, tmp_path: Path) -
     )
     assert completed.returncode != 0
     assert "lowercase letters" in completed.stderr
+
+
+# --- Repository-contained private key material, resolved rather than compared ---
+
+@pytest.mark.parametrize("command", [PLAN, VERIFY])
+@pytest.mark.parametrize(
+    "identity",
+    [
+        ".artifacts/id_target",
+        "infra/../.artifacts/id_target",
+        "./scripts/../.artifacts/nested/id_target",
+        "infra/inventories/id_target",
+    ],
+)
+def test_a_relative_or_traversing_repository_identity_is_refused(
+    command: Path, identity: str, tmp_path: Path
+) -> None:
+    """A lexical prefix check would pass every one of these."""
+
+    _, known_hosts = local_inputs(tmp_path)
+    completed = run(
+        [
+            command,
+            "--limit",
+            ANY_HOST,
+            "--address",
+            "203.0.113.9",
+            "--identity-file",
+            identity,
+            "--known-hosts-file",
+            known_hosts,
+        ],
+        cwd=ROOT,
+    )
+    assert completed.returncode != 0
+    assert "outside the repository" in completed.stderr
+
+
+@pytest.mark.parametrize("command", [PLAN, VERIFY])
+def test_an_identity_reached_through_a_symlinked_parent_is_refused(
+    command: Path, tmp_path: Path
+) -> None:
+    _, known_hosts = local_inputs(tmp_path)
+    link = tmp_path / "link"
+    link.symlink_to(ROOT)
+    completed = run(
+        [
+            command,
+            "--limit",
+            ANY_HOST,
+            "--address",
+            "203.0.113.9",
+            "--identity-file",
+            str(link / ".artifacts" / "id_target"),
+            "--known-hosts-file",
+            known_hosts,
+        ]
+    )
+    assert completed.returncode != 0
+    assert "outside the repository" in completed.stderr
+
+
+@pytest.mark.parametrize("command", [PLAN, VERIFY])
+def test_a_symlinked_identity_file_is_refused(command: Path, tmp_path: Path) -> None:
+    identity, known_hosts = local_inputs(tmp_path)
+    link = tmp_path / "linked_id"
+    link.symlink_to(identity)
+    completed = run(
+        [
+            command,
+            "--limit",
+            ANY_HOST,
+            "--address",
+            "203.0.113.9",
+            "--identity-file",
+            str(link),
+            "--known-hosts-file",
+            known_hosts,
+        ]
+    )
+    assert completed.returncode != 0
+    assert "must not be a symbolic link" in completed.stderr
+
+
+@pytest.mark.parametrize("command", [PLAN, VERIFY])
+def test_a_directory_is_not_accepted_as_an_identity(command: Path, tmp_path: Path) -> None:
+    _, known_hosts = local_inputs(tmp_path)
+    directory = tmp_path / "keydir"
+    directory.mkdir()
+    completed = run(
+        [
+            command,
+            "--limit",
+            ANY_HOST,
+            "--address",
+            "203.0.113.9",
+            "--identity-file",
+            str(directory),
+            "--known-hosts-file",
+            known_hosts,
+        ]
+    )
+    assert completed.returncode != 0
+    assert "must be a regular file" in completed.stderr
+
+
+def test_controller_exec_ssh_refuses_a_repository_relative_identity() -> None:
+    controller = ROOT / "scripts/controller"
+    completed = run(
+        [
+            controller,
+            "exec-ssh",
+            "--known-hosts",
+            ".artifacts/known_hosts",
+            "--identity",
+            ".artifacts/id_target",
+            "--confirm",
+            "production-host",
+            "true",
+        ],
+        cwd=ROOT,
+    )
+    assert completed.returncode != 0
+    assert "identity file inside the repository" in completed.stderr
+
+
+def test_controller_exec_ssh_refuses_an_identity_behind_a_symlinked_parent(
+    tmp_path: Path,
+) -> None:
+    controller = ROOT / "scripts/controller"
+    link = tmp_path / "link"
+    link.symlink_to(ROOT)
+    completed = run(
+        [
+            controller,
+            "exec-ssh",
+            "--known-hosts",
+            ".artifacts/known_hosts",
+            "--identity",
+            str(link / ".artifacts" / "id_target"),
+            "--confirm",
+            "production-host",
+            "true",
+        ]
+    )
+    assert completed.returncode != 0
+    assert "identity file inside the repository" in completed.stderr
+
+
+# --- Stage lifecycle ---
+
+@pytest.mark.parametrize("command", [PLAN, APPLY])
+def test_an_unsupported_stage_is_refused(command: Path, tmp_path: Path) -> None:
+    identity, known_hosts = local_inputs(tmp_path)
+    arguments = [
+        command,
+        "--limit",
+        ANY_HOST,
+        "--address",
+        "203.0.113.9",
+        "--identity-file",
+        identity,
+        "--known-hosts-file",
+        known_hosts,
+        "--stage",
+        "first-contact",
+    ]
+    if command == APPLY:
+        arguments += ["--release", ANY_TAG, "--approved-plan", "/tmp/plan.yml"]
+    completed = run(arguments)
+    assert completed.returncode != 0
+    assert "--stage must be bootstrap or converged" in completed.stderr

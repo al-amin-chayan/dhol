@@ -11,56 +11,73 @@ CONTROLLER_IDENTITY=/tmp/controller-home/.ssh/id_target
 CONTROLLER_KNOWN_HOSTS=/tmp/controller-home/.ssh/known_hosts
 CONTROLLER_INPUTS=/tmp/controller-inputs
 LOG_LIMIT_BYTES=8388608
+APPLIED_PLAYBOOK="playbooks/site.yml"
 
 LIMIT=""
 ADDRESS=""
 IDENTITY_FILE=""
 KNOWN_HOSTS_FILE=""
-RELEASE_DOCUMENT=""
+OPENTOFU_PLAN=""
 STAGE=bootstrap
 REHEARSAL=false
 ARTIFACT_SUFFIX=""
 TEMP_ROOT=""
+SESSION_ROOT=""
 
 usage() {
   cat <<'EOF'
 Usage: scripts/infra-plan --limit <host> --address <ip> --identity-file <path>
                           --known-hosts-file <path>
                           [--stage bootstrap|converged]
-                          [--release-document <path>] [--rehearsal]
+                          [--opentofu-plan <path>] [--rehearsal]
+                          [--artifact-suffix <slug>]
 
 Produce a redacted, reproducible plan for exactly one production host.
 
-The command reads live state only. It runs every read-only repository check,
-renders the operator inventory from committed manifests plus the address you
-supply, decrypts nothing to disk, runs Ansible in check/diff mode against the
-named host, and writes a normalized plan document whose SHA-256 is the digest a
-release must approve.
+The command reads live state only and writes a normalized plan document whose
+SHA-256 is the digest a release must approve.
+
+Two stages exist because a bare host cannot produce a meaningful check-mode
+diff: ufw, Docker, and chrony are absent, so the probes those roles depend on
+cannot run.
+
+  --stage bootstrap  connects as the provider bootstrap identity and runs the
+                     read-only preflight. The reviewable plan is the declared
+                     contract validated against the host's real facts plus the
+                     current package, directory, listener, and firewall state.
+
+  --stage converged  connects as the named administrator and runs Ansible in
+                     check/diff mode. Every diff hunk is bound into the plan
+                     document, so a host that changes cannot reproduce an
+                     earlier digest.
+
+Either way the plan fails closed: a nonzero run, an unreachable host, a failed
+task, or a missing recap produces no approvable digest.
 
 Required arguments:
   --limit             exact host ID that also owns a committed baseline contract
   --address           literal IP address of that host; never committed to Git
   --identity-file     private key for this connection; must live outside the
-                      repository
-  --known-hosts-file  pre-verified host key; a new key is never auto-trusted
+                      repository, with symlinked parents resolved
+  --known-hosts-file  pre-verified host key; a new key is never auto-trusted.
+                      Only a redacted fingerprint receipt is retained.
 
 Options:
-  --stage             bootstrap connects as the provider bootstrap identity;
-                      converged connects as the named administrator
-                      (default: bootstrap)
-  --release-document  plan infra/playbooks/site.yml, including the release
-                      receipt, against this reviewed release document
+  --opentofu-plan     saved OpenTofu plan to bind when infra/tofu exists
   --rehearsal         allow a commit that is not yet reachable from main. The
                       plan is marked rehearsal and scripts/infra-apply refuses
                       it.
-  --artifact-suffix   distinguish this run's evidence directory from an earlier
-                      plan for the same host, stage, and commit
+  --artifact-suffix   distinguish this run's evidence from an earlier plan for
+                      the same host, stage, and commit
 
 Evidence is written under .artifacts/ and is never a repository input.
 EOF
 }
 
 cleanup() {
+  if [ -n "$SESSION_ROOT" ] && [ -d "$SESSION_ROOT" ]; then
+    rm -rf -- "$SESSION_ROOT"
+  fi
   if [ -n "$TEMP_ROOT" ] && [ -d "$TEMP_ROOT" ]; then
     rm -rf -- "$TEMP_ROOT"
   fi
@@ -74,7 +91,7 @@ while [ "$#" -gt 0 ]; do
     --address) [ "$#" -ge 2 ] || dholbeat_die "--address requires an IP address"; ADDRESS="$2"; shift 2 ;;
     --identity-file) [ "$#" -ge 2 ] || dholbeat_die "--identity-file requires a path"; IDENTITY_FILE="$2"; shift 2 ;;
     --known-hosts-file) [ "$#" -ge 2 ] || dholbeat_die "--known-hosts-file requires a path"; KNOWN_HOSTS_FILE="$2"; shift 2 ;;
-    --release-document) [ "$#" -ge 2 ] || dholbeat_die "--release-document requires a path"; RELEASE_DOCUMENT="$2"; shift 2 ;;
+    --opentofu-plan) [ "$#" -ge 2 ] || dholbeat_die "--opentofu-plan requires a path"; OPENTOFU_PLAN="$2"; shift 2 ;;
     --stage) [ "$#" -ge 2 ] || dholbeat_die "--stage requires bootstrap or converged"; STAGE="$2"; shift 2 ;;
     --rehearsal) REHEARSAL=true; shift ;;
     --artifact-suffix) [ "$#" -ge 2 ] || dholbeat_die "--artifact-suffix requires a slug"; ARTIFACT_SUFFIX="$2"; shift 2 ;;
@@ -87,16 +104,20 @@ done
 [ -n "$IDENTITY_FILE" ] || dholbeat_die "--identity-file is required"
 [ -n "$KNOWN_HOSTS_FILE" ] || dholbeat_die "--known-hosts-file is required; host keys are never auto-trusted"
 case "$STAGE" in
-  bootstrap|converged) ;;
+  bootstrap) PLAN_KIND=bootstrap-preflight; PLANNED_PLAYBOOK="playbooks/preflight.yml" ;;
+  converged) PLAN_KIND=check-diff; PLANNED_PLAYBOOK="playbooks/bootstrap.yml" ;;
   *) dholbeat_die "--stage must be bootstrap or converged" ;;
+esac
+case "$ARTIFACT_SUFFIX" in
+  "") ;;
+  *[!a-z0-9-]*) dholbeat_die "--artifact-suffix must be lowercase letters, digits, and hyphens" ;;
 esac
 [ -z "${GITHUB_ACTIONS:-}${CI:-}" ] \
   || dholbeat_die "planning against a production host is never permitted in CI"
 
-case "$IDENTITY_FILE" in
-  "$REPO_ROOT"/*) dholbeat_die "the connection identity must live outside the repository" ;;
-esac
-[ -f "$IDENTITY_FILE" ] || dholbeat_die "identity file is unavailable: $IDENTITY_FILE"
+IDENTITY_FILE="$(dholbeat_assert_outside_repository "$REPO_ROOT" "$IDENTITY_FILE" "connection identity")"
+KNOWN_HOSTS_FILE="$(dholbeat_canonical_path "$KNOWN_HOSTS_FILE")"
+[ ! -L "$KNOWN_HOSTS_FILE" ] || dholbeat_die "the known-hosts file must not be a symbolic link"
 [ -f "$KNOWN_HOSTS_FILE" ] || dholbeat_die "known-hosts file is unavailable: $KNOWN_HOSTS_FILE"
 [ -s "$KNOWN_HOSTS_FILE" ] || dholbeat_die "known-hosts file is empty; verify the host key first"
 
@@ -122,16 +143,6 @@ if [ "$REACHABLE_FROM_MAIN" != true ] && [ "$REHEARSAL" != true ]; then
   dholbeat_die "commit $GIT_COMMIT is not reachable from protected main; use --rehearsal for a non-authorizing plan"
 fi
 
-PLAYBOOK_LABEL="playbooks/bootstrap.yml"
-if [ -n "$RELEASE_DOCUMENT" ]; then
-  [ -f "$RELEASE_DOCUMENT" ] || dholbeat_die "release document is unavailable: $RELEASE_DOCUMENT"
-  PLAYBOOK_LABEL="playbooks/site.yml"
-fi
-
-case "$ARTIFACT_SUFFIX" in
-  "") ;;
-  *[!a-z0-9-]*) dholbeat_die "--artifact-suffix must be lowercase letters, digits, and hyphens" ;;
-esac
 ARTIFACT_NAME="infra-plan-$LIMIT-$STAGE-${GIT_COMMIT:0:12}${ARTIFACT_SUFFIX:+-$ARTIFACT_SUFFIX}"
 ARTIFACT_ROOT="$REPO_ROOT/.artifacts/$ARTIFACT_NAME"
 [ ! -L "$REPO_ROOT/.artifacts" ] || dholbeat_die ".artifacts must not be a symbolic link"
@@ -139,11 +150,20 @@ ARTIFACT_ROOT="$REPO_ROOT/.artifacts/$ARTIFACT_NAME"
   || dholbeat_die "plan evidence already exists; inspect and remove: .artifacts/$ARTIFACT_NAME"
 mkdir -p "$ARTIFACT_ROOT"
 chmod 0700 "$ARTIFACT_ROOT"
+
+# Operational host-key material stays in a bounded session directory that is
+# removed on exit. Only a redacted fingerprint receipt survives as evidence.
+SESSION_NAME="session-plan-$$"
+SESSION_ROOT="$REPO_ROOT/.artifacts/$SESSION_NAME"
+[ ! -e "$SESSION_ROOT" ] || dholbeat_die "a stale plan session directory exists: .artifacts/$SESSION_NAME"
+mkdir -p "$SESSION_ROOT"
+chmod 0700 "$SESSION_ROOT"
+install -m 0600 "$KNOWN_HOSTS_FILE" "$SESSION_ROOT/known_hosts"
+
 TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/dholbeat-infra-plan.XXXXXX")"
 chmod 0700 "$TEMP_ROOT"
 mkdir -p "$TEMP_ROOT/inputs"
 chmod 0700 "$TEMP_ROOT/inputs"
-install -m 0600 "$KNOWN_HOSTS_FILE" "$ARTIFACT_ROOT/known_hosts"
 
 cat >"$TEMP_ROOT/inputs/run-ansible.sh" <<'RUNNER'
 #!/bin/sh
@@ -179,6 +199,47 @@ printf '\n==> operator inventory (the address stays local)\n'
   --known-hosts-file "$CONTROLLER_KNOWN_HOSTS" \
   --output - >"$TEMP_ROOT/inputs/inventory.yml"
 chmod 0600 "$TEMP_ROOT/inputs/inventory.yml"
+grep -q "ansible_host: $ADDRESS" "$TEMP_ROOT/inputs/inventory.yml" \
+  || dholbeat_die "the rendered inventory does not target the supplied address"
+
+printf '\n==> Compose scope for %s\n' "$LIMIT"
+COMPOSE_STACKS="$("$SCRIPT_DIR/controller" exec python3 scripts/lib/plan_document.py compose-scope \
+  --root /workspace --limit "$LIMIT")"
+COMPOSE_RENDER_ARGS=()
+while IFS= read -r stack_id; do
+  [ -n "$stack_id" ] || continue
+  printf 'rendering Compose configuration: %s\n' "$stack_id"
+  compose_file=""
+  for candidate in "stack/$stack_id/compose.yml" "stack/$stack_id/compose.yaml"; do
+    if [ -f "$REPO_ROOT/$candidate" ]; then
+      compose_file="$candidate"
+      break
+    fi
+  done
+  [ -n "$compose_file" ] || dholbeat_die "no Compose file found for owned stack: $stack_id"
+  compose_digest="$(
+    "$SCRIPT_DIR/controller" exec docker-compose --file "$compose_file" config \
+      | "$SCRIPT_DIR/controller" exec python3 -c \
+        'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'
+  )" || dholbeat_die "Compose configuration could not be rendered for stack: $stack_id"
+  COMPOSE_RENDER_ARGS+=(--compose-render "$stack_id=$compose_digest")
+done <<EOF
+$COMPOSE_STACKS
+EOF
+
+OPENTOFU_ARGS=()
+if [ -d "$REPO_ROOT/infra/tofu" ]; then
+  printf '\n==> OpenTofu scope\n'
+  "$SCRIPT_DIR/controller" exec tofu fmt -check -recursive infra/tofu \
+    || dholbeat_die "committed OpenTofu declarations are not formatted"
+  [ -n "$OPENTOFU_PLAN" ] \
+    || dholbeat_die "infra/tofu exists; supply --opentofu-plan so the external-state delta is bound"
+  OPENTOFU_PLAN="$(dholbeat_canonical_path "$OPENTOFU_PLAN")"
+  [ -f "$OPENTOFU_PLAN" ] || dholbeat_die "OpenTofu plan is unavailable: $OPENTOFU_PLAN"
+  OPENTOFU_ARGS+=(--opentofu-plan-sha256 "$(dholbeat_sha256_path "$OPENTOFU_PLAN")")
+elif [ -n "$OPENTOFU_PLAN" ]; then
+  dholbeat_die "--opentofu-plan was supplied but no OpenTofu declarations are committed"
+fi
 
 SOPS_CANARY=skipped-no-key
 if [ -n "${SOPS_AGE_KEY:-}" ]; then
@@ -193,51 +254,59 @@ fi
 ANSIBLE_ARGS=(
   --inventory "$CONTROLLER_INPUTS/inventory.yml"
   --limit "$LIMIT"
-  --check
-  --diff
+)
+if [ "$PLAN_KIND" = check-diff ]; then
+  ANSIBLE_ARGS+=(--check --diff)
+fi
+ANSIBLE_ARGS+=(
   --extra-vars "dholbeat_expected_host=$LIMIT"
   --extra-vars "dholbeat_expected_role=$HOST_ROLE"
+  "$PLANNED_PLAYBOOK"
 )
-if [ -n "$RELEASE_DOCUMENT" ]; then
-  "$SCRIPT_DIR/controller" exec python3 scripts/lib/release_vars.py \
-    <"$RELEASE_DOCUMENT" >"$TEMP_ROOT/inputs/release-vars.yml"
-  chmod 0600 "$TEMP_ROOT/inputs/release-vars.yml"
-  install -m 0600 "$RELEASE_DOCUMENT" "$ARTIFACT_ROOT/release.yml"
-  ANSIBLE_ARGS+=(--extra-vars "@$CONTROLLER_INPUTS/release-vars.yml")
-fi
-ANSIBLE_ARGS+=("$PLAYBOOK_LABEL")
 
-printf '\n==> Ansible check/diff against %s\n' "$LIMIT"
+printf '\n==> %s against %s\n' "$PLAN_KIND" "$LIMIT"
 set +e
 "$SCRIPT_DIR/controller" exec-ssh \
-  --known-hosts ".artifacts/$ARTIFACT_NAME/known_hosts" \
+  --known-hosts ".artifacts/$SESSION_NAME/known_hosts" \
   --identity "$IDENTITY_FILE" \
   --inputs "$TEMP_ROOT/inputs" \
   --confirm production-host \
   sh "$CONTROLLER_INPUTS/run-ansible.sh" "${ANSIBLE_ARGS[@]}" \
-  >"$TEMP_ROOT/ansible-check.raw" 2>&1
+  >"$TEMP_ROOT/ansible.raw" 2>&1
 ANSIBLE_STATUS=$?
 set -e
 
-RAW_BYTES="$(wc -c <"$TEMP_ROOT/ansible-check.raw" | tr -d ' ')"
+RAW_BYTES="$(wc -c <"$TEMP_ROOT/ansible.raw" | tr -d ' ')"
 if [ "$RAW_BYTES" -gt "$LOG_LIMIT_BYTES" ]; then
-  head -c "$LOG_LIMIT_BYTES" "$TEMP_ROOT/ansible-check.raw" >"$TEMP_ROOT/ansible-check.trimmed"
-  printf '\n[transcript truncated at %s bytes]\n' "$LOG_LIMIT_BYTES" >>"$TEMP_ROOT/ansible-check.trimmed"
-  mv -- "$TEMP_ROOT/ansible-check.trimmed" "$TEMP_ROOT/ansible-check.raw"
+  head -c "$LOG_LIMIT_BYTES" "$TEMP_ROOT/ansible.raw" >"$TEMP_ROOT/ansible.trimmed"
+  printf '\n[transcript truncated at %s bytes]\n' "$LOG_LIMIT_BYTES" >>"$TEMP_ROOT/ansible.trimmed"
+  mv -- "$TEMP_ROOT/ansible.trimmed" "$TEMP_ROOT/ansible.raw"
 fi
 
 "$SCRIPT_DIR/controller" exec python3 scripts/lib/plan_document.py redact \
   --redact "$ADDRESS" \
   --redact "$IDENTITY_FILE" \
   --redact "$KNOWN_HOSTS_FILE" \
-  <"$TEMP_ROOT/ansible-check.raw" >"$ARTIFACT_ROOT/ansible-check.log"
-chmod 0600 "$ARTIFACT_ROOT/ansible-check.log"
+  <"$TEMP_ROOT/ansible.raw" >"$ARTIFACT_ROOT/ansible-run.log"
+chmod 0600 "$ARTIFACT_ROOT/ansible-run.log"
+
+# Retain proof that a specific host key was pinned, without the address.
+"$SCRIPT_DIR/controller" exec-ssh \
+  --known-hosts ".artifacts/$SESSION_NAME/known_hosts" \
+  --identity "$IDENTITY_FILE" \
+  --inputs "$TEMP_ROOT/inputs" \
+  --confirm production-host \
+  ssh-keygen -lf "$CONTROLLER_KNOWN_HOSTS" \
+  | awk '{print $1, $2, $4}' >"$ARTIFACT_ROOT/known-hosts-fingerprint.txt"
+chmod 0600 "$ARTIFACT_ROOT/known-hosts-fingerprint.txt"
 
 printf '\n==> redacted plan document\n'
 "$SCRIPT_DIR/controller" exec python3 scripts/lib/plan_document.py render \
   --root /workspace \
   --limit "$LIMIT" \
-  --playbook "$PLAYBOOK_LABEL" \
+  --playbook "$PLANNED_PLAYBOOK" \
+  --applied-playbook "$APPLIED_PLAYBOOK" \
+  --plan-kind "$PLAN_KIND" \
   --stage "$STAGE" \
   --git-commit "$GIT_COMMIT" \
   --worktree-clean "$WORKTREE_CLEAN" \
@@ -246,26 +315,28 @@ printf '\n==> redacted plan document\n'
   --controller-image-id "$CONTROLLER_IMAGE_ID" \
   --controller-source-lock "$CONTROLLER_SOURCE_LOCK" \
   --contract "/workspace/.artifacts/$ARTIFACT_NAME/contract.json" \
-  --ansible-log "/workspace/.artifacts/$ARTIFACT_NAME/ansible-check.log" \
+  --ansible-log "/workspace/.artifacts/$ARTIFACT_NAME/ansible-run.log" \
   --ansible-status "$ANSIBLE_STATUS" \
   --sops-canary "$SOPS_CANARY" \
-  >"$ARTIFACT_ROOT/plan.yml"
+  ${COMPOSE_RENDER_ARGS[@]+"${COMPOSE_RENDER_ARGS[@]}"} \
+  ${OPENTOFU_ARGS[@]+"${OPENTOFU_ARGS[@]}"} \
+  >"$ARTIFACT_ROOT/plan.yml" \
+  || dholbeat_die "the plan authorizes nothing; see .artifacts/$ARTIFACT_NAME/ansible-run.log"
 chmod 0600 "$ARTIFACT_ROOT/plan.yml"
+
+dholbeat_assert_absent_from_evidence "$ARTIFACT_ROOT" "$ADDRESS" "$IDENTITY_FILE" "$KNOWN_HOSTS_FILE"
 
 PLAN_DIGEST="$(dholbeat_sha256_path "$ARTIFACT_ROOT/plan.yml")"
 printf '%s\n' "$PLAN_DIGEST" >"$ARTIFACT_ROOT/plan.sha256"
 
 printf '\n'
 printf 'plan host            : %s (%s)\n' "$LIMIT" "$HOST_ROLE"
-printf 'plan playbook        : %s\n' "$PLAYBOOK_LABEL"
+printf 'plan kind            : %s\n' "$PLAN_KIND"
+printf 'planned playbook     : %s\n' "$PLANNED_PLAYBOOK"
+printf 'applied playbook     : %s\n' "$APPLIED_PLAYBOOK"
 printf 'plan commit          : %s\n' "$GIT_COMMIT"
 printf 'reachable from main  : %s\n' "$REACHABLE_FROM_MAIN"
 printf 'rehearsal only       : %s\n' "$REHEARSAL"
-printf 'ansible check status : %s\n' "$ANSIBLE_STATUS"
 printf 'approved_plan_sha256 : %s\n' "$PLAN_DIGEST"
 printf 'evidence             : .artifacts/%s\n' "$ARTIFACT_NAME"
 printf '\nReview .artifacts/%s/plan.yml before recording this digest in a release.\n' "$ARTIFACT_NAME"
-
-if [ "$ANSIBLE_STATUS" -ne 0 ]; then
-  printf '\nThe Ansible check run did not complete cleanly; the plan records that status.\n' >&2
-fi

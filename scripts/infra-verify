@@ -19,6 +19,7 @@ KNOWN_HOSTS_FILE=""
 RELEASE_TAG=""
 ARTIFACT_SUFFIX=""
 TEMP_ROOT=""
+SESSION_ROOT=""
 
 usage() {
   cat <<'EOF'
@@ -40,6 +41,9 @@ EOF
 }
 
 cleanup() {
+  if [ -n "$SESSION_ROOT" ] && [ -d "$SESSION_ROOT" ]; then
+    rm -rf -- "$SESSION_ROOT"
+  fi
   if [ -n "$TEMP_ROOT" ] && [ -d "$TEMP_ROOT" ]; then
     rm -rf -- "$TEMP_ROOT"
   fi
@@ -70,10 +74,9 @@ esac
 [ -z "${GITHUB_ACTIONS:-}${CI:-}" ] \
   || dholbeat_die "probing a production host is never permitted in CI"
 
-case "$IDENTITY_FILE" in
-  "$REPO_ROOT"/*) dholbeat_die "the connection identity must live outside the repository" ;;
-esac
-[ -f "$IDENTITY_FILE" ] || dholbeat_die "identity file is unavailable: $IDENTITY_FILE"
+IDENTITY_FILE="$(dholbeat_assert_outside_repository "$REPO_ROOT" "$IDENTITY_FILE" "connection identity")"
+KNOWN_HOSTS_FILE="$(dholbeat_canonical_path "$KNOWN_HOSTS_FILE")"
+[ ! -L "$KNOWN_HOSTS_FILE" ] || dholbeat_die "the known-hosts file must not be a symbolic link"
 [ -s "$KNOWN_HOSTS_FILE" ] || dholbeat_die "known-hosts file is missing or empty: $KNOWN_HOSTS_FILE"
 
 BASELINE_RELATIVE="infra/inventories/production/baseline/$LIMIT.yml"
@@ -89,11 +92,17 @@ ARTIFACT_ROOT="$REPO_ROOT/.artifacts/$ARTIFACT_NAME"
   || dholbeat_die "verification evidence already exists; inspect and remove: .artifacts/$ARTIFACT_NAME"
 mkdir -p "$ARTIFACT_ROOT"
 chmod 0700 "$ARTIFACT_ROOT"
+
+SESSION_NAME="session-verify-$$"
+SESSION_ROOT="$REPO_ROOT/.artifacts/$SESSION_NAME"
+[ ! -e "$SESSION_ROOT" ] || dholbeat_die "a stale verify session directory exists: .artifacts/$SESSION_NAME"
+mkdir -p "$SESSION_ROOT"
+chmod 0700 "$SESSION_ROOT"
+install -m 0600 "$KNOWN_HOSTS_FILE" "$SESSION_ROOT/known_hosts"
 TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/dholbeat-infra-verify.XXXXXX")"
 chmod 0700 "$TEMP_ROOT"
 mkdir -p "$TEMP_ROOT/inputs"
 chmod 0700 "$TEMP_ROOT/inputs"
-install -m 0600 "$KNOWN_HOSTS_FILE" "$ARTIFACT_ROOT/known_hosts"
 
 cat >"$TEMP_ROOT/inputs/run-ansible.sh" <<'RUNNER'
 #!/bin/sh
@@ -128,7 +137,7 @@ ANSIBLE_ARGS+=(playbooks/verify.yml)
 printf '\n==> verifying %s without changing desired state\n' "$LIMIT"
 set +e
 "$SCRIPT_DIR/controller" exec-ssh \
-  --known-hosts ".artifacts/$ARTIFACT_NAME/known_hosts" \
+  --known-hosts ".artifacts/$SESSION_NAME/known_hosts" \
   --identity "$IDENTITY_FILE" \
   --inputs "$TEMP_ROOT/inputs" \
   --confirm production-host \
@@ -161,6 +170,7 @@ printf '%s\n' \
   "exit_status: $VERIFY_STATUS" \
   "reported_changed: ${CHANGED:-unknown}" \
   >"$ARTIFACT_ROOT/summary.yml"
+dholbeat_assert_absent_from_evidence "$ARTIFACT_ROOT" "$ADDRESS" "$IDENTITY_FILE" "$KNOWN_HOSTS_FILE"
 
 printf 'verification evidence: .artifacts/%s\n' "$ARTIFACT_NAME"
 if [ "$VERIFY_STATUS" -ne 0 ]; then

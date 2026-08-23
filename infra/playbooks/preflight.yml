@@ -1,0 +1,110 @@
+---
+- name: Guard the exact production host boundary before any inspection
+  hosts: baseline_targets
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Require an explicit single-host boundary
+      ansible.builtin.assert:
+        that:
+          - dholbeat_expected_host is defined
+          - dholbeat_expected_role is defined
+          - ansible_play_hosts_all | length == 1
+          - inventory_hostname == dholbeat_expected_host
+          - dholbeat_host_id == dholbeat_expected_host
+          - dholbeat_host_role == dholbeat_expected_role
+          - baseline_target_environment == 'production'
+        fail_msg: >-
+          Refusing to run: this entry point inspects exactly one named production
+          host supplied through --limit and the rendered inventory.
+      tags: [always]
+
+# A bare host cannot produce a meaningful Ansible check-mode diff: ufw, Docker,
+# and chrony are not installed yet, so the probes those roles rely on cannot
+# run. The reviewable plan for a first bootstrap is therefore this read-only
+# preflight — the declared contract validated against the host's real facts,
+# plus the current state the convergence is about to replace.
+- name: Capture the read-only first-contact plan for a host
+  hosts: baseline_targets
+  become: true
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  vars_files:
+    - ../roles/base/defaults/main.yml
+    - ../roles/docker/defaults/main.yml
+  tasks:
+    - name: Validate every baseline gate against the host's real facts
+      ansible.builtin.import_role:
+        name: base
+        tasks_from: preflight
+      tags: [preflight]
+
+    - name: Prove the named administrator connection path before mutation is authorized
+      ansible.builtin.import_role:
+        name: base
+        tasks_from: connection_probe
+      when: dholbeat_stage == 'converged'
+      tags: [preflight, connection-safety]
+
+    - name: Record the packages the baseline will manage
+      ansible.builtin.command:
+        argv: "{{ ['dpkg-query', '--show', '--showformat=${db:Status-Abbrev}\\t${binary:Package}\\t${Version}\\n'] + (base_packages + (docker_packages.keys() | list) + ['ufw']) | sort }}"
+      changed_when: false
+      check_mode: false
+      failed_when: false
+      register: preflight_packages
+      tags: [preflight]
+
+    - name: Report the resolved package state
+      ansible.builtin.debug:
+        msg: "{{ preflight_packages.stdout_lines }}"
+      tags: [preflight]
+
+    - name: Record which catalogued baseline directories already exist
+      ansible.builtin.stat:
+        path: "{{ item.path }}"
+      loop: "{{ baseline_managed_directories }}"
+      loop_control:
+        label: "{{ item.path }}"
+      changed_when: false
+      register: preflight_directories
+      tags: [preflight]
+
+    - name: Report the catalogued directory state
+      ansible.builtin.debug:
+        msg: >-
+          {{ item.item.path }}
+          exists={{ item.stat.exists }}
+          mode={{ item.stat.mode | default('absent') }}
+          owner={{ item.stat.pw_name | default('absent') }}
+      loop: "{{ preflight_directories.results }}"
+      loop_control:
+        label: "{{ item.item.path }}"
+      tags: [preflight]
+
+    - name: Record the current listening sockets
+      ansible.builtin.command:
+        argv: [ss, --no-header, --listening, --numeric, --tcp, --udp]
+      changed_when: false
+      check_mode: false
+      register: preflight_listeners
+      tags: [preflight]
+
+    - name: Report the current listening sockets
+      ansible.builtin.debug:
+        msg: "{{ preflight_listeners.stdout_lines }}"
+      tags: [preflight]
+
+    - name: Record the current firewall state without changing it
+      ansible.builtin.command:
+        argv: [sh, -c, 'if command -v ufw >/dev/null 2>&1; then ufw status verbose; else printf "Status: not-installed\n"; fi']
+      changed_when: false
+      check_mode: false
+      register: preflight_firewall
+      tags: [preflight]
+
+    - name: Report the current firewall state
+      ansible.builtin.debug:
+        msg: "{{ preflight_firewall.stdout_lines }}"
+      tags: [preflight]

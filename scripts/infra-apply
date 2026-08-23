@@ -18,13 +18,15 @@ ADDRESS=""
 IDENTITY_FILE=""
 KNOWN_HOSTS_FILE=""
 APPROVED_PLAN=""
+STAGE=converged
 TEMP_ROOT=""
+SESSION_ROOT=""
 
 usage() {
   cat <<'EOF'
 Usage: scripts/infra-apply --limit <host> --release <tag> --address <ip>
                            --identity-file <path> --known-hosts-file <path>
-                           --approved-plan <path>
+                           --approved-plan <path> [--stage bootstrap|converged]
 
 Mutate exactly one production host, and only under a complete authorization.
 
@@ -40,12 +42,22 @@ Every one of these must hold or the command stops before touching the host:
     so a changed host or repository invalidates the approval;
   * the founder confirms interactively at the terminal.
 
+--stage must match the stage the approved plan was generated with, and selects
+only the identity used for first contact: bootstrap connects as the provider
+bootstrap login on a host whose named administrator does not exist yet, and
+converged connects as that administrator. Both stages converge the same
+infra/playbooks/site.yml, so the reviewed desired state never differs between
+them.
+
 After convergence the command independently re-reads /etc/dholbeat-release,
 validates it against the reviewed release, and runs scripts/infra-verify.
 EOF
 }
 
 cleanup() {
+  if [ -n "$SESSION_ROOT" ] && [ -d "$SESSION_ROOT" ]; then
+    rm -rf -- "$SESSION_ROOT"
+  fi
   if [ -n "$TEMP_ROOT" ] && [ -d "$TEMP_ROOT" ]; then
     rm -rf -- "$TEMP_ROOT"
   fi
@@ -61,6 +73,7 @@ while [ "$#" -gt 0 ]; do
     --identity-file) [ "$#" -ge 2 ] || dholbeat_die "--identity-file requires a path"; IDENTITY_FILE="$2"; shift 2 ;;
     --known-hosts-file) [ "$#" -ge 2 ] || dholbeat_die "--known-hosts-file requires a path"; KNOWN_HOSTS_FILE="$2"; shift 2 ;;
     --approved-plan) [ "$#" -ge 2 ] || dholbeat_die "--approved-plan requires a path"; APPROVED_PLAN="$2"; shift 2 ;;
+    --stage) [ "$#" -ge 2 ] || dholbeat_die "--stage requires bootstrap or converged"; STAGE="$2"; shift 2 ;;
     *) dholbeat_die "unexpected argument: $1" ;;
   esac
 done
@@ -71,14 +84,17 @@ done
 [ -n "$IDENTITY_FILE" ] || dholbeat_die "--identity-file is required"
 [ -n "$KNOWN_HOSTS_FILE" ] || dholbeat_die "--known-hosts-file is required; host keys are never auto-trusted"
 [ -n "$APPROVED_PLAN" ] || dholbeat_die "--approved-plan is required and must name the reviewed plan document"
+case "$STAGE" in
+  bootstrap|converged) ;;
+  *) dholbeat_die "--stage must be bootstrap or converged" ;;
+esac
 [ -z "${GITHUB_ACTIONS:-}${CI:-}" ] \
   || dholbeat_die "production apply is never permitted in CI; ci_apply_allowed is false"
 [ -t 0 ] || dholbeat_die "production apply requires an interactive terminal for founder confirmation"
 
-case "$IDENTITY_FILE" in
-  "$REPO_ROOT"/*) dholbeat_die "the connection identity must live outside the repository" ;;
-esac
-[ -f "$IDENTITY_FILE" ] || dholbeat_die "identity file is unavailable: $IDENTITY_FILE"
+IDENTITY_FILE="$(dholbeat_assert_outside_repository "$REPO_ROOT" "$IDENTITY_FILE" "connection identity")"
+KNOWN_HOSTS_FILE="$(dholbeat_canonical_path "$KNOWN_HOSTS_FILE")"
+[ ! -L "$KNOWN_HOSTS_FILE" ] || dholbeat_die "the known-hosts file must not be a symbolic link"
 [ -s "$KNOWN_HOSTS_FILE" ] || dholbeat_die "known-hosts file is missing or empty: $KNOWN_HOSTS_FILE"
 
 BASELINE_RELATIVE="infra/inventories/production/baseline/$LIMIT.yml"
@@ -126,13 +142,21 @@ chmod 0700 "$TEMP_ROOT"
 mkdir -p "$TEMP_ROOT/inputs"
 chmod 0700 "$TEMP_ROOT/inputs"
 
-ARTIFACT_NAME="infra-apply-$LIMIT-$RELEASE_TAG"
+ARTIFACT_NAME="infra-apply-$LIMIT-$STAGE-$RELEASE_TAG"
 ARTIFACT_ROOT="$REPO_ROOT/.artifacts/$ARTIFACT_NAME"
 [ ! -e "$ARTIFACT_ROOT" ] \
   || dholbeat_die "apply evidence already exists; inspect and remove: .artifacts/$ARTIFACT_NAME"
 mkdir -p "$ARTIFACT_ROOT"
 chmod 0700 "$ARTIFACT_ROOT"
-install -m 0600 "$KNOWN_HOSTS_FILE" "$ARTIFACT_ROOT/known_hosts"
+
+# Operational host-key material stays in a bounded session directory removed on
+# exit; only the plan's redacted fingerprint receipt survives as evidence.
+SESSION_NAME="session-apply-$$"
+SESSION_ROOT="$REPO_ROOT/.artifacts/$SESSION_NAME"
+[ ! -e "$SESSION_ROOT" ] || dholbeat_die "a stale apply session directory exists: .artifacts/$SESSION_NAME"
+mkdir -p "$SESSION_ROOT"
+chmod 0700 "$SESSION_ROOT"
+install -m 0600 "$KNOWN_HOSTS_FILE" "$SESSION_ROOT/known_hosts"
 
 printf '\n==> release identity gate\n'
 "$SCRIPT_DIR/controller" exec python3 scripts/lib/release_gate.py \
@@ -150,10 +174,9 @@ PREAPPLY_SUFFIX="preapply-$(printf '%s' "$RELEASE_TAG" | tr -c 'a-z0-9' '-')"
   --address "$ADDRESS" \
   --identity-file "$IDENTITY_FILE" \
   --known-hosts-file "$KNOWN_HOSTS_FILE" \
-  --release-document "$RELEASE_DOCUMENT" \
-  --stage converged \
+  --stage "$STAGE" \
   --artifact-suffix "$PREAPPLY_SUFFIX"
-PREAPPLY_PLAN="$REPO_ROOT/.artifacts/infra-plan-$LIMIT-converged-${TAG_COMMIT:0:12}-$PREAPPLY_SUFFIX/plan.yml"
+PREAPPLY_PLAN="$REPO_ROOT/.artifacts/infra-plan-$LIMIT-$STAGE-${TAG_COMMIT:0:12}-$PREAPPLY_SUFFIX/plan.yml"
 [ -f "$PREAPPLY_PLAN" ] || dholbeat_die "the pre-apply plan document was not produced"
 APPROVED_DIGEST="$(dholbeat_sha256_path "$APPROVED_PLAN_ABS")"
 PREAPPLY_DIGEST="$(dholbeat_sha256_path "$PREAPPLY_PLAN")"
@@ -165,6 +188,7 @@ printf 'host                 : %s (%s)\n' "$LIMIT" "$HOST_ROLE"
 printf 'release tag          : %s\n' "$RELEASE_TAG"
 printf 'release commit       : %s\n' "$TAG_COMMIT"
 printf 'approved_plan_sha256 : %s\n' "$APPROVED_DIGEST"
+printf 'stage                : %s\n' "$STAGE"
 printf 'playbook             : infra/playbooks/site.yml\n'
 printf '\nThis mutates the production host named above.\n'
 printf 'Type exactly "apply %s %s" to continue: ' "$LIMIT" "$RELEASE_TAG"
@@ -201,7 +225,7 @@ chmod 0700 "$TEMP_ROOT/inputs/run-ansible.sh" "$TEMP_ROOT/inputs/fetch-receipt.s
   --root /workspace render \
   --limit "$LIMIT" \
   --address "$ADDRESS" \
-  --stage converged \
+  --stage "$STAGE" \
   --identity-file "$CONTROLLER_IDENTITY" \
   --known-hosts-file "$CONTROLLER_KNOWN_HOSTS" \
   --output - >"$TEMP_ROOT/inputs/inventory.yml"
@@ -212,7 +236,7 @@ chmod 0600 "$TEMP_ROOT/inputs/inventory.yml" "$TEMP_ROOT/inputs/release-vars.yml
 printf '\n==> converging %s\n' "$LIMIT"
 set +e
 "$SCRIPT_DIR/controller" exec-ssh \
-  --known-hosts ".artifacts/$ARTIFACT_NAME/known_hosts" \
+  --known-hosts ".artifacts/$SESSION_NAME/known_hosts" \
   --identity "$IDENTITY_FILE" \
   --inputs "$TEMP_ROOT/inputs" \
   --confirm production-host \
@@ -244,7 +268,7 @@ chmod 0600 "$ARTIFACT_ROOT/apply.log"
 
 printf '\n==> independent receipt verification\n'
 "$SCRIPT_DIR/controller" exec-ssh \
-  --known-hosts ".artifacts/$ARTIFACT_NAME/known_hosts" \
+  --known-hosts ".artifacts/$SESSION_NAME/known_hosts" \
   --identity "$IDENTITY_FILE" \
   --inputs "$TEMP_ROOT/inputs" \
   --confirm production-host \
@@ -252,6 +276,7 @@ printf '\n==> independent receipt verification\n'
   "$CONTROLLER_INPUTS/inventory.yml" /etc/dholbeat-release "$LIMIT" \
   >"$TEMP_ROOT/inputs/runtime-receipt.yml"
 install -m 0600 "$TEMP_ROOT/inputs/runtime-receipt.yml" "$ARTIFACT_ROOT/runtime-receipt.yml"
+dholbeat_assert_absent_from_evidence "$ARTIFACT_ROOT" "$ADDRESS" "$IDENTITY_FILE" "$KNOWN_HOSTS_FILE"
 "$SCRIPT_DIR/controller" exec python3 scripts/lib/release_gate.py \
   --root /workspace \
   --release "/workspace/$RELEASE_RELATIVE" \
@@ -277,11 +302,13 @@ printf '%s\n' \
   "target_host_role: $HOST_ROLE" \
   "release_tag: $RELEASE_TAG" \
   "release_commit: $TAG_COMMIT" \
+  "stage: $STAGE" \
   "approved_plan_sha256: $APPROVED_DIGEST" \
   "applied_plan_sha256: $PREAPPLY_DIGEST" \
   'receipt_verified: true' \
   'host_verified: true' \
   >"$ARTIFACT_ROOT/summary.yml"
+dholbeat_assert_absent_from_evidence "$ARTIFACT_ROOT" "$ADDRESS" "$IDENTITY_FILE" "$KNOWN_HOSTS_FILE"
 
 printf '\napply complete: %s at %s\n' "$LIMIT" "$RELEASE_TAG"
 printf 'evidence: .artifacts/%s\n' "$ARTIFACT_NAME"
