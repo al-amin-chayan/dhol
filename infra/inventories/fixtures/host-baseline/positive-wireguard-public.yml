@@ -1,4 +1,4 @@
-# Synthetic production-shaped host baseline, phase two of the tunnel cutover. It names no real host
+# Synthetic production-shaped host baseline, phase one of the tunnel cutover. It names no real host
 # and carries fixture-only public key material. The VPN subnet, host address,
 # and peer addresses are committed policy; the provider-assigned public
 # address is never committed.
@@ -135,10 +135,11 @@ schema_version: 1
 ssh:
   allow_cidrs:
     - 10.99.0.0/24
+    - 203.0.113.0/24
   port: 22
 target_environment: production
 vpn:
-  administration: tunnel
+  administration: public
   host_address: 10.99.0.1/24
   interface: wg0
   listen_port: 51820
@@ -152,5 +153,4 @@ vpn:
         - 10.99.0.3/32
       id: founder-recovery
       public_key: RklYVFVSRS1QRUVSLVRXTy0tLS0tLS0tLS0tLS0tLS0=
-  server_public_key: RklYVFVSRS1TRVJWRVItUFVCLS0tLS0tLS0tLS0tLS0=
   subnet: 10.99.0.0/24

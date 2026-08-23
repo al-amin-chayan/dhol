@@ -259,20 +259,42 @@ def test_a_bootstrap_inventory_cannot_be_reused_after_hardening(rendering_root: 
     assert bootstrap["ansible_private_key_file"] != converged["ansible_private_key_file"]
 
 
-# --- Tunnel-only administration (WP-05C) ---
+# --- Two-phase tunnel administration (WP-05C) ---
 
-WIREGUARD_FIXTURE = FIXTURE_ROOT / "positive-wireguard.yml"
+TUNNEL_FIXTURE = FIXTURE_ROOT / "positive-wireguard.yml"
+PUBLIC_PHASE_FIXTURE = FIXTURE_ROOT / "positive-wireguard-public.yml"
 WIREGUARD_NEGATIVES = FIXTURE_ROOT / "negative-wireguard"
 
 
-def wireguard_document() -> dict:
-    document = load_yaml(WIREGUARD_FIXTURE)
+def tunnel_document() -> dict:
+    document = load_yaml(TUNNEL_FIXTURE)
     assert isinstance(document, dict)
     return document
 
 
-def test_the_tunnel_only_fixture_satisfies_the_contract() -> None:
-    assert HOST_BASELINE.validate_document(ROOT, wireguard_document(), "fixture") == []
+def public_phase_document() -> dict:
+    document = load_yaml(PUBLIC_PHASE_FIXTURE)
+    assert isinstance(document, dict)
+    return document
+
+
+def merge_overlay(base: dict, overlay: dict) -> dict:
+    """Deep merge where a null value removes the key, so absence can be tested."""
+
+    result = copy.deepcopy(base)
+    for key, value in overlay.items():
+        if value is None:
+            result.pop(key, None)
+        elif isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = merge_overlay(result[key], value)
+        else:
+            result[key] = copy.deepcopy(value)
+    return result
+
+
+def test_both_cutover_phases_satisfy_the_contract() -> None:
+    assert HOST_BASELINE.validate_document(ROOT, public_phase_document(), "fixture") == []
+    assert HOST_BASELINE.validate_document(ROOT, tunnel_document(), "fixture") == []
 
 
 def test_the_interim_contract_without_a_vpn_block_remains_valid() -> None:
@@ -289,19 +311,44 @@ def test_an_explicit_vpn_mode_of_none_is_the_interim_state() -> None:
     assert HOST_BASELINE.validate_document(ROOT, document, "fixture") == []
 
 
+def test_the_public_phase_keeps_the_existing_path_while_adding_the_tunnel() -> None:
+    """The cutover cannot close the only working path in the same release."""
+
+    document = public_phase_document()
+    assert document["vpn"]["administration"] == "public"
+    assert "203.0.113.0/24" in document["ssh"]["allow_cidrs"]
+    assert "10.99.0.0/24" in document["ssh"]["allow_cidrs"]
+
+
+def test_the_tunnel_phase_closes_the_public_path_exactly() -> None:
+    document = tunnel_document()
+    assert document["vpn"]["administration"] == "tunnel"
+    assert document["ssh"]["allow_cidrs"] == ["10.99.0.0/24"]
+
+
 @pytest.mark.parametrize(
     ("fixture", "expected"),
     [
         ("allowlist-not-subnet.yml", "exactly the VPN subnet"),
         ("allowlist-is-public.yml", "exactly the VPN subnet"),
+        ("public-phase-omits-vpn-subnet.yml", "must already include"),
+        ("tunnel-without-server-key.yml", "requires vpn.server_public_key"),
+        ("server-key-invalid.yml", "server_public_key is not a valid"),
+        ("unknown-administration.yml", "vpn.administration must be one of"),
         ("public-subnet.yml", "RFC 1918 or unique-local"),
+        ("ipv6-subnet.yml", "must be IPv4 until the verifier supports IPv6"),
+        ("interface-path-traversal.yml", "bare Linux interface name"),
+        ("interface-too-long.yml", "bare Linux interface name"),
+        ("host-address-wider-than-subnet.yml", "exactly the vpn.subnet prefix"),
+        ("host-address-is-network.yml", "must not be the network address"),
+        ("host-address-outside-subnet.yml", "vpn.host_address"),
+        ("peer-key-wrong-length.yml", "not a valid WireGuard public key"),
         ("peer-allowed-range.yml", "single addresses, not ranges"),
         ("peer-outside-subnet.yml", "outside vpn.subnet"),
         ("peer-reuses-host-address.yml", "reuses the host's own tunnel address"),
         ("duplicate-peer-address.yml", "already assigned to another peer"),
         ("duplicate-peer-key.yml", "declared more than once"),
         ("invalid-peer-key.yml", "not a valid WireGuard public key"),
-        ("host-address-outside-subnet.yml", "outside vpn.subnet"),
         ("port-reuses-ssh.yml", "must not reuse the SSH port"),
         ("no-peers.yml", "at least one administrator peer"),
     ],
@@ -310,13 +357,25 @@ def test_tunnel_negative_fixtures_fail_closed(fixture: str, expected: str) -> No
     overlay = load_yaml(WIREGUARD_NEGATIVES / fixture)
     assert isinstance(overlay, dict)
     findings = HOST_BASELINE.validate_document(
-        ROOT, deep_merge(wireguard_document(), overlay), "fixture"
+        ROOT, merge_overlay(tunnel_document(), overlay), "fixture"
     )
     assert any(expected in finding for finding in findings), findings
 
 
+def test_every_negative_overlay_is_exercised() -> None:
+    """A fixture nobody asserts on is a fixture that proves nothing."""
+
+    on_disk = {path.name for path in WIREGUARD_NEGATIVES.glob("*.yml")}
+    parametrize = next(
+        mark for mark in test_tunnel_negative_fixtures_fail_closed.pytestmark
+        if mark.name == "parametrize"
+    )
+    exercised = {fixture for fixture, _ in parametrize.args[1]}
+    assert on_disk == exercised, on_disk ^ exercised
+
+
 def test_the_wireguard_directory_must_be_catalogued() -> None:
-    document = wireguard_document()
+    document = tunnel_document()
     document["managed_directories"] = [
         entry for entry in document["managed_directories"] if entry["path"] != "/etc/wireguard"
     ]
@@ -324,17 +383,16 @@ def test_the_wireguard_directory_must_be_catalogued() -> None:
     assert any("/etc/wireguard must be catalogued" in finding for finding in findings), findings
 
 
-def test_no_private_key_material_appears_in_the_committed_contract() -> None:
-    text = WIREGUARD_FIXTURE.read_text(encoding="utf-8")
+@pytest.mark.parametrize("fixture", [TUNNEL_FIXTURE, PUBLIC_PHASE_FIXTURE])
+def test_no_private_key_material_appears_in_a_committed_contract(fixture: Path) -> None:
+    text = fixture.read_text(encoding="utf-8")
     assert "private_key" not in text.lower()
     assert "PrivateKey" not in text
 
 
-@pytest.fixture()
-def tunnel_root(tmp_path: Path) -> Path:
+def vpn_root(tmp_path: Path, document: dict) -> Path:
     baseline_dir = tmp_path / "infra/inventories/production/baseline"
     baseline_dir.mkdir(parents=True)
-    document = wireguard_document()
     (baseline_dir / f"{document['host_id']}.yml").write_text(
         yaml.safe_dump(document, sort_keys=True), encoding="utf-8"
     )
@@ -346,41 +404,47 @@ def tunnel_root(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def tunnel_vars(root: Path, stage: str) -> dict:
-    inventory = HOST_BASELINE.render_inventory(
-        root,
-        wireguard_document()["host_id"],
-        "203.0.113.20",
-        stage,
-        "/tmp/controller-home/.ssh/id_target",
-        "/tmp/controller-home/.ssh/known_hosts",
-        "/tmp/controller-home/.ssh/id_admin",
+def vpn_vars(root: Path, document: dict, stage: str) -> dict:
+    return host_vars(
+        HOST_BASELINE.render_inventory(
+            root,
+            document["host_id"],
+            "203.0.113.20",
+            stage,
+            "/tmp/controller-home/.ssh/id_target",
+            "/tmp/controller-home/.ssh/known_hosts",
+            "/tmp/controller-home/.ssh/id_admin",
+        )
     )
-    return host_vars(inventory)
 
 
-def test_first_contact_still_uses_the_public_address(tunnel_root: Path) -> None:
-    """The tunnel does not exist yet on a fresh host."""
+def test_the_public_phase_still_connects_over_the_public_address(tmp_path: Path) -> None:
+    """The cutover plan and its first apply must reach the host that exists."""
 
-    variables = tunnel_vars(tunnel_root, "bootstrap")
+    document = public_phase_document()
+    variables = vpn_vars(vpn_root(tmp_path, document), document, "converged")
     assert variables["ansible_host"] == "203.0.113.20"
+    assert variables["baseline_second_connection_host"] == "203.0.113.20"
 
 
-def test_every_later_connection_uses_the_tunnel_address(tunnel_root: Path) -> None:
-    variables = tunnel_vars(tunnel_root, "converged")
+def test_the_tunnel_phase_connects_over_the_tunnel(tmp_path: Path) -> None:
+    document = tunnel_document()
+    variables = vpn_vars(vpn_root(tmp_path, document), document, "converged")
     assert variables["ansible_host"] == "10.99.0.1"
+    assert variables["baseline_second_connection_host"] == "10.99.0.1"
 
 
-def test_the_second_connection_probe_always_targets_the_tunnel(tunnel_root: Path) -> None:
-    """The probe must prove the path that survives the firewall closing."""
+def test_first_contact_never_uses_a_tunnel_that_does_not_exist(tmp_path: Path) -> None:
+    for document in (public_phase_document(), tunnel_document()):
+        variables = vpn_vars(vpn_root(tmp_path / document["vpn"]["administration"], document),
+                             document, "bootstrap")
+        assert variables["ansible_host"] == "203.0.113.20"
 
-    for stage in ("bootstrap", "converged"):
-        assert tunnel_vars(tunnel_root, stage)["baseline_second_connection_host"] == "10.99.0.1"
 
-
-def test_the_rendered_inventory_carries_the_vpn_declaration(tunnel_root: Path) -> None:
-    vpn = tunnel_vars(tunnel_root, "converged")["baseline_vpn"]
-    assert vpn["mode"] == "wireguard"
+def test_the_rendered_inventory_carries_the_vpn_declaration(tmp_path: Path) -> None:
+    document = tunnel_document()
+    vpn = vpn_vars(vpn_root(tmp_path, document), document, "converged")["baseline_vpn"]
+    assert vpn["administration"] == "tunnel"
     assert vpn["listen_port"] == 51820
     assert [peer["allowed_ips"] for peer in vpn["peers"]] == [["10.99.0.2/32"], ["10.99.0.3/32"]]
 
