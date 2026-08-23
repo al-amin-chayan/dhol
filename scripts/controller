@@ -37,9 +37,14 @@ Commands:
   build                              build the locked native-architecture image
   versions                           verify and print normalized tool versions
   exec <command> [arguments]         run a command in the read-only controller
-  exec-ssh --known-hosts .artifacts/<file> --confirm disposable-host
-       <command> [arguments]         run against a founder-approved disposable
-                                     SSH target with strict host-key checking
+  exec-ssh --known-hosts .artifacts/<file> [--identity <path>]
+       [--inputs <directory>] --confirm disposable-host|production-host
+       <command> [arguments]         run against a founder-approved SSH target
+                                     with strict host-key checking. --identity
+                                     mounts one private key at
+                                     /tmp/controller-home/.ssh/id_target and
+                                     --inputs mounts one read-only operator
+                                     directory at /tmp/controller-inputs.
   digest                             print the source lock and local OCI image ID
   cache size                         report labelled controller image usage
   cache cleanup --confirm dholbeat-controller
@@ -227,6 +232,7 @@ run_controller() {
     --label "${CACHE_LABEL}=${CACHE_VALUE}" \
     --env DHOLBEAT_IN_CONTROLLER=1 \
     --env REPO_ROOT=/workspace \
+    --env SOPS_AGE_KEY \
     --env GITHUB_ACTIONS \
     --env GITHUB_EVENT_NAME \
     --env GITHUB_BASE_REF \
@@ -239,7 +245,9 @@ run_controller() {
 
 run_ssh_controller() {
   local known_hosts_relative="$1"
-  shift
+  local identity_path="$2"
+  local inputs_path="$3"
+  shift 3
   [ "$#" -gt 0 ] || dholbeat_die "exec-ssh requires a command"
   case "$known_hosts_relative" in
     .artifacts/*) ;;
@@ -253,6 +261,20 @@ run_ssh_controller() {
   [ -f "$known_hosts_path" ] || dholbeat_die "exec-ssh known-hosts file is unavailable"
   [ ! -L "$known_hosts_path" ] || dholbeat_die "exec-ssh refuses a symlinked known-hosts file"
   [ -r "$known_hosts_path" ] || dholbeat_die "exec-ssh known-hosts file is unreadable"
+  [ -s "$known_hosts_path" ] || dholbeat_die "exec-ssh refuses an empty known-hosts file"
+
+  if [ -n "$identity_path" ]; then
+    [ -f "$identity_path" ] || dholbeat_die "exec-ssh identity file is unavailable"
+    [ ! -L "$identity_path" ] || dholbeat_die "exec-ssh refuses a symlinked identity file"
+    [ -r "$identity_path" ] || dholbeat_die "exec-ssh identity file is unreadable"
+    case "$identity_path" in
+      "$REPO_ROOT"/*) dholbeat_die "exec-ssh refuses an identity file inside the repository" ;;
+    esac
+  fi
+  if [ -n "$inputs_path" ]; then
+    [ -d "$inputs_path" ] || dholbeat_die "exec-ssh inputs path must be an existing directory"
+    [ ! -L "$inputs_path" ] || dholbeat_die "exec-ssh refuses a symlinked inputs directory"
+  fi
 
   ensure_image
   local image_id
@@ -274,6 +296,17 @@ run_ssh_controller() {
   printf 'controller:x:%s:\n' "$controller_gid" >"$NETWORKED_HOME/group"
   chmod 0600 "$NETWORKED_HOME/passwd" "$NETWORKED_HOME/group"
 
+  local identity_mount=()
+  if [ -n "$identity_path" ]; then
+    cp -- "$identity_path" "$NETWORKED_HOME/.ssh/id_target"
+    chmod 0600 "$NETWORKED_HOME/.ssh/id_target"
+    identity_mount=(--env DHOLBEAT_SSH_IDENTITY=/tmp/controller-home/.ssh/id_target)
+  fi
+  local inputs_mount=()
+  if [ -n "$inputs_path" ]; then
+    inputs_mount=(--volume "$inputs_path:/tmp/controller-inputs:ro")
+  fi
+
   docker run --rm \
     --read-only \
     --network bridge \
@@ -285,11 +318,14 @@ run_ssh_controller() {
     --env ANSIBLE_HOST_KEY_CHECKING=True \
     --env DHOLBEAT_IN_CONTROLLER=1 \
     --env REPO_ROOT=/workspace \
+    --env SOPS_AGE_KEY \
     --tmpfs /tmp:rw,nosuid,nodev,size=536870912 \
     --volume "$REPO_ROOT:/workspace:ro" \
     --volume "$NETWORKED_HOME:/tmp/controller-home:rw" \
     --volume "$NETWORKED_HOME/passwd:/etc/passwd:ro" \
     --volume "$NETWORKED_HOME/group:/etc/group:ro" \
+    ${identity_mount[@]+"${identity_mount[@]}"} \
+    ${inputs_mount[@]+"${inputs_mount[@]}"} \
     --workdir /workspace \
     "$image_id" "$@"
 }
@@ -313,13 +349,43 @@ case "${1:-help}" in
     ;;
   exec-ssh)
     shift
-    [ "${1:-}" = "--known-hosts" ] || dholbeat_die "exec-ssh requires --known-hosts .artifacts/<file>"
-    known_hosts_relative="${2:-}"
-    shift 2
-    [ "${1:-}" = "--confirm" ] || dholbeat_die "exec-ssh requires --confirm disposable-host"
-    [ "${2:-}" = "disposable-host" ] || dholbeat_die "exec-ssh confirmation must be exactly: disposable-host"
-    shift 2
-    run_ssh_controller "$known_hosts_relative" "$@"
+    known_hosts_relative=""
+    ssh_identity_path=""
+    ssh_inputs_path=""
+    ssh_target_class=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --known-hosts)
+          [ "$#" -ge 2 ] || dholbeat_die "--known-hosts requires .artifacts/<file>"
+          known_hosts_relative="$2"
+          shift 2
+          ;;
+        --identity)
+          [ "$#" -ge 2 ] || dholbeat_die "--identity requires a path"
+          ssh_identity_path="$2"
+          shift 2
+          ;;
+        --inputs)
+          [ "$#" -ge 2 ] || dholbeat_die "--inputs requires a directory"
+          ssh_inputs_path="$2"
+          shift 2
+          ;;
+        --confirm)
+          [ "$#" -ge 2 ] || dholbeat_die "--confirm requires disposable-host or production-host"
+          ssh_target_class="$2"
+          shift 2
+          break
+          ;;
+        --*) dholbeat_die "unexpected exec-ssh argument: $1" ;;
+        *) dholbeat_die "exec-ssh requires --confirm disposable-host or --confirm production-host before the command" ;;
+      esac
+    done
+    [ -n "$known_hosts_relative" ] || dholbeat_die "exec-ssh requires --known-hosts .artifacts/<file>"
+    case "$ssh_target_class" in
+      disposable-host|production-host) ;;
+      *) dholbeat_die "exec-ssh requires --confirm disposable-host or --confirm production-host" ;;
+    esac
+    run_ssh_controller "$known_hosts_relative" "$ssh_identity_path" "$ssh_inputs_path" "$@"
     ;;
   digest)
     [ "$#" -eq 1 ] || dholbeat_die "digest accepts no arguments"

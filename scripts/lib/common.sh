@@ -73,6 +73,17 @@ dholbeat_sha256_files() {
   fi
 }
 
+dholbeat_sha256_path() {
+  local path="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum -- "$path" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 -- "$path" | awk '{print $1}'
+  else
+    dholbeat_die "sha256sum or shasum is required to digest $path"
+  fi
+}
+
 dholbeat_human_bytes() {
   awk -v bytes="$1" 'BEGIN {
     split("B KiB MiB GiB TiB", units, " ")
