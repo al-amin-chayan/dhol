@@ -14,9 +14,9 @@
   check_mode: false
   register: docker_exec_start_result
 
-- name: Inspect TCP listeners for an exposed Docker daemon
+- name: Inspect every listening socket the Docker daemon owns
   ansible.builtin.command:
-    argv: [ss, --listening, --numeric, --tcp]
+    argv: [ss, --no-header, --listening, --numeric, --tcp, --processes]
   changed_when: false
   check_mode: false
   register: docker_tcp_listeners
@@ -37,10 +37,30 @@
       - (docker_daemon_config.content | b64decode | from_json)['log-driver'] == docker_log_driver
       - (docker_daemon_config.content | b64decode | from_json)['log-opts']['max-size'] == docker_log_max_size
       - (docker_daemon_config.content | b64decode | from_json)['log-opts']['max-file'] == (docker_log_max_files | string)
-      - "'tcp://' not in docker_exec_start_result.stdout"
-      - "':2375' not in docker_tcp_listeners.stdout"
-      - "':2376' not in docker_tcp_listeners.stdout"
-    fail_msg: Docker effective configuration violates the bounded local-only contract.
+    fail_msg: Docker effective configuration violates the bounded logging contract.
+
+- name: Prove the daemon is reachable only over its declared Unix socket
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ role_path }}/files/verify_daemon_listeners.py"
+      - --input
+      - "-"
+    stdin: >-
+      {{
+        {
+          'declared_hosts': docker_daemon_hosts,
+          'daemon_config': (docker_daemon_config.content | b64decode | from_json),
+          'exec_start': docker_exec_start_result.stdout,
+          'socket_table': docker_tcp_listeners.stdout,
+        } | to_json
+      }}
+  become: false
+  changed_when: false
+  check_mode: false
+  delegate_to: localhost
+  vars:
+    ansible_remote_tmp: /tmp/ansible-controller
 
 - name: Verify the Compose plugin is available
   ansible.builtin.command: /usr/bin/docker compose version --short
