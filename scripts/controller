@@ -7,6 +7,7 @@ SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)"
 source "$SCRIPT_DIR/lib/common.sh"
 
 REPO_ROOT="$(dholbeat_repo_root "$SCRIPT_PATH")"
+REPO_ROOT="$(CDPATH='' cd -- "$REPO_ROOT" && pwd -P)"
 LOCK_FILE="$REPO_ROOT/toolchain.lock.yml"
 SOURCE_INPUTS=(
   toolchain.lock.yml
@@ -257,20 +258,27 @@ run_ssh_controller() {
     */../*|*/./*) dholbeat_die "exec-ssh known-hosts path must not contain dot segments" ;;
   esac
 
+  if [ -n "$identity_path" ]; then
+    # Resolve symlinked parents before comparing, so a relative path or a
+    # symlinked directory cannot smuggle repository-internal key material in.
+    local identity_canonical
+    identity_canonical="$(dholbeat_canonical_path "$identity_path")"
+    case "$identity_canonical" in
+      "$REPO_ROOT"|"$REPO_ROOT"/*)
+        dholbeat_die "exec-ssh refuses an identity file inside the repository"
+        ;;
+    esac
+    [ ! -L "$identity_path" ] || dholbeat_die "exec-ssh refuses a symlinked identity file"
+    [ -f "$identity_path" ] || dholbeat_die "exec-ssh identity file is unavailable"
+    [ -r "$identity_path" ] || dholbeat_die "exec-ssh identity file is unreadable"
+    identity_path="$identity_canonical"
+  fi
   local known_hosts_path="$REPO_ROOT/$known_hosts_relative"
   [ -f "$known_hosts_path" ] || dholbeat_die "exec-ssh known-hosts file is unavailable"
   [ ! -L "$known_hosts_path" ] || dholbeat_die "exec-ssh refuses a symlinked known-hosts file"
   [ -r "$known_hosts_path" ] || dholbeat_die "exec-ssh known-hosts file is unreadable"
   [ -s "$known_hosts_path" ] || dholbeat_die "exec-ssh refuses an empty known-hosts file"
 
-  if [ -n "$identity_path" ]; then
-    [ -f "$identity_path" ] || dholbeat_die "exec-ssh identity file is unavailable"
-    [ ! -L "$identity_path" ] || dholbeat_die "exec-ssh refuses a symlinked identity file"
-    [ -r "$identity_path" ] || dholbeat_die "exec-ssh identity file is unreadable"
-    case "$identity_path" in
-      "$REPO_ROOT"/*) dholbeat_die "exec-ssh refuses an identity file inside the repository" ;;
-    esac
-  fi
   if [ -n "$inputs_path" ]; then
     [ -d "$inputs_path" ] || dholbeat_die "exec-ssh inputs path must be an existing directory"
     [ ! -L "$inputs_path" ] || dholbeat_die "exec-ssh refuses a symlinked inputs directory"
