@@ -25,6 +25,11 @@ ALLOWED_SCHEMES = ("unix://", "fd://")
 HOST_ARGUMENT_RE = re.compile(r"(?:^|\s)(?:-H|--host(?:=|\s+))\s*(?P<value>\S+)")
 DOCKER_PROCESS_RE = re.compile(r"\bdockerd\b")
 PROTOCOL_TOKENS = {"tcp", "tcp6", "udp", "udp6"}
+# systemd serializes the Listen property endpoint-first, as "<endpoint> (<Kind>)".
+# Captured from `systemctl show docker.socket --property=Listen --value` on
+# Ubuntu 24.04: "/run/docker.sock (Stream)".
+LISTEN_ENTRY_RE = re.compile(r"^(?P<endpoint>\S.*?)\s+\((?P<kind>[A-Za-z]+)\)$")
+EXPECTED_SOCKET_KIND = "Stream"
 
 
 def non_unix(hosts: Any) -> list[str]:
@@ -79,6 +84,10 @@ def socket_activation_findings(listen_text: str, uses_socket_activation: bool) -
     ``fd://`` is only Unix-only if the activating socket unit is. A drifted
     ``docker.socket`` can carry ``ListenStream=127.0.0.1:2375`` while ExecStart
     still reads ``-H fd://``.
+
+    The parsed form is systemd's own serialization, endpoint first. A missing
+    unit yields empty output, which is itself a finding when ExecStart claims
+    socket activation.
     """
 
     findings: list[str] = []
@@ -87,15 +96,20 @@ def socket_activation_findings(listen_text: str, uses_socket_activation: bool) -
         line = raw_line.strip()
         if not line:
             continue
-        parts = line.split(None, 1)
-        if len(parts) != 2:
+        match = LISTEN_ENTRY_RE.match(line)
+        if match is None:
             findings.append(f"docker.socket Listen entry could not be parsed: {line}")
             continue
-        kind, endpoint = parts[0], parts[1].strip()
         endpoints += 1
+        endpoint = match.group("endpoint")
+        kind = match.group("kind")
+        if kind != EXPECTED_SOCKET_KIND:
+            findings.append(
+                f"docker.socket declares an unexpected socket kind: {endpoint} ({kind})"
+            )
         if not endpoint.startswith("/"):
             findings.append(
-                f"docker.socket activates a non-filesystem endpoint: {kind} {endpoint}"
+                f"docker.socket activates a non-filesystem endpoint: {endpoint} ({kind})"
             )
     if uses_socket_activation and endpoints == 0:
         findings.append(

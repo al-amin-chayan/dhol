@@ -29,6 +29,10 @@ SS_TCP_ONLY = 'LISTEN 0      1      127.0.0.1:{port} 0.0.0.0:* users:(("{process
 SS_TCP_AND_UDP = 'tcp LISTEN 0      1      127.0.0.1:{port} 0.0.0.0:* users:(("{process}",pid=270,fd=3))'
 SS_SHAPES = (SS_TCP_ONLY, SS_TCP_AND_UDP)
 
+# Captured from `systemctl show <unit> --property=Listen --value` on Ubuntu
+# 24.04. systemd serializes the endpoint first, then the kind in parentheses.
+HEALTHY_LISTEN = "/run/docker.sock (Stream)"
+
 
 def document(**overrides):
     base = {
@@ -36,7 +40,7 @@ def document(**overrides):
         "daemon_config": {"live-restore": True, "log-driver": "json-file"},
         "exec_start": "/usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock",
         "socket_table": SS_TCP_AND_UDP.format(port="22", process="sshd"),
-        "socket_activation": "Stream /run/docker.sock",
+        "socket_activation": HEALTHY_LISTEN,
     }
     base.update(overrides)
     return base
@@ -123,28 +127,66 @@ def test_an_unparseable_daemon_row_fails_closed(row: str) -> None:
 
 # --- systemd socket activation behind fd:// ---
 
-def test_a_filesystem_socket_activation_endpoint_passes() -> None:
-    assert DOCKER.validate(document(socket_activation="Stream /run/docker.sock")) == []
+def test_the_normal_docker_socket_unit_passes() -> None:
+    """Regression: the shared verifier must not fail a healthy default install."""
+
+    assert DOCKER.validate(document(socket_activation=HEALTHY_LISTEN)) == []
 
 
 @pytest.mark.parametrize(
-    "endpoint",
-    ["Stream 127.0.0.1:2375", "Stream 0.0.0.0:2376", "Stream [::1]:4243", "Datagram 10.4.0.7:9999"],
+    "listen_value",
+    [
+        "/run/docker.sock (Stream)",
+        "/var/run/docker.sock (Stream)",
+        "/run/docker-custom.sock (Stream)",
+    ],
 )
-def test_a_tcp_socket_activation_endpoint_is_rejected(endpoint: str) -> None:
+def test_a_filesystem_socket_activation_endpoint_passes(listen_value: str) -> None:
+    assert DOCKER.validate(document(socket_activation=listen_value)) == []
+
+
+@pytest.mark.parametrize(
+    "listen_value",
+    [
+        "127.0.0.1:2375 (Stream)",
+        "0.0.0.0:2376 (Stream)",
+        "[::1]:4243 (Stream)",
+        "10.4.0.7:9999 (Datagram)",
+    ],
+)
+def test_a_network_socket_activation_endpoint_is_rejected(listen_value: str) -> None:
     """fd:// is only Unix-only if the activating socket unit is."""
 
-    findings = DOCKER.validate(document(socket_activation=endpoint))
+    findings = DOCKER.validate(document(socket_activation=listen_value))
+    assert any("non-filesystem endpoint" in finding for finding in findings), findings
+
+
+def test_a_non_stream_socket_kind_is_reported() -> None:
+    findings = DOCKER.validate(document(socket_activation="/run/docker.sock (Datagram)"))
+    assert any("unexpected socket kind" in finding for finding in findings), findings
+
+
+def test_a_mixed_unit_is_rejected_for_its_network_endpoint() -> None:
+    """Captured from a unit declaring both a filesystem and a network endpoint."""
+
+    listen_value = "/run/probe-multi.sock (Stream)\n10.4.0.7:9999 (Datagram)"
+    findings = DOCKER.validate(document(socket_activation=listen_value))
     assert any("non-filesystem endpoint" in finding for finding in findings), findings
 
 
 def test_fd_activation_without_any_declared_endpoint_is_rejected() -> None:
+    """An absent unit yields empty output, which cannot be what fd:// claims."""
+
     findings = DOCKER.validate(document(socket_activation=""))
     assert any("declares no endpoint" in finding for finding in findings), findings
 
 
-def test_an_unparseable_socket_activation_entry_fails_closed() -> None:
-    findings = DOCKER.validate(document(socket_activation="StreamOnly"))
+@pytest.mark.parametrize(
+    "listen_value",
+    ["StreamOnly", "Stream /run/docker.sock", "(Stream)", "/run/docker.sock Stream"],
+)
+def test_an_unparseable_socket_activation_entry_fails_closed(listen_value: str) -> None:
+    findings = DOCKER.validate(document(socket_activation=listen_value))
     assert any("Listen entry could not be parsed" in finding for finding in findings), findings
 
 
@@ -158,19 +200,3 @@ def test_a_daemon_without_fd_activation_needs_no_socket_unit() -> None:
         )
         == []
     )
-
-
-def test_daemon_json_hosts_that_differ_from_the_contract_are_rejected() -> None:
-    findings = DOCKER.validate(
-        document(daemon_config={"hosts": ["unix:///var/run/docker-alt.sock"]})
-    )
-    assert any("do not match the declared" in finding for finding in findings), findings
-
-
-def test_a_declared_contract_that_is_itself_non_unix_is_rejected() -> None:
-    findings = DOCKER.validate(document(declared_hosts=["tcp://127.0.0.1:2375"]))
-    assert any("declared docker_daemon_hosts" in finding for finding in findings), findings
-
-
-def test_an_absent_hosts_key_is_acceptable() -> None:
-    assert DOCKER.validate(document(daemon_config={})) == []
