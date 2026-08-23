@@ -1,9 +1,14 @@
 # Rendered by infra/roles/wireguard. Do not edit on the host: the next
 # convergence overwrites it, and a live edit is drift, not desired state.
+#
+# This file deliberately contains no private key. wg-quick loads the server key
+# from {{ wireguard_config_dir }}/{{ baseline_vpn.interface }}.key at interface
+# start, so the configuration stays reviewable and diffable while only the key
+# file is secret.
 [Interface]
 Address = {{ baseline_vpn.host_address }}
 ListenPort = {{ baseline_vpn.listen_port | int }}
-PrivateKey = {{ wireguard_server_private_key }}
+PostUp = wg set %i private-key {{ wireguard_config_dir }}/%i.key
 {% for peer in baseline_vpn.peers %}
 
 [Peer]

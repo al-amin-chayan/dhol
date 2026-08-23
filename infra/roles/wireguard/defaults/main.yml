@@ -8,3 +8,9 @@ wireguard_packages:
 wireguard_config_dir: /etc/wireguard
 wireguard_config_mode: "0600"
 wireguard_config_dir_mode: "0700"
+wireguard_key_path: "{{ wireguard_config_dir }}/{{ baseline_vpn.interface }}.key"
+wireguard_key_mode: "0600"
+# Optional. Supply a reviewed key only when bit-identical reproducibility across
+# a host rebuild is wanted; otherwise the host generates one once and the
+# founder escrows it in the password manager.
+wireguard_server_private_key: ""

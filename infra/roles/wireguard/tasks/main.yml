@@ -15,17 +15,6 @@
       Refusing to configure WireGuard: the host contract must declare the
       interface, listen port, subnet, host address, and at least one peer.
 
-- name: Require the reviewed server private key from its secret store
-  ansible.builtin.assert:
-    that:
-      - wireguard_server_private_key is defined
-      - wireguard_server_private_key | length > 0
-    fail_msg: >-
-      Refusing to configure WireGuard: the server private key must be supplied
-      from SOPS. The role never generates a key on the host, because a key that
-      exists only there is hidden state whose recovery is "copy the old server".
-  no_log: true
-
 - name: Install WireGuard userspace tools
   ansible.builtin.apt:
     name: "{{ wireguard_packages }}"
@@ -39,6 +28,46 @@
     group: root
     mode: "{{ wireguard_config_dir_mode }}"
 
+# The server key is escrowed in the founder's password manager, which is this
+# repository's established home for private keys. Generation happens once and
+# never overwrites: a second convergence must not silently invalidate every
+# peer configuration already saved there.
+- name: Install a reviewed server private key when one is supplied
+  ansible.builtin.copy:
+    content: "{{ wireguard_server_private_key }}\n"
+    dest: "{{ wireguard_key_path }}"
+    owner: root
+    group: root
+    mode: "{{ wireguard_key_mode }}"
+  when: wireguard_server_private_key | default('') | length > 0
+  no_log: true
+
+- name: Check whether a server private key already exists
+  ansible.builtin.stat:
+    path: "{{ wireguard_key_path }}"
+  register: wireguard_key_state
+
+- name: Generate the server private key once when none exists
+  ansible.builtin.shell:
+    cmd: set -o pipefail && umask 077 && wg genkey >{{ wireguard_key_path | quote }}
+    executable: /bin/bash
+    creates: "{{ wireguard_key_path }}"
+  when: not wireguard_key_state.stat.exists
+
+- name: Enforce ownership and mode on the server private key
+  ansible.builtin.file:
+    path: "{{ wireguard_key_path }}"
+    owner: root
+    group: root
+    mode: "{{ wireguard_key_mode }}"
+
+- name: Read the server public key for peer configuration
+  ansible.builtin.shell:
+    cmd: set -o pipefail && wg pubkey <{{ wireguard_key_path | quote }}
+    executable: /bin/bash
+  changed_when: false
+  register: wireguard_public_key
+
 - name: Install the WireGuard interface configuration
   ansible.builtin.template:
     src: wireguard.conf.j2
@@ -46,7 +75,6 @@
     owner: root
     group: root
     mode: "{{ wireguard_config_mode }}"
-  no_log: true
   notify: Restart WireGuard
 
 - name: Apply pending WireGuard configuration before the tunnel is relied upon
@@ -58,6 +86,12 @@
     enabled: true
     state: started
     daemon_reload: true
+
+- name: Report the server public key to escrow with each peer configuration
+  ansible.builtin.debug:
+    msg: >-
+      wireguard_server_public_key={{ wireguard_public_key.stdout | trim }}
+      endpoint_port={{ baseline_vpn.listen_port | int }}
 
 - name: Verify the effective WireGuard contract
   ansible.builtin.import_tasks: verify.yml

@@ -1,0 +1,123 @@
+#!/usr/bin/env python3
+"""Create one WireGuard peer configuration to escrow in the password manager.
+
+The private half never enters this repository and is never printed. It is
+written once to a file outside the checkout, which you move into the password
+manager and then delete. Only the public key is printed, because that is the one
+value the committed host contract needs.
+"""
+
+from __future__ import annotations
+
+import argparse
+import importlib.util
+import ipaddress
+from pathlib import Path
+import sys
+
+
+def load_keys():
+    path = Path(__file__).resolve().parent / "lib/wireguard_keys.py"
+    spec = importlib.util.spec_from_file_location("dholbeat_wireguard_keys", path)
+    if spec is None or spec.loader is None:  # pragma: no cover - defensive
+        raise RuntimeError(f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+KEYS = load_keys()
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def render(peer_address: str, subnet: str, server_public_key: str, endpoint: str,
+           private_key: str, keepalive: int) -> str:
+    return (
+        "# Dholbeat administrative peer. Store this file in the password manager\n"
+        "# and delete the local copy. It contains a private key.\n"
+        "[Interface]\n"
+        f"PrivateKey = {private_key}\n"
+        f"Address = {peer_address}\n"
+        "\n"
+        "[Peer]\n"
+        f"PublicKey = {server_public_key}\n"
+        f"Endpoint = {endpoint}\n"
+        f"AllowedIPs = {subnet}\n"
+        f"PersistentKeepalive = {keepalive}\n"
+    )
+
+
+def validate(arguments: argparse.Namespace) -> list[str]:
+    findings: list[str] = []
+    try:
+        network = ipaddress.ip_network(arguments.subnet, strict=True)
+    except ValueError:
+        return [f"--subnet is not a valid network: {arguments.subnet}"]
+    try:
+        address = ipaddress.ip_network(arguments.address, strict=True)
+    except ValueError:
+        return [f"--address is not a valid single address: {arguments.address}"]
+    if address.prefixlen not in {32, 128}:
+        findings.append("--address must be a single address, such as 10.99.0.2/32")
+    if address.network_address not in network:
+        findings.append("--address is outside --subnet")
+    try:
+        KEYS.decode(arguments.server_public_key)
+    except (ValueError, Exception):  # noqa: BLE001 - any decode failure is a finding
+        findings.append("--server-public-key is not a valid WireGuard key")
+    host, separator, port = arguments.endpoint.rpartition(":")
+    if not separator or not host or not port.isdigit():
+        findings.append("--endpoint must be <host>:<port>")
+    return findings
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--peer-id", required=True, help="identifier recorded in the host contract")
+    parser.add_argument("--address", required=True, help="this peer's tunnel address, such as 10.99.0.2/32")
+    parser.add_argument("--subnet", required=True, help="the VPN subnet the peer may reach")
+    parser.add_argument("--server-public-key", required=True)
+    parser.add_argument("--endpoint", required=True, help="<public-address-or-hostname>:<port>")
+    parser.add_argument("--keepalive", type=int, default=25)
+    parser.add_argument("--output", type=Path, required=True, help="path outside the repository")
+    arguments = parser.parse_args()
+
+    findings = validate(arguments)
+    if findings:
+        for finding in findings:
+            print(f"peer configuration failure: {finding}", file=sys.stderr)
+        raise SystemExit(1)
+
+    destination = arguments.output.expanduser().resolve()
+    if destination == REPO_ROOT or REPO_ROOT in destination.parents:
+        raise SystemExit(
+            "peer configuration failure: --output must be outside the repository; "
+            "this file contains a private key"
+        )
+    if destination.exists():
+        raise SystemExit(f"peer configuration failure: refusing to overwrite {destination}")
+
+    private_key = KEYS.generate_private_key()
+    body = render(
+        arguments.address,
+        arguments.subnet,
+        arguments.server_public_key,
+        arguments.endpoint,
+        KEYS.encode(private_key),
+        arguments.keepalive,
+    )
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(body, encoding="utf-8")
+    destination.chmod(0o600)
+
+    print(f"peer configuration written: {destination}")
+    print("Move it into the password manager, then delete the local copy.")
+    print()
+    print("Add this peer to the host contract's vpn.peers (public key only):")
+    print(f"  - id: {arguments.peer_id}")
+    print(f"    public_key: {KEYS.encode(KEYS.public_key(private_key))}")
+    print(f"    allowed_ips: [{arguments.address}]")
+
+
+if __name__ == "__main__":
+    main()
