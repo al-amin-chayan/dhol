@@ -52,35 +52,10 @@
         fail_msg: The host root filesystem is below the declared total or free minimum.
       tags: [host]
 
-    - name: Read the resolved Docker package manifest
-      ansible.builtin.command:
-        argv: "{{ ['dpkg-query', '--show', '--showformat=${binary:Package}\\t${Version}\\n'] + (docker_packages.keys() | list | sort) }}"
-      changed_when: false
-      register: verify_docker_packages
-      tags: [docker]
-
-    - name: Verify the exact reviewed Docker package versions are installed
-      ansible.builtin.assert:
-        that:
-          - (item.key ~ '\t' ~ item.value) in verify_docker_packages.stdout
-        fail_msg: "Installed Docker package does not match the reviewed version: {{ item.key }}"
-      loop: "{{ docker_packages | dict2items | sort(attribute='key') }}"
-      loop_control:
-        label: "{{ item.key }}={{ item.value }}"
-      tags: [docker]
-
-    - name: Read the effective Docker daemon information
-      ansible.builtin.command: /usr/bin/docker info --format json
-      changed_when: false
-      register: verify_docker_info
-      tags: [docker]
-
-    - name: Verify bounded local-only Docker daemon behavior
-      ansible.builtin.assert:
-        that:
-          - (verify_docker_info.stdout | from_json).LoggingDriver == docker_log_driver
-          - (verify_docker_info.stdout | from_json).LiveRestoreEnabled == docker_live_restore
-        fail_msg: The Docker daemon no longer matches the bounded local-only contract.
+    - name: Verify the effective Docker daemon contract
+      ansible.builtin.import_role:
+        name: docker
+        tasks_from: verify
       tags: [docker]
 
     - name: Read the converged firewall policy
@@ -127,7 +102,7 @@
       ansible.builtin.script:
         cmd: >-
           files/verify_public_listeners.py
-          --allow-public-port {{ base_ssh_port | int }}
+          --allow-public tcp/{{ base_ssh_port | int }}
       args:
         executable: /usr/bin/python3
       changed_when: false
