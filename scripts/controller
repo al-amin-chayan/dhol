@@ -39,12 +39,15 @@ Commands:
   versions                           verify and print normalized tool versions
   exec <command> [arguments]         run a command in the read-only controller
   exec-ssh --known-hosts .artifacts/<file> [--identity <path>]
-       [--inputs <directory>] --confirm disposable-host|production-host
+       [--admin-identity <path>] [--inputs <directory>]
+       --confirm disposable-host|production-host
        <command> [arguments]         run against a founder-approved SSH target
                                      with strict host-key checking. --identity
                                      mounts one private key at
-                                     /tmp/controller-home/.ssh/id_target and
-                                     --inputs mounts one read-only operator
+                                     /tmp/controller-home/.ssh/id_target,
+                                     --admin-identity mounts the administrator
+                                     key at /tmp/controller-home/.ssh/id_admin,
+                                     and --inputs mounts one read-only operator
                                      directory at /tmp/controller-inputs.
   digest                             print the source lock and local OCI image ID
   cache size                         report labelled controller image usage
@@ -247,8 +250,9 @@ run_controller() {
 run_ssh_controller() {
   local known_hosts_relative="$1"
   local identity_path="$2"
-  local inputs_path="$3"
-  shift 3
+  local admin_identity_path="$3"
+  local inputs_path="$4"
+  shift 4
   [ "$#" -gt 0 ] || dholbeat_die "exec-ssh requires a command"
   case "$known_hosts_relative" in
     .artifacts/*) ;;
@@ -258,21 +262,34 @@ run_ssh_controller() {
     */../*|*/./*) dholbeat_die "exec-ssh known-hosts path must not contain dot segments" ;;
   esac
 
-  if [ -n "$identity_path" ]; then
+  local resolved_identity=""
+  local resolved_admin_identity=""
+  local candidate
+  for candidate in identity admin_identity; do
+    local raw=""
+    case "$candidate" in
+      identity) raw="$identity_path" ;;
+      admin_identity) raw="$admin_identity_path" ;;
+    esac
+    [ -n "$raw" ] || continue
     # Resolve symlinked parents before comparing, so a relative path or a
     # symlinked directory cannot smuggle repository-internal key material in.
-    local identity_canonical
-    identity_canonical="$(dholbeat_canonical_path "$identity_path")"
-    case "$identity_canonical" in
+    local canonical
+    canonical="$(dholbeat_canonical_path "$raw")"
+    case "$canonical" in
       "$REPO_ROOT"|"$REPO_ROOT"/*)
         dholbeat_die "exec-ssh refuses an identity file inside the repository"
         ;;
     esac
-    [ ! -L "$identity_path" ] || dholbeat_die "exec-ssh refuses a symlinked identity file"
-    [ -f "$identity_path" ] || dholbeat_die "exec-ssh identity file is unavailable"
-    [ -r "$identity_path" ] || dholbeat_die "exec-ssh identity file is unreadable"
-    identity_path="$identity_canonical"
-  fi
+    [ ! -L "$raw" ] || dholbeat_die "exec-ssh refuses a symlinked identity file"
+    [ -f "$raw" ] || dholbeat_die "exec-ssh identity file is unavailable"
+    [ -r "$raw" ] || dholbeat_die "exec-ssh identity file is unreadable"
+    case "$candidate" in
+      identity) resolved_identity="$canonical" ;;
+      admin_identity) resolved_admin_identity="$canonical" ;;
+    esac
+  done
+
   local known_hosts_path="$REPO_ROOT/$known_hosts_relative"
   [ -f "$known_hosts_path" ] || dholbeat_die "exec-ssh known-hosts file is unavailable"
   [ ! -L "$known_hosts_path" ] || dholbeat_die "exec-ssh refuses a symlinked known-hosts file"
@@ -305,10 +322,14 @@ run_ssh_controller() {
   chmod 0600 "$NETWORKED_HOME/passwd" "$NETWORKED_HOME/group"
 
   local identity_mount=()
-  if [ -n "$identity_path" ]; then
-    cp -- "$identity_path" "$NETWORKED_HOME/.ssh/id_target"
+  if [ -n "$resolved_identity" ]; then
+    cp -- "$resolved_identity" "$NETWORKED_HOME/.ssh/id_target"
     chmod 0600 "$NETWORKED_HOME/.ssh/id_target"
     identity_mount=(--env DHOLBEAT_SSH_IDENTITY=/tmp/controller-home/.ssh/id_target)
+  fi
+  if [ -n "$resolved_admin_identity" ]; then
+    cp -- "$resolved_admin_identity" "$NETWORKED_HOME/.ssh/id_admin"
+    chmod 0600 "$NETWORKED_HOME/.ssh/id_admin"
   fi
   local inputs_mount=()
   if [ -n "$inputs_path" ]; then
@@ -359,6 +380,7 @@ case "${1:-help}" in
     shift
     known_hosts_relative=""
     ssh_identity_path=""
+    ssh_admin_identity_path=""
     ssh_inputs_path=""
     ssh_target_class=""
     while [ "$#" -gt 0 ]; do
@@ -371,6 +393,11 @@ case "${1:-help}" in
         --identity)
           [ "$#" -ge 2 ] || dholbeat_die "--identity requires a path"
           ssh_identity_path="$2"
+          shift 2
+          ;;
+        --admin-identity)
+          [ "$#" -ge 2 ] || dholbeat_die "--admin-identity requires a path"
+          ssh_admin_identity_path="$2"
           shift 2
           ;;
         --inputs)
@@ -393,7 +420,8 @@ case "${1:-help}" in
       disposable-host|production-host) ;;
       *) dholbeat_die "exec-ssh requires --confirm disposable-host or --confirm production-host" ;;
     esac
-    run_ssh_controller "$known_hosts_relative" "$ssh_identity_path" "$ssh_inputs_path" "$@"
+    run_ssh_controller "$known_hosts_relative" "$ssh_identity_path" \
+      "$ssh_admin_identity_path" "$ssh_inputs_path" "$@"
     ;;
   digest)
     [ "$#" -eq 1 ] || dholbeat_die "digest accepts no arguments"

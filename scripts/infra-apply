@@ -8,6 +8,7 @@ source "$SCRIPT_DIR/lib/common.sh"
 REPO_ROOT="$(dholbeat_repo_root "$SCRIPT_PATH")"
 
 CONTROLLER_IDENTITY=/tmp/controller-home/.ssh/id_target
+CONTROLLER_ADMIN_IDENTITY=/tmp/controller-home/.ssh/id_admin
 CONTROLLER_KNOWN_HOSTS=/tmp/controller-home/.ssh/known_hosts
 CONTROLLER_INPUTS=/tmp/controller-inputs
 LOG_LIMIT_BYTES=8388608
@@ -16,6 +17,7 @@ LIMIT=""
 RELEASE_TAG=""
 ADDRESS=""
 IDENTITY_FILE=""
+ADMIN_IDENTITY_FILE=""
 KNOWN_HOSTS_FILE=""
 APPROVED_PLAN=""
 STAGE=converged
@@ -49,6 +51,9 @@ converged connects as that administrator. Both stages converge the same
 infra/playbooks/site.yml, so the reviewed desired state never differs between
 them.
 
+--admin-identity-file names the key authenticating the named administrator when it
+differs from the bootstrap key.
+
 After convergence the command independently re-reads /etc/dholbeat-release,
 validates it against the reviewed release, and runs scripts/infra-verify.
 EOF
@@ -71,6 +76,7 @@ while [ "$#" -gt 0 ]; do
     --release) [ "$#" -ge 2 ] || dholbeat_die "--release requires an annotated tag"; RELEASE_TAG="$2"; shift 2 ;;
     --address) [ "$#" -ge 2 ] || dholbeat_die "--address requires an IP address"; ADDRESS="$2"; shift 2 ;;
     --identity-file) [ "$#" -ge 2 ] || dholbeat_die "--identity-file requires a path"; IDENTITY_FILE="$2"; shift 2 ;;
+    --admin-identity-file) [ "$#" -ge 2 ] || dholbeat_die "--admin-identity-file requires a path"; ADMIN_IDENTITY_FILE="$2"; shift 2 ;;
     --known-hosts-file) [ "$#" -ge 2 ] || dholbeat_die "--known-hosts-file requires a path"; KNOWN_HOSTS_FILE="$2"; shift 2 ;;
     --approved-plan) [ "$#" -ge 2 ] || dholbeat_die "--approved-plan requires a path"; APPROVED_PLAN="$2"; shift 2 ;;
     --stage) [ "$#" -ge 2 ] || dholbeat_die "--stage requires bootstrap or converged"; STAGE="$2"; shift 2 ;;
@@ -93,6 +99,11 @@ esac
 [ -t 0 ] || dholbeat_die "production apply requires an interactive terminal for founder confirmation"
 
 IDENTITY_FILE="$(dholbeat_assert_outside_repository "$REPO_ROOT" "$IDENTITY_FILE" "connection identity")"
+if [ -n "$ADMIN_IDENTITY_FILE" ]; then
+  ADMIN_IDENTITY_FILE="$(dholbeat_assert_outside_repository "$REPO_ROOT" "$ADMIN_IDENTITY_FILE" "administrator identity")"
+else
+  ADMIN_IDENTITY_FILE="$IDENTITY_FILE"
+fi
 KNOWN_HOSTS_FILE="$(dholbeat_canonical_path "$KNOWN_HOSTS_FILE")"
 [ ! -L "$KNOWN_HOSTS_FILE" ] || dholbeat_die "the known-hosts file must not be a symbolic link"
 [ -s "$KNOWN_HOSTS_FILE" ] || dholbeat_die "known-hosts file is missing or empty: $KNOWN_HOSTS_FILE"
@@ -219,25 +230,46 @@ text = sys.stdin.read()
 start = text.index("{")
 sys.stdout.write(base64.b64decode(json.loads(text[start:])["content"]).decode("utf-8"))'
 FETCH
-chmod 0700 "$TEMP_ROOT/inputs/run-ansible.sh" "$TEMP_ROOT/inputs/fetch-receipt.sh"
+cat >"$TEMP_ROOT/inputs/run-ansible-adhoc.sh" <<'ADHOC'
+#!/bin/sh
+# Run an ad-hoc Ansible module from the infra tree.
+set -eu
+cd /workspace/infra
+exec ansible "$@"
+ADHOC
+chmod 0700 "$TEMP_ROOT/inputs/run-ansible.sh" "$TEMP_ROOT/inputs/fetch-receipt.sh" \
+  "$TEMP_ROOT/inputs/run-ansible-adhoc.sh"
 
-"$SCRIPT_DIR/controller" exec python3 infra/inventories/host_baseline.py \
-  --root /workspace render \
-  --limit "$LIMIT" \
-  --address "$ADDRESS" \
-  --stage "$STAGE" \
-  --identity-file "$CONTROLLER_IDENTITY" \
-  --known-hosts-file "$CONTROLLER_KNOWN_HOSTS" \
-  --output - >"$TEMP_ROOT/inputs/inventory.yml"
+render_inventory() {
+  local stage="$1"
+  local destination="$2"
+  "$SCRIPT_DIR/controller" exec python3 infra/inventories/host_baseline.py \
+    --root /workspace render \
+    --limit "$LIMIT" \
+    --address "$ADDRESS" \
+    --stage "$stage" \
+    --identity-file "$CONTROLLER_IDENTITY" \
+    --admin-identity-file "$CONTROLLER_ADMIN_IDENTITY" \
+    --known-hosts-file "$CONTROLLER_KNOWN_HOSTS" \
+    --output - >"$destination"
+  chmod 0600 "$destination"
+}
+
+# The convergence inventory reflects the requested stage. Convergence then
+# disables root login and restricts AllowUsers to the named administrator, so
+# every later Ansible process must connect as that administrator instead.
+render_inventory "$STAGE" "$TEMP_ROOT/inputs/inventory.yml"
+render_inventory converged "$TEMP_ROOT/inputs/inventory-converged.yml"
 "$SCRIPT_DIR/controller" exec python3 scripts/lib/release_vars.py \
   <"$RELEASE_DOCUMENT" >"$TEMP_ROOT/inputs/release-vars.yml"
-chmod 0600 "$TEMP_ROOT/inputs/inventory.yml" "$TEMP_ROOT/inputs/release-vars.yml"
+chmod 0600 "$TEMP_ROOT/inputs/release-vars.yml"
 
 printf '\n==> converging %s\n' "$LIMIT"
 set +e
 "$SCRIPT_DIR/controller" exec-ssh \
   --known-hosts ".artifacts/$SESSION_NAME/known_hosts" \
   --identity "$IDENTITY_FILE" \
+  --admin-identity "$ADMIN_IDENTITY_FILE" \
   --inputs "$TEMP_ROOT/inputs" \
   --confirm production-host \
   sh "$CONTROLLER_INPUTS/run-ansible.sh" \
@@ -260,23 +292,42 @@ fi
 "$SCRIPT_DIR/controller" exec python3 scripts/lib/plan_document.py redact \
   --redact "$ADDRESS" \
   --redact "$IDENTITY_FILE" \
+  --redact "$ADMIN_IDENTITY_FILE" \
   --redact "$KNOWN_HOSTS_FILE" \
   <"$TEMP_ROOT/apply.raw" >"$ARTIFACT_ROOT/apply.log"
 chmod 0600 "$ARTIFACT_ROOT/apply.log"
 [ "$APPLY_STATUS" -eq 0 ] \
   || dholbeat_die "convergence failed for $LIMIT; see .artifacts/$ARTIFACT_NAME/apply.log"
 
+# The host is hardened now: prove the administrator path works before relying
+# on it, so a broken transition surfaces here rather than as an opaque failure.
+printf '\n==> administrator connection after hardening\n'
+"$SCRIPT_DIR/controller" exec-ssh \
+  --known-hosts ".artifacts/$SESSION_NAME/known_hosts" \
+  --identity "$IDENTITY_FILE" \
+  --admin-identity "$ADMIN_IDENTITY_FILE" \
+  --inputs "$TEMP_ROOT/inputs" \
+  --confirm production-host \
+  sh "$CONTROLLER_INPUTS/run-ansible-adhoc.sh" \
+  --inventory "$CONTROLLER_INPUTS/inventory-converged.yml" \
+  --module-name ansible.builtin.ping \
+  "$LIMIT" >/dev/null \
+  || dholbeat_die "the named administrator could not reconnect after SSH hardening; \
+the host is converged but unverified -- recover through the provider console"
+
 printf '\n==> independent receipt verification\n'
 "$SCRIPT_DIR/controller" exec-ssh \
   --known-hosts ".artifacts/$SESSION_NAME/known_hosts" \
   --identity "$IDENTITY_FILE" \
+  --admin-identity "$ADMIN_IDENTITY_FILE" \
   --inputs "$TEMP_ROOT/inputs" \
   --confirm production-host \
   sh "$CONTROLLER_INPUTS/fetch-receipt.sh" \
-  "$CONTROLLER_INPUTS/inventory.yml" /etc/dholbeat-release "$LIMIT" \
+  "$CONTROLLER_INPUTS/inventory-converged.yml" /etc/dholbeat-release "$LIMIT" \
   >"$TEMP_ROOT/inputs/runtime-receipt.yml"
 install -m 0600 "$TEMP_ROOT/inputs/runtime-receipt.yml" "$ARTIFACT_ROOT/runtime-receipt.yml"
-dholbeat_assert_absent_from_evidence "$ARTIFACT_ROOT" "$ADDRESS" "$IDENTITY_FILE" "$KNOWN_HOSTS_FILE"
+dholbeat_assert_absent_from_evidence "$ARTIFACT_ROOT" "$ADDRESS" "$IDENTITY_FILE" \
+  "$ADMIN_IDENTITY_FILE" "$KNOWN_HOSTS_FILE"
 "$SCRIPT_DIR/controller" exec python3 scripts/lib/release_gate.py \
   --root /workspace \
   --release "/workspace/$RELEASE_RELATIVE" \
@@ -290,7 +341,8 @@ printf '\n==> read-only host verification\n'
 "$SCRIPT_DIR/infra-verify" \
   --limit "$LIMIT" \
   --address "$ADDRESS" \
-  --identity-file "$IDENTITY_FILE" \
+  --identity-file "$ADMIN_IDENTITY_FILE" \
+  --admin-identity-file "$ADMIN_IDENTITY_FILE" \
   --known-hosts-file "$KNOWN_HOSTS_FILE" \
   --release-tag "$RELEASE_TAG" \
   --artifact-suffix "postapply"
@@ -308,7 +360,8 @@ printf '%s\n' \
   'receipt_verified: true' \
   'host_verified: true' \
   >"$ARTIFACT_ROOT/summary.yml"
-dholbeat_assert_absent_from_evidence "$ARTIFACT_ROOT" "$ADDRESS" "$IDENTITY_FILE" "$KNOWN_HOSTS_FILE"
+dholbeat_assert_absent_from_evidence "$ARTIFACT_ROOT" "$ADDRESS" "$IDENTITY_FILE" \
+  "$ADMIN_IDENTITY_FILE" "$KNOWN_HOSTS_FILE"
 
 printf '\napply complete: %s at %s\n' "$LIMIT" "$RELEASE_TAG"
 printf 'evidence: .artifacts/%s\n' "$ARTIFACT_NAME"

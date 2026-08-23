@@ -417,7 +417,17 @@ def render_inventory(
     stage: str,
     identity_file: str,
     known_hosts_file: str,
+    admin_identity_file: str | None = None,
 ) -> dict[str, Any]:
+    """Render the operator inventory for one connection phase.
+
+    ``stage`` selects only the identity used to open the connection. Bootstrap
+    connects as the provider login because the named administrator does not
+    exist yet; converged connects as that administrator. The second-connection
+    probe always authenticates as the administrator, so it uses the
+    administrator key whether or not that differs from the bootstrap key.
+    """
+
     document = load_yaml(baseline_path(root, host_id))
     if not isinstance(document, dict):
         raise ValueError(f"{host_id}: baseline contract is not a mapping")
@@ -432,12 +442,14 @@ def render_inventory(
     ssh = document["ssh"]
     directories = document["managed_directories"]
     group_all = load_yaml(root / "infra/inventories/production/group_vars/all.yml")
-    connection_user = document["bootstrap"]["identity"] if stage == "bootstrap" else admin["user"]
+    admin_identity = admin_identity_file or identity_file
+    bootstrap_stage = stage == "bootstrap"
+    connection_user = document["bootstrap"]["identity"] if bootstrap_stage else admin["user"]
     host_vars: dict[str, Any] = {
         "ansible_host": address,
         "ansible_port": int(ssh["port"]),
         "ansible_user": connection_user,
-        "ansible_private_key_file": identity_file,
+        "ansible_private_key_file": identity_file if bootstrap_stage else admin_identity,
         "dholbeat_host_id": document["host_id"],
         "dholbeat_host_role": document["host_role"],
         "dholbeat_stage": stage,
@@ -452,7 +464,7 @@ def render_inventory(
         "baseline_public_interface": document["expected_host"]["public_interface"],
         "baseline_second_connection_host": address,
         "baseline_second_connection_port": int(ssh["port"]),
-        "baseline_second_connection_identity_file": identity_file,
+        "baseline_second_connection_identity_file": admin_identity,
         "baseline_second_connection_known_hosts_file": known_hosts_file,
         "baseline_application_bindings": list(document["application_bindings"]),
         "baseline_managed_directories": directories,
@@ -479,6 +491,10 @@ def main() -> None:
     render.add_argument("--address", required=True)
     render.add_argument("--stage", choices=["bootstrap", "converged"], required=True)
     render.add_argument("--identity-file", required=True)
+    render.add_argument(
+        "--admin-identity-file",
+        help="administrator key when it differs from the bootstrap key; defaults to --identity-file",
+    )
     render.add_argument("--known-hosts-file", required=True)
     render.add_argument(
         "--output", type=Path, required=True, help="destination path, or - to stream to stdout"
@@ -518,6 +534,7 @@ def main() -> None:
         arguments.stage,
         arguments.identity_file,
         arguments.known_hosts_file,
+        arguments.admin_identity_file,
     )
     if str(arguments.output) == "-":
         # The controller mounts the workspace read-only, so the inventory is

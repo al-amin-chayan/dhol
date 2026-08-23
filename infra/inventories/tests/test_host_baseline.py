@@ -136,7 +136,12 @@ def rendering_root(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def rendered(root: Path, stage: str, address: str = "203.0.113.20") -> dict:
+def rendered(
+    root: Path,
+    stage: str,
+    address: str = "203.0.113.20",
+    admin_identity: str | None = None,
+) -> dict:
     return HOST_BASELINE.render_inventory(
         root,
         positive_document()["host_id"],
@@ -144,6 +149,7 @@ def rendered(root: Path, stage: str, address: str = "203.0.113.20") -> dict:
         stage,
         "/tmp/controller-home/.ssh/id_target",
         "/tmp/controller-home/.ssh/known_hosts",
+        admin_identity,
     )
 
 
@@ -200,3 +206,54 @@ def test_render_refuses_anything_but_a_literal_address(
 def test_render_refuses_an_unknown_stage(rendering_root: Path) -> None:
     with pytest.raises(ValueError):
         rendered(rendering_root, "production")
+
+
+# --- Bootstrap-to-administrator lifecycle ---
+
+BOOTSTRAP_KEY = "/tmp/controller-home/.ssh/id_target"
+ADMIN_KEY = "/tmp/controller-home/.ssh/id_admin"
+
+
+def test_first_contact_uses_the_bootstrap_key_and_login(rendering_root: Path) -> None:
+    document = positive_document()
+    variables = host_vars(rendered(rendering_root, "bootstrap", admin_identity=ADMIN_KEY))
+    assert variables["ansible_user"] == document["bootstrap"]["identity"]
+    assert variables["ansible_private_key_file"] == BOOTSTRAP_KEY
+
+
+def test_every_later_connection_uses_the_administrator_key_and_login(
+    rendering_root: Path,
+) -> None:
+    document = positive_document()
+    variables = host_vars(rendered(rendering_root, "converged", admin_identity=ADMIN_KEY))
+    assert variables["ansible_user"] == document["admin"]["user"]
+    assert variables["ansible_private_key_file"] == ADMIN_KEY
+
+
+def test_the_second_connection_probe_always_authenticates_as_the_administrator(
+    rendering_root: Path,
+) -> None:
+    """The probe proves the path that survives SSH hardening, not the bootstrap one."""
+
+    for stage in ("bootstrap", "converged"):
+        variables = host_vars(rendered(rendering_root, stage, admin_identity=ADMIN_KEY))
+        assert variables["baseline_second_connection_identity_file"] == ADMIN_KEY
+
+
+def test_the_administrator_key_defaults_to_the_bootstrap_key(rendering_root: Path) -> None:
+    variables = host_vars(rendered(rendering_root, "converged"))
+    assert variables["ansible_private_key_file"] == BOOTSTRAP_KEY
+    assert variables["baseline_second_connection_identity_file"] == BOOTSTRAP_KEY
+
+
+def test_a_bootstrap_inventory_cannot_be_reused_after_hardening(rendering_root: Path) -> None:
+    """Convergence disables root login and restricts AllowUsers to the administrator.
+
+    A second Ansible process therefore needs a distinct converged inventory; the
+    in-play identity switch cannot cross a process boundary.
+    """
+
+    bootstrap = host_vars(rendered(rendering_root, "bootstrap", admin_identity=ADMIN_KEY))
+    converged = host_vars(rendered(rendering_root, "converged", admin_identity=ADMIN_KEY))
+    assert bootstrap["ansible_user"] != converged["ansible_user"]
+    assert bootstrap["ansible_private_key_file"] != converged["ansible_private_key_file"]

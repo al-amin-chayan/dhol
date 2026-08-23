@@ -8,6 +8,7 @@ source "$SCRIPT_DIR/lib/common.sh"
 REPO_ROOT="$(dholbeat_repo_root "$SCRIPT_PATH")"
 
 CONTROLLER_IDENTITY=/tmp/controller-home/.ssh/id_target
+CONTROLLER_ADMIN_IDENTITY=/tmp/controller-home/.ssh/id_admin
 CONTROLLER_KNOWN_HOSTS=/tmp/controller-home/.ssh/known_hosts
 CONTROLLER_INPUTS=/tmp/controller-inputs
 LOG_LIMIT_BYTES=8388608
@@ -15,6 +16,7 @@ LOG_LIMIT_BYTES=8388608
 LIMIT=""
 ADDRESS=""
 IDENTITY_FILE=""
+ADMIN_IDENTITY_FILE=""
 KNOWN_HOSTS_FILE=""
 RELEASE_TAG=""
 ARTIFACT_SUFFIX=""
@@ -36,6 +38,9 @@ key-only SSH policy, a working second administrator connection, and that no
 undeclared service answers on a public address. With --release-tag it also
 requires the host runtime receipt to identify that exact release.
 
+--admin-identity-file names the key authenticating the named administrator when it
+differs from the bootstrap key.
+
 Evidence is redacted and written under .artifacts/.
 EOF
 }
@@ -56,6 +61,7 @@ while [ "$#" -gt 0 ]; do
     --limit) [ "$#" -ge 2 ] || dholbeat_die "--limit requires a host ID"; LIMIT="$2"; shift 2 ;;
     --address) [ "$#" -ge 2 ] || dholbeat_die "--address requires an IP address"; ADDRESS="$2"; shift 2 ;;
     --identity-file) [ "$#" -ge 2 ] || dholbeat_die "--identity-file requires a path"; IDENTITY_FILE="$2"; shift 2 ;;
+    --admin-identity-file) [ "$#" -ge 2 ] || dholbeat_die "--admin-identity-file requires a path"; ADMIN_IDENTITY_FILE="$2"; shift 2 ;;
     --known-hosts-file) [ "$#" -ge 2 ] || dholbeat_die "--known-hosts-file requires a path"; KNOWN_HOSTS_FILE="$2"; shift 2 ;;
     --release-tag) [ "$#" -ge 2 ] || dholbeat_die "--release-tag requires a tag"; RELEASE_TAG="$2"; shift 2 ;;
     --artifact-suffix) [ "$#" -ge 2 ] || dholbeat_die "--artifact-suffix requires a slug"; ARTIFACT_SUFFIX="$2"; shift 2 ;;
@@ -75,6 +81,11 @@ esac
   || dholbeat_die "probing a production host is never permitted in CI"
 
 IDENTITY_FILE="$(dholbeat_assert_outside_repository "$REPO_ROOT" "$IDENTITY_FILE" "connection identity")"
+if [ -n "$ADMIN_IDENTITY_FILE" ]; then
+  ADMIN_IDENTITY_FILE="$(dholbeat_assert_outside_repository "$REPO_ROOT" "$ADMIN_IDENTITY_FILE" "administrator identity")"
+else
+  ADMIN_IDENTITY_FILE="$IDENTITY_FILE"
+fi
 KNOWN_HOSTS_FILE="$(dholbeat_canonical_path "$KNOWN_HOSTS_FILE")"
 [ ! -L "$KNOWN_HOSTS_FILE" ] || dholbeat_die "the known-hosts file must not be a symbolic link"
 [ -s "$KNOWN_HOSTS_FILE" ] || dholbeat_die "known-hosts file is missing or empty: $KNOWN_HOSTS_FILE"
@@ -119,6 +130,7 @@ chmod 0700 "$TEMP_ROOT/inputs/run-ansible.sh"
   --address "$ADDRESS" \
   --stage converged \
   --identity-file "$CONTROLLER_IDENTITY" \
+  --admin-identity-file "$CONTROLLER_ADMIN_IDENTITY" \
   --known-hosts-file "$CONTROLLER_KNOWN_HOSTS" \
   --output - >"$TEMP_ROOT/inputs/inventory.yml"
 chmod 0600 "$TEMP_ROOT/inputs/inventory.yml"
@@ -139,6 +151,7 @@ set +e
 "$SCRIPT_DIR/controller" exec-ssh \
   --known-hosts ".artifacts/$SESSION_NAME/known_hosts" \
   --identity "$IDENTITY_FILE" \
+  --admin-identity "$ADMIN_IDENTITY_FILE" \
   --inputs "$TEMP_ROOT/inputs" \
   --confirm production-host \
   sh "$CONTROLLER_INPUTS/run-ansible.sh" "${ANSIBLE_ARGS[@]}" \
@@ -156,6 +169,7 @@ fi
 "$SCRIPT_DIR/controller" exec python3 scripts/lib/plan_document.py redact \
   --redact "$ADDRESS" \
   --redact "$IDENTITY_FILE" \
+  --redact "$ADMIN_IDENTITY_FILE" \
   --redact "$KNOWN_HOSTS_FILE" \
   <"$TEMP_ROOT/verify.raw" >"$ARTIFACT_ROOT/verify.log"
 chmod 0600 "$ARTIFACT_ROOT/verify.log"
@@ -170,7 +184,8 @@ printf '%s\n' \
   "exit_status: $VERIFY_STATUS" \
   "reported_changed: ${CHANGED:-unknown}" \
   >"$ARTIFACT_ROOT/summary.yml"
-dholbeat_assert_absent_from_evidence "$ARTIFACT_ROOT" "$ADDRESS" "$IDENTITY_FILE" "$KNOWN_HOSTS_FILE"
+dholbeat_assert_absent_from_evidence "$ARTIFACT_ROOT" "$ADDRESS" "$IDENTITY_FILE" \
+  "$ADMIN_IDENTITY_FILE" "$KNOWN_HOSTS_FILE"
 
 printf 'verification evidence: .artifacts/%s\n' "$ARTIFACT_NAME"
 if [ "$VERIFY_STATUS" -ne 0 ]; then
