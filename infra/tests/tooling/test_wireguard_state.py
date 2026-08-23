@@ -115,6 +115,19 @@ def test_a_reported_peer_never_echoes_a_full_key() -> None:
     assert all(PEER_TWO not in finding for finding in findings)
 
 
+def test_the_reviewed_identity_is_asserted_when_declared() -> None:
+    """A replaced host key must not pass verification silently."""
+
+    interface, peers = parsed()
+    assert check(expected_public_key=SERVER_PUBLIC) == []
+    findings = check(expected_public_key=PEER_ONE)
+    assert any("differs from the reviewed public key" in f for f in findings), findings
+
+
+def test_no_expected_key_means_no_identity_assertion() -> None:
+    assert check(expected_public_key="") == []
+
+
 def test_a_missing_tunnel_address_is_reported() -> None:
     findings = check(interface_addresses=[])
     assert any("does not carry the declared host address" in f for f in findings), findings

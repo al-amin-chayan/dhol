@@ -11,6 +11,9 @@
       --listen-port {{ baseline_vpn.listen_port | int }}
       --subnet {{ baseline_vpn.subnet | quote }}
       --host-address {{ baseline_vpn.host_address | quote }}
+      {% if baseline_vpn.server_public_key is defined %}
+      --expect-public-key {{ baseline_vpn.server_public_key | quote }}
+      {% endif %}
       {% for peer in baseline_vpn.peers %}
       --peer {{ (peer.public_key ~ '|' ~ (peer.allowed_ips | join(','))) | quote }}
       {% endfor %}

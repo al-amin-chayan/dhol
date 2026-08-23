@@ -81,9 +81,12 @@ def validate(
     subnet: str,
     host_address: str,
     interface_addresses: list[str],
+    expected_public_key: str = "",
 ) -> list[str]:
     findings: list[str] = []
 
+    if expected_public_key and interface.get("public_key") != expected_public_key:
+        findings.append("the running WireGuard identity differs from the reviewed public key")
     if str(interface.get("listen_port")) != str(listen_port):
         findings.append(
             f"WireGuard listen port is {interface.get('listen_port')}, declared {listen_port}"
@@ -158,6 +161,7 @@ def main() -> None:
     parser.add_argument("--subnet", required=True)
     parser.add_argument("--host-address", required=True)
     parser.add_argument("--peer", action="append", default=[])
+    parser.add_argument("--expect-public-key", default="")
     arguments = parser.parse_args()
 
     dump = read_command(["wg", "show", arguments.interface, "dump"])
@@ -180,6 +184,7 @@ def main() -> None:
             arguments.subnet,
             arguments.host_address,
             interface_addresses(arguments.interface),
+            arguments.expect_public_key,
         )
     )
 

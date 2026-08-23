@@ -28,20 +28,11 @@
     group: root
     mode: "{{ wireguard_config_dir_mode }}"
 
-# The server key is escrowed in the founder's password manager, which is this
-# repository's established home for private keys. Generation happens once and
-# never overwrites: a second convergence must not silently invalidate every
-# peer configuration already saved there.
-- name: Install a reviewed server private key when one is supplied
-  ansible.builtin.copy:
-    content: "{{ wireguard_server_private_key }}\n"
-    dest: "{{ wireguard_key_path }}"
-    owner: root
-    group: root
-    mode: "{{ wireguard_key_mode }}"
-  when: wireguard_server_private_key | default('') | length > 0
-  no_log: true
-
+# One authoritative key lifecycle: the host generates its key once, it is
+# escrowed in the password manager alongside the age keys and provider logins,
+# and its public half is committed so the running identity is reviewable. There
+# is deliberately no second path that could install a different key without
+# restarting the interface.
 - name: Check whether a server private key already exists
   ansible.builtin.stat:
     path: "{{ wireguard_key_path }}"
@@ -61,11 +52,16 @@
     group: root
     mode: "{{ wireguard_key_mode }}"
 
+# Read-only, so it runs in check mode too. On a host that has no key yet the
+# read simply fails and the reported delta stays informational rather than
+# executing a postcondition that cannot exist.
 - name: Read the server public key for peer configuration
   ansible.builtin.shell:
     cmd: set -o pipefail && wg pubkey <{{ wireguard_key_path | quote }}
     executable: /bin/bash
   changed_when: false
+  check_mode: false
+  failed_when: false
   register: wireguard_public_key
 
 - name: Install the WireGuard interface configuration
@@ -90,8 +86,23 @@
 - name: Report the server public key to escrow with each peer configuration
   ansible.builtin.debug:
     msg: >-
-      wireguard_server_public_key={{ wireguard_public_key.stdout | trim }}
+      wireguard_server_public_key={{ wireguard_public_key.stdout | default('') | trim }}
       endpoint_port={{ baseline_vpn.listen_port | int }}
+  when: wireguard_public_key.stdout | default('') | length > 0
 
+- name: Require the running key to match the reviewed identity
+  ansible.builtin.assert:
+    that:
+      - wireguard_public_key.stdout | default('') | trim == baseline_vpn.server_public_key
+    fail_msg: >-
+      The running WireGuard identity does not match vpn.server_public_key. Either
+      the host key was replaced without review, or the contract records a key this
+      host never had.
+  when:
+    - not ansible_check_mode
+    - baseline_vpn.server_public_key is defined
+
+# Postconditions cannot be asserted against state a check run has not created.
 - name: Verify the effective WireGuard contract
   ansible.builtin.import_tasks: verify.yml
+  when: not ansible_check_mode
