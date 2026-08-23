@@ -54,33 +54,66 @@ def test_a_malformed_socket_address_is_skipped() -> None:
     assert LISTENERS.split_local("nonsense") is None
 
 
-def parse(sample: str) -> list[tuple[str, str, str]]:
-    sockets = []
-    for line in sample.splitlines():
-        match = LISTENERS.LISTEN_RE.match(line.strip())
-        if match is None:
-            continue
-        local = LISTENERS.split_local(match.group("local"))
-        assert local is not None
-        sockets.append((match.group("protocol"), local[0], local[1]))
-    return sockets
-
-
 SS_SAMPLE = """
 tcp   LISTEN 0      4096       127.0.0.1:5432      0.0.0.0:*
 tcp   LISTEN 0      4096         0.0.0.0:22        0.0.0.0:*
-tcp   LISTEN 0      4096         0.0.0.0:8080      0.0.0.0:*
 udp   UNCONN 0      0          127.0.0.53:53       0.0.0.0:*
 """
 
 
-def test_only_the_declared_ssh_port_may_answer_publicly() -> None:
-    public = [
-        (protocol, port)
-        for protocol, address, port in parse(SS_SAMPLE)
-        if LISTENERS.is_public_binding(address)
-    ]
-    assert ("tcp", "22") in public
-    assert ("tcp", "8080") in public, "an undeclared published port must be reported"
-    assert ("tcp", "5432") not in public
-    assert ("udp", "53") not in public
+def test_a_declared_public_tcp_port_passes() -> None:
+    assert LISTENERS.evaluate(SS_SAMPLE, ["tcp/22"]) == []
+
+
+def test_an_undeclared_public_tcp_port_is_reported() -> None:
+    sample = SS_SAMPLE + "tcp   LISTEN 0 4096 0.0.0.0:8080 0.0.0.0:*\n"
+    findings = LISTENERS.evaluate(sample, ["tcp/22"])
+    assert any("tcp/8080 listens on a public address" in finding for finding in findings)
+
+
+def test_the_same_port_on_another_protocol_is_not_covered() -> None:
+    sample = SS_SAMPLE + "udp   UNCONN 0 0 0.0.0.0:22 0.0.0.0:*\n"
+    findings = LISTENERS.evaluate(sample, ["tcp/22"])
+    assert any("udp/22 listens on a public address" in finding for finding in findings)
+
+
+def test_an_unparseable_row_fails_closed_instead_of_being_skipped() -> None:
+    findings = LISTENERS.evaluate(SS_SAMPLE + "wat is this row\n", ["tcp/22"])
+    assert any("could not be parsed" in finding for finding in findings)
+
+
+def test_a_malformed_local_address_fails_closed() -> None:
+    sample = "tcp   LISTEN 0      4096       nonsense      0.0.0.0:*\n"
+    findings = LISTENERS.evaluate(sample, ["tcp/22"])
+    assert any("could not be parsed" in finding for finding in findings)
+
+
+def test_blank_rows_are_not_treated_as_unparseable() -> None:
+    assert LISTENERS.evaluate("\n\n" + SS_SAMPLE + "\n   \n", ["tcp/22"]) == []
+
+
+@pytest.mark.parametrize("entry", ["22", "tcp:22", "tcp/", "sctp/22", "tcp/0"])
+def test_an_allowlist_entry_that_is_not_protocol_slash_port_is_rejected(entry: str) -> None:
+    findings = LISTENERS.evaluate(SS_SAMPLE, [entry])
+    assert any("not protocol/port" in finding for finding in findings)
+
+
+def test_an_empty_allowlist_is_rejected() -> None:
+    findings = LISTENERS.evaluate(SS_SAMPLE, [])
+    assert any("no public protocol/port pair was declared" in finding for finding in findings)
+
+
+def test_private_and_loopback_listeners_never_need_declaring() -> None:
+    sample = (
+        "tcp   LISTEN 0 4096 127.0.0.1:5432 0.0.0.0:*\n"
+        "tcp   LISTEN 0 4096 10.4.0.7:6379 0.0.0.0:*\n"
+        "tcp   LISTEN 0 4096 [::1]:9090 [::]:*\n"
+        "tcp   LISTEN 0 4096 0.0.0.0:22 0.0.0.0:*\n"
+    )
+    assert LISTENERS.evaluate(sample, ["tcp/22"]) == []
+
+
+def test_a_public_ipv6_listener_is_reported() -> None:
+    sample = "tcp   LISTEN 0 4096 [2001:db8::1]:8443 [::]:*\n"
+    findings = LISTENERS.evaluate(sample, ["tcp/22"])
+    assert any("tcp/8443 listens on a public address" in finding for finding in findings)
