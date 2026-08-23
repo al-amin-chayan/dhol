@@ -23,13 +23,20 @@ def load_module():
 DOCKER = load_module()
 DECLARED = ["unix:///var/run/docker.sock"]
 
+# Captured from Ubuntu 24.04. ss omits the Netid column when a single protocol
+# is selected, so the committed invocation's real output is shape-dependent.
+SS_TCP_ONLY = 'LISTEN 0      1      127.0.0.1:{port} 0.0.0.0:* users:(("{process}",pid=270,fd=3))'
+SS_TCP_AND_UDP = 'tcp LISTEN 0      1      127.0.0.1:{port} 0.0.0.0:* users:(("{process}",pid=270,fd=3))'
+SS_SHAPES = (SS_TCP_ONLY, SS_TCP_AND_UDP)
+
 
 def document(**overrides):
     base = {
         "declared_hosts": DECLARED,
         "daemon_config": {"live-restore": True, "log-driver": "json-file"},
         "exec_start": "/usr/bin/dockerd -H fd:// --containerd=/run/containerd/containerd.sock",
-        "socket_table": "tcp LISTEN 0 4096 0.0.0.0:22 0.0.0.0:* users:((\"sshd\",pid=700,fd=3))",
+        "socket_table": SS_TCP_AND_UDP.format(port="22", process="sshd"),
+        "socket_activation": "Stream /run/docker.sock",
     }
     base.update(overrides)
     return base
@@ -78,18 +85,79 @@ def test_a_non_unix_host_on_the_systemd_command_line_is_rejected(exec_start: str
     assert any("systemd command line" in finding for finding in findings), findings
 
 
-@pytest.mark.parametrize(
-    "port", ["2375", "2376", "4243", "9999"]
-)
-def test_any_tcp_socket_owned_by_the_daemon_is_rejected(port: str) -> None:
-    table = f'tcp LISTEN 0 4096 127.0.0.1:{port} 0.0.0.0:* users:(("dockerd",pid=901,fd=9))'
+@pytest.mark.parametrize("shape", SS_SHAPES)
+@pytest.mark.parametrize("port", ["2375", "2376", "4243", "9999"])
+def test_any_socket_owned_by_the_daemon_is_rejected(shape: str, port: str) -> None:
+    """Both real ss output shapes must be parsed, not just the two-column one."""
+
+    table = shape.format(port=port, process="dockerd")
     findings = DOCKER.validate(document(socket_table=table))
-    assert any("listening on a TCP socket" in finding for finding in findings), findings
+    assert any("is listening on a" in finding for finding in findings), findings
 
 
-def test_a_non_docker_tcp_listener_is_not_the_daemon_contract() -> None:
-    table = 'tcp LISTEN 0 4096 0.0.0.0:443 0.0.0.0:* users:(("nginx",pid=12,fd=6))'
+def test_the_committed_ss_invocation_shape_is_not_silently_skipped() -> None:
+    """Regression: ss omits Netid with a single protocol, and rows were skipped."""
+
+    table = "LISTEN 0      1      127.0.0.1:4243 0.0.0.0:* users:((\"dockerd\",pid=270,fd=3))"
+    assert DOCKER.validate(document(socket_table=table)) != []
+
+
+@pytest.mark.parametrize("shape", SS_SHAPES)
+def test_a_non_docker_listener_is_not_attributed_to_the_daemon(shape: str) -> None:
+    table = shape.format(port="443", process="nginx")
     assert DOCKER.validate(document(socket_table=table)) == []
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        'LISTEN 0 1 users:(("dockerd",pid=270,fd=3))',
+        'tcp dockerd',
+        'LISTEN 0 1 not-an-endpoint 0.0.0.0:* users:(("dockerd",pid=1,fd=3))',
+    ],
+)
+def test_an_unparseable_daemon_row_fails_closed(row: str) -> None:
+    findings = DOCKER.validate(document(socket_table=row))
+    assert any("could not be parsed" in finding for finding in findings), findings
+
+
+# --- systemd socket activation behind fd:// ---
+
+def test_a_filesystem_socket_activation_endpoint_passes() -> None:
+    assert DOCKER.validate(document(socket_activation="Stream /run/docker.sock")) == []
+
+
+@pytest.mark.parametrize(
+    "endpoint",
+    ["Stream 127.0.0.1:2375", "Stream 0.0.0.0:2376", "Stream [::1]:4243", "Datagram 10.4.0.7:9999"],
+)
+def test_a_tcp_socket_activation_endpoint_is_rejected(endpoint: str) -> None:
+    """fd:// is only Unix-only if the activating socket unit is."""
+
+    findings = DOCKER.validate(document(socket_activation=endpoint))
+    assert any("non-filesystem endpoint" in finding for finding in findings), findings
+
+
+def test_fd_activation_without_any_declared_endpoint_is_rejected() -> None:
+    findings = DOCKER.validate(document(socket_activation=""))
+    assert any("declares no endpoint" in finding for finding in findings), findings
+
+
+def test_an_unparseable_socket_activation_entry_fails_closed() -> None:
+    findings = DOCKER.validate(document(socket_activation="StreamOnly"))
+    assert any("Listen entry could not be parsed" in finding for finding in findings), findings
+
+
+def test_a_daemon_without_fd_activation_needs_no_socket_unit() -> None:
+    assert (
+        DOCKER.validate(
+            document(
+                exec_start="/usr/bin/dockerd -H unix:///var/run/docker.sock",
+                socket_activation="",
+            )
+        )
+        == []
+    )
 
 
 def test_daemon_json_hosts_that_differ_from_the_contract_are_rejected() -> None:

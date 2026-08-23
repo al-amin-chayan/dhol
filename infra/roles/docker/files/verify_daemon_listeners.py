@@ -24,6 +24,7 @@ from typing import Any
 ALLOWED_SCHEMES = ("unix://", "fd://")
 HOST_ARGUMENT_RE = re.compile(r"(?:^|\s)(?:-H|--host(?:=|\s+))\s*(?P<value>\S+)")
 DOCKER_PROCESS_RE = re.compile(r"\bdockerd\b")
+PROTOCOL_TOKENS = {"tcp", "tcp6", "udp", "udp6"}
 
 
 def non_unix(hosts: Any) -> list[str]:
@@ -36,17 +37,71 @@ def exec_start_hosts(exec_start: str) -> list[str]:
     return [match.group("value") for match in HOST_ARGUMENT_RE.finditer(exec_start or "")]
 
 
-def daemon_tcp_listeners(socket_table: str) -> list[str]:
-    listeners: list[str] = []
+def is_network_endpoint(value: str) -> bool:
+    """A network endpoint is host:port; a Unix socket never appears in ss -t/-u."""
+
+    address, separator, port = value.rpartition(":")
+    return bool(separator) and port.isdigit()
+
+
+def daemon_socket_findings(socket_table: str) -> list[str]:
+    """Report every network socket the daemon owns, in either ss output shape.
+
+    ``ss`` omits the Netid column when a single protocol is selected, so
+    ``--tcp`` alone yields ``LISTEN 0 128 127.0.0.1:4243 ...`` while
+    ``--tcp --udp`` yields ``tcp LISTEN 0 128 ...``. Both are parsed. A row
+    attributed to the daemon that cannot be parsed is a finding, never a skip:
+    an unparsed row is indistinguishable from an exposed daemon.
+    """
+
+    findings: list[str] = []
     for raw_line in (socket_table or "").splitlines():
         line = raw_line.strip()
         if not line or not DOCKER_PROCESS_RE.search(line):
             continue
         fields = line.split()
-        if not fields or fields[0].lower() not in {"tcp", "tcp6"}:
+        if fields and fields[0].lower() in PROTOCOL_TOKENS:
+            protocol = fields[0].lower()
+            columns = fields[1:]
+        else:
+            protocol = "network"
+            columns = fields
+        if len(columns) < 4 or not is_network_endpoint(columns[3]):
+            findings.append(f"a Docker-attributed socket row could not be parsed: {line}")
             continue
-        listeners.append(fields[4] if len(fields) > 4 else line)
-    return listeners
+        findings.append(f"the Docker daemon is listening on a {protocol} socket: {columns[3]}")
+    return findings
+
+
+def socket_activation_findings(listen_text: str, uses_socket_activation: bool) -> list[str]:
+    """Validate what systemd actually hands the daemon.
+
+    ``fd://`` is only Unix-only if the activating socket unit is. A drifted
+    ``docker.socket`` can carry ``ListenStream=127.0.0.1:2375`` while ExecStart
+    still reads ``-H fd://``.
+    """
+
+    findings: list[str] = []
+    endpoints = 0
+    for raw_line in (listen_text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = line.split(None, 1)
+        if len(parts) != 2:
+            findings.append(f"docker.socket Listen entry could not be parsed: {line}")
+            continue
+        kind, endpoint = parts[0], parts[1].strip()
+        endpoints += 1
+        if not endpoint.startswith("/"):
+            findings.append(
+                f"docker.socket activates a non-filesystem endpoint: {kind} {endpoint}"
+            )
+    if uses_socket_activation and endpoints == 0:
+        findings.append(
+            "the daemon uses fd:// socket activation but docker.socket declares no endpoint"
+        )
+    return findings
 
 
 def validate(document: dict[str, Any]) -> list[str]:
@@ -66,13 +121,18 @@ def validate(document: dict[str, Any]) -> list[str]:
                     "daemon.json hosts do not match the declared docker_daemon_hosts contract"
                 )
 
+    uses_socket_activation = False
     for host in exec_start_hosts(document.get("exec_start", "")):
+        if host.startswith("fd://"):
+            uses_socket_activation = True
+            continue
         if not host.startswith(ALLOWED_SCHEMES):
             findings.append(f"the Docker systemd command line declares a non-Unix host: {host}")
 
-    for listener in daemon_tcp_listeners(document.get("socket_table", "")):
-        findings.append(f"the Docker daemon is listening on a TCP socket: {listener}")
-
+    findings.extend(daemon_socket_findings(document.get("socket_table", "")))
+    findings.extend(
+        socket_activation_findings(document.get("socket_activation", ""), uses_socket_activation)
+    )
     return sorted(set(findings))
 
 

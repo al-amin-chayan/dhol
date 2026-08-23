@@ -16,10 +16,18 @@
 
 - name: Inspect every listening socket the Docker daemon owns
   ansible.builtin.command:
-    argv: [ss, --no-header, --listening, --numeric, --tcp, --processes]
+    argv: [ss, --no-header, --listening, --numeric, --tcp, --udp, --processes]
   changed_when: false
   check_mode: false
   register: docker_tcp_listeners
+
+- name: Read the effective Docker socket activation endpoints
+  ansible.builtin.command:
+    argv: [systemctl, show, docker.socket, --property=Listen, --value]
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  register: docker_socket_activation
 
 - name: Read the bounded Docker daemon configuration
   ansible.builtin.slurp:
@@ -53,6 +61,7 @@
           'daemon_config': (docker_daemon_config.content | b64decode | from_json),
           'exec_start': docker_exec_start_result.stdout,
           'socket_table': docker_tcp_listeners.stdout,
+          'socket_activation': docker_socket_activation.stdout | default(''),
         } | to_json
       }}
   become: false

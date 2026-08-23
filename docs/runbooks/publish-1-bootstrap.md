@@ -196,9 +196,10 @@ allowlist, the attached Docker ingress chain, catalogued directory ownership and
 modes, effective key-only SSH, a working second administrator connection, and
 that no undeclared protocol/port pair answers on a public address. It also
 proves the Docker daemon is reachable only over its declared Unix socket,
-rejecting every non-Unix host declaration and any TCP socket the daemon owns —
+rejecting every non-Unix host declaration, any network socket the daemon owns —
 including a loopback binding on a nonstandard port, which the public-listener
-probe deliberately ignores.
+probe deliberately ignores — and any `docker.socket` unit that activates a TCP
+endpoint behind an innocuous-looking `fd://`.
 
 From here on, ordinary changes are: plan with `--stage converged`, review, tag,
 apply with `--stage converged`.
