@@ -239,12 +239,14 @@
     - firewall_vpn_mode == 'wireguard'
 
 - name: Verify the Docker ingress chain is attached
+  when: not ansible_check_mode
   ansible.builtin.command:
     argv: [iptables, -w, -C, DOCKER-USER, -j, DHOLBEAT-DOCKER-INGRESS]
   changed_when: false
   check_mode: false
 
 - name: Verify the Docker policy drops only public-interface ingress
+  when: not ansible_check_mode
   ansible.builtin.command:
     argv:
       - iptables
@@ -259,6 +261,7 @@
   check_mode: false
 
 - name: Verify non-ingress Docker forwarding returns to Docker policy
+  when: not ansible_check_mode
   ansible.builtin.command:
     argv: [iptables, -w, -C, DHOLBEAT-DOCKER-INGRESS, -j, RETURN]
   changed_when: false

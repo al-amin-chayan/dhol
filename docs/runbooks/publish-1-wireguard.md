@@ -166,45 +166,71 @@ non-secret and already in Git.
 
 ### Restore onto a rebuilt host
 
-Export the key from the password manager to a path outside the repository, then:
+A rebuilt host has no `dholbeat-admin` account and no proven tunnel, so restore
+is a **phase-one** operation: first contact over the provider login, with the
+contract still carrying `vpn.administration: public`. The commands refuse the
+alternatives rather than letting you discover them on a host you cannot reach.
+
+1. Set `vpn.administration` back to `public` in the contract and keep the office
+   CIDR in `ssh.allow_cidrs`. A tunnel-only contract cannot be bootstrapped: the
+   run would prove the public path it is about to close.
+2. Export the escrowed key from the password manager to a path outside the
+   repository.
+3. Plan and apply as a bootstrap release, supplying both identities:
 
 ```sh
-scripts/infra-apply --limit publish-1 --release <tag> --address <address> \
-  --identity-file ~/.dholbeat/publish-1-admin \
+scripts/infra-apply --limit publish-1 --release <tag> --stage bootstrap \
+  --address <public-address> \
+  --identity-file ~/.dholbeat/publish-1-bootstrap \
+  --admin-identity-file ~/.dholbeat/publish-1-admin \
   --known-hosts-file ~/.dholbeat/publish-1.known_hosts \
   --approved-plan .artifacts/<plan>/plan.yml \
   --wireguard-key-file ~/publish-1-wg0.key
 ```
 
 The key is copied into the run's bounded inputs directory, never logged, and
-removed with that directory when the command exits. The interface is restarted
-deliberately so disk and runtime cannot diverge, convergence then asserts the
-running identity equals `vpn.server_public_key`, and the evidence directory keeps
-only `wireguard-restore-receipt.yml` containing the public half. Delete the
-exported file afterwards.
+removed with that directory when the command exits. A key that does not derive to
+the committed `vpn.server_public_key` is refused before the interface restarts.
+The interface is restarted once, after both the key and a complete `wg0.conf`
+exist, and the evidence directory keeps only `wireguard-restore-receipt.yml`
+holding the public half. Delete the exported file afterwards.
 
-Because the identity is preserved, every peer configuration keeps working.
+Because the identity is preserved, every peer configuration keeps working. Cut
+back over to `vpn.administration: tunnel` as a second release once the tunnel is
+confirmed.
 
 ### Rotation
 
 - **A peer:** remove it from `vpn.peers` and converge. Verification fails if the
   peer is still present on the host, so removal is proven rather than assumed.
-- **The server key:** generate a new one, escrow it, update
-  `vpn.server_public_key`, and converge with `--wireguard-key-file` pointing at
-  the new key. This runs entirely through the reviewed plan and apply path — no
-  console session and no hand-deleted host file. Every peer needs its `PublicKey`
-  updated afterwards, so schedule it.
 
-```sh
-scripts/wireguard-server-key --output ~/publish-1-wg0.key.new
-```
+- **The server key:** this replaces the identity every peer has pinned, so the
+  restart drops every peer still holding the old key — including the one carrying
+  your session. Changing the key over the tunnel would therefore kill its own
+  transport mid-apply, and both `scripts/infra-plan` and `scripts/infra-apply`
+  refuse it. Rotate over the public path instead:
 
-It refuses an existing path, creates the file mode `0600`, and prints only the
-public half for `vpn.server_public_key`. Commit that value, then converge with
-`--wireguard-key-file ~/publish-1-wg0.key.new`; planning derives the same public
-half, compares it with the contract, and records it in `plan.yml`, so the apply
-you confirm is the rotation you reviewed.
-```
+  1. Reverse-cutover to `vpn.administration: public` over the live tunnel, as
+     under **Rollback** below. Confirm public SSH works.
+  2. Generate and escrow the new key:
+
+     ```sh
+     scripts/wireguard-server-key --output ~/publish-1-wg0.key.new
+     ```
+
+     It refuses an existing path, creates the file mode `0600`, and prints only
+     the public half. Store it in the password manager.
+  3. Commit the printed value as `vpn.server_public_key`, then plan and apply
+     over the **public** path with
+     `--wireguard-key-file ~/publish-1-wg0.key.new`. Planning derives the same
+     public half, compares it with the contract, and records it in `plan.yml`, so
+     the apply you confirm is the rotation you reviewed.
+  4. Reissue every peer file with the new `PublicKey` and update the password
+     manager. Confirm each device reconnects.
+  5. Cut over to `vpn.administration: tunnel` again.
+
+  No console session is needed at any point. Steps 1 and 5 are the two reviewed
+  releases the cutover already uses.
 
 ## Rollback
 

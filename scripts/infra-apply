@@ -193,9 +193,18 @@ printf '\n==> release identity gate\n'
   --tag-commit "$TAG_COMMIT" \
   --reachable-from-main "$REACHABLE_FROM_MAIN"
 
+CONNECTION_ADDRESS="$("$SCRIPT_DIR/controller" exec python3 infra/inventories/host_baseline.py \
+  --root /workspace connection-address \
+  --limit "$LIMIT" --address "$ADDRESS" --stage "$STAGE" --transport "$TRANSPORT")" \
+  || dholbeat_die "this stage and transport are not a safe combination for the committed contract"
+
 # Derive and check the supplied identity before the founder is asked to confirm,
 # so the confirmation covers the operation actually about to happen.
 if [ -n "$WIREGUARD_KEY_FILE" ]; then
+  [ "$CONNECTION_ADDRESS" = "$ADDRESS" ] \
+    || dholbeat_die "refusing to change the WireGuard identity over the tunnel it would restart; \
+roll administration back to public first, rotate over the public path, reissue the peer files, \
+then cut over again"
   printf '\n==> supplied WireGuard identity\n'
   RESTORE_FINGERPRINT="$("$SCRIPT_DIR/controller" exec python3 scripts/lib/wireguard_keys.py \
     --public-of - <"$WIREGUARD_KEY_FILE")" \

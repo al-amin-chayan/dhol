@@ -198,6 +198,21 @@ exec ansible-playbook "$@"
 RUNNER
 chmod 0700 "$TEMP_ROOT/inputs/run-ansible.sh"
 
+# Resolved once from the contract so every later guard uses the same answer.
+CONNECTION_ADDRESS="$("$SCRIPT_DIR/controller" exec python3 infra/inventories/host_baseline.py \
+  --root /workspace connection-address \
+  --limit "$LIMIT" --address "$ADDRESS" --stage "$STAGE" --transport "$TRANSPORT")" \
+  || dholbeat_die "this stage and transport are not a safe combination for the committed contract"
+
+# Replacing the server identity restarts the interface, and every peer still
+# holding the old key is dropped the moment it does. Carrying that over the
+# tunnel would kill the transport running the apply, before verification.
+if [ -n "$WIREGUARD_KEY_FILE" ] && [ "$CONNECTION_ADDRESS" != "$ADDRESS" ]; then
+  dholbeat_die "refusing to change the WireGuard identity over the tunnel it would restart; \
+roll administration back to public first, rotate over the public path, reissue the peer files, \
+then cut over again"
+fi
+
 printf '\n==> read-only repository checks\n'
 "$SCRIPT_DIR/check"
 
@@ -229,10 +244,7 @@ chmod 0600 "$TEMP_ROOT/inputs/inventory.yml"
 # moves onto the tunnel, every non-bootstrap run connects over the tunnel
 # instead. Ask the contract which address this stage resolves to rather than
 # assuming, so a tunnel-only host can still be planned.
-EXPECTED_ADDRESS="$("$SCRIPT_DIR/controller" exec python3 infra/inventories/host_baseline.py \
-  --root /workspace connection-address \
-  --limit "$LIMIT" --address "$ADDRESS" --stage "$STAGE" --transport "$TRANSPORT")"
-grep -q "ansible_host: $EXPECTED_ADDRESS" "$TEMP_ROOT/inputs/inventory.yml" \
+grep -q "ansible_host: $CONNECTION_ADDRESS" "$TEMP_ROOT/inputs/inventory.yml" \
   || dholbeat_die "the rendered inventory does not target the resolved connection address"
 
 printf '\n==> Compose scope for %s\n' "$LIMIT"

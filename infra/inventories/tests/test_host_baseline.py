@@ -435,10 +435,21 @@ def test_the_tunnel_phase_connects_over_the_tunnel(tmp_path: Path) -> None:
 
 
 def test_first_contact_never_uses_a_tunnel_that_does_not_exist(tmp_path: Path) -> None:
-    for document in (public_phase_document(), tunnel_document()):
-        variables = vpn_vars(vpn_root(tmp_path / document["vpn"]["administration"], document),
-                             document, "bootstrap")
-        assert variables["ansible_host"] == "203.0.113.20"
+    document = public_phase_document()
+    variables = vpn_vars(vpn_root(tmp_path, document), document, "bootstrap")
+    assert variables["ansible_host"] == "203.0.113.20"
+
+
+def test_a_tunnel_only_contract_cannot_be_bootstrapped(tmp_path: Path) -> None:
+    """An earlier revision of this test asserted the defect.
+
+    It required bootstrap of a tunnel-only contract to return the public address,
+    which is precisely the run that proves the path it is about to close.
+    """
+
+    document = tunnel_document()
+    with pytest.raises(ValueError):
+        vpn_vars(vpn_root(tmp_path, document), document, "bootstrap")
 
 
 def test_the_rendered_inventory_carries_the_vpn_declaration(tmp_path: Path) -> None:

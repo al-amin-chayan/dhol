@@ -36,6 +36,7 @@
   register: docker_daemon_config
 
 - name: Verify Docker logging, Compose, and local socket boundaries
+  when: not ansible_check_mode
   ansible.builtin.assert:
     that:
       - (docker_info_result.stdout | from_json).LoggingDriver == docker_log_driver
@@ -84,6 +85,7 @@
   register: docker_resolved_packages
 
 - name: Verify the exact reviewed Docker package versions are installed
+  when: not ansible_check_mode
   ansible.builtin.assert:
     that:
       - (item.key ~ '\t' ~ item.value) in docker_resolved_packages.stdout

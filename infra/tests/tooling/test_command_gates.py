@@ -526,3 +526,66 @@ def test_a_wireguard_key_export_inside_the_repository_is_refused(tmp_path: Path)
     )
     assert completed.returncode != 0
     assert "outside the repository" in completed.stderr
+
+
+# --- Unsafe transitions refused at the command boundary (PR44-B01, PR44-R04) ---
+
+@pytest.mark.parametrize("transport", ["auto", "public", "tunnel"])
+def test_the_render_cli_refuses_bootstrapping_a_tunnel_only_contract(
+    transport: str, tmp_path: Path
+) -> None:
+    """Reproduced through argparse, not the function, because that is what runs."""
+
+    import shutil
+
+    import yaml
+
+    root = tmp_path / "repo"
+    (root / "infra/inventories/production/baseline").mkdir(parents=True)
+    (root / "infra/inventories/production/group_vars").mkdir(parents=True)
+    shutil.copy(
+        ROOT / "infra/inventories/production/group_vars/all.yml",
+        root / "infra/inventories/production/group_vars/all.yml",
+    )
+    document = yaml.safe_load(
+        (ROOT / "infra/inventories/fixtures/host-baseline/positive-wireguard.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    (root / "infra/inventories/production/baseline" / f"{document['host_id']}.yml").write_text(
+        yaml.safe_dump(document, sort_keys=True), encoding="utf-8"
+    )
+    completed = subprocess.run(
+        [
+            sys.executable, str(ROOT / "infra/inventories/host_baseline.py"),
+            "--root", str(root), "connection-address",
+            "--limit", document["host_id"],
+            "--address", "203.0.113.20",
+            "--stage", "bootstrap",
+            "--transport", transport,
+        ],
+        capture_output=True, text=True, stdin=subprocess.DEVNULL,
+    )
+    assert completed.returncode != 0, completed.stdout
+    assert "203.0.113.20" not in completed.stdout
+
+
+@pytest.mark.parametrize("command", [PLAN, APPLY])
+def test_a_key_change_is_refused_before_any_slow_work(
+    command: Path, tmp_path: Path
+) -> None:
+    """The rotation guard must reject bad input paths outright."""
+
+    identity, known_hosts = local_inputs(tmp_path)
+    key_export = tmp_path / "wg0.key"
+    key_export.write_text("not-a-key\n", encoding="utf-8")
+    arguments = [
+        command, "--limit", ANY_HOST, "--address", "203.0.113.9",
+        "--identity-file", identity, "--known-hosts-file", known_hosts,
+        "--wireguard-key-file", str(tmp_path / "absent.key"),
+    ]
+    if command == APPLY:
+        arguments += ["--release", ANY_TAG, "--approved-plan", "/tmp/plan.yml"]
+    completed = run(arguments)
+    assert completed.returncode != 0
+    assert "unavailable" in completed.stderr or "interactive terminal" in completed.stderr

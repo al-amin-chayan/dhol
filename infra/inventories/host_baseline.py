@@ -299,36 +299,66 @@ def is_wireguard_key(value: str) -> bool:
 def resolve_connection_address(
     vpn: dict[str, Any], address: str, stage: str, transport: str = "auto"
 ) -> str:
-    """Decide which address this run actually connects over.
+    """Decide which address this run connects over, refusing unsafe combinations.
 
-    ``auto`` follows the contract: the tunnel once administration has moved onto
-    it, the supplied address otherwise. An explicit transport overrides that, so
-    a reverse cutover can connect over the still-live tunnel while the desired
-    document already re-adds the public rule.
+    One invariant governs every case, and it is the reason this issue exists:
+
+        a run whose desired state can close public SSH must prove the tunnel
+        first, so the path being adopted is verified before the path being
+        removed is taken away.
+
+    The connection address is also the second-connection probe target, so
+    returning the public address for a tunnel-only contract would prove the path
+    about to be deleted. Rather than enumerate the safe cases, every combination
+    of stage, transport, and desired administration is decided here, and the test
+    suite asserts the invariant across the whole matrix.
     """
 
     if transport not in TRANSPORTS:
         raise ValueError(f"transport must be one of {sorted(TRANSPORTS)}")
+    if stage not in {"bootstrap", "converged"}:
+        raise ValueError("stage must be bootstrap or converged")
+
     is_wireguard = vpn.get("mode") == "wireguard"
+    tunnel_only = is_wireguard and vpn.get("administration") == "tunnel"
     tunnel_address = (
         str(ipaddress.ip_interface(str(vpn["host_address"])).ip) if is_wireguard else ""
     )
+
+    if stage == "bootstrap":
+        # First contact cannot use a tunnel that does not exist, and a contract
+        # that closes public SSH must never be the one being bootstrapped: the
+        # run would prove the path it is about to remove. Phase one carries
+        # administration: public precisely so this combination never arises.
+        if tunnel_only:
+            raise ValueError(
+                "a tunnel-only contract cannot be bootstrapped: first contact is public, so the "
+                "run would prove the path it is about to close. Converge phase one with "
+                "vpn.administration: public first"
+            )
+        if transport == "tunnel":
+            raise ValueError("first contact cannot use a tunnel that does not exist yet")
+        return address
+
     if transport == "tunnel":
         if not tunnel_address:
             raise ValueError("transport tunnel requires a wireguard contract")
-        if stage == "bootstrap":
-            raise ValueError("first contact cannot use a tunnel that does not exist yet")
         return tunnel_address
-    tunnel_only = is_wireguard and vpn.get("administration") == "tunnel"
     if transport == "public":
-        if tunnel_only and stage != "bootstrap":
+        if tunnel_only:
             raise ValueError(
                 "a tunnel-only contract must be converged over the tunnel: proving the public "
                 "path and then removing it would close administration without ever proving the "
                 "replacement"
             )
         return address
-    return tunnel_address if (tunnel_only and stage != "bootstrap") else address
+    return tunnel_address if tunnel_only else address
+
+
+def closes_public_administration(vpn: dict[str, Any]) -> bool:
+    """Whether converging this contract can remove the public SSH rule."""
+
+    return vpn.get("mode") == "wireguard" and vpn.get("administration") == "tunnel"
 
 
 def vpn_findings(document: dict[str, Any], label: str) -> list[str]:
