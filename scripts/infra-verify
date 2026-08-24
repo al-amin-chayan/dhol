@@ -17,6 +17,7 @@ LIMIT=""
 ADDRESS=""
 IDENTITY_FILE=""
 ADMIN_IDENTITY_FILE=""
+TRANSPORT=auto
 KNOWN_HOSTS_FILE=""
 RELEASE_TAG=""
 ARTIFACT_SUFFIX=""
@@ -40,6 +41,10 @@ requires the host runtime receipt to identify that exact release.
 
 --admin-identity-file names the key authenticating the named administrator when it
 differs from the bootstrap key.
+
+--transport selects which path this run connects over. auto follows the
+contract; --transport tunnel performs a reverse cutover over the still-live
+tunnel while desired state re-adds the public rule.
 
 Evidence is redacted and written under .artifacts/.
 EOF
@@ -65,6 +70,7 @@ while [ "$#" -gt 0 ]; do
     --known-hosts-file) [ "$#" -ge 2 ] || dholbeat_die "--known-hosts-file requires a path"; KNOWN_HOSTS_FILE="$2"; shift 2 ;;
     --release-tag) [ "$#" -ge 2 ] || dholbeat_die "--release-tag requires a tag"; RELEASE_TAG="$2"; shift 2 ;;
     --artifact-suffix) [ "$#" -ge 2 ] || dholbeat_die "--artifact-suffix requires a slug"; ARTIFACT_SUFFIX="$2"; shift 2 ;;
+    --transport) [ "$#" -ge 2 ] || dholbeat_die "--transport requires auto, public, or tunnel"; TRANSPORT="$2"; shift 2 ;;
     *) dholbeat_die "unexpected argument: $1" ;;
   esac
 done
@@ -76,6 +82,10 @@ done
 case "$ARTIFACT_SUFFIX" in
   "") ;;
   *[!a-z0-9-]*) dholbeat_die "--artifact-suffix must be lowercase letters, digits, and hyphens" ;;
+esac
+case "$TRANSPORT" in
+  auto|public|tunnel) ;;
+  *) dholbeat_die "--transport must be auto, public, or tunnel" ;;
 esac
 [ -z "${GITHUB_ACTIONS:-}${CI:-}" ] \
   || dholbeat_die "probing a production host is never permitted in CI"
@@ -129,6 +139,7 @@ chmod 0700 "$TEMP_ROOT/inputs/run-ansible.sh"
   --limit "$LIMIT" \
   --address "$ADDRESS" \
   --stage converged \
+  --transport "$TRANSPORT" \
   --identity-file "$CONTROLLER_IDENTITY" \
   --admin-identity-file "$CONTROLLER_ADMIN_IDENTITY" \
   --known-hosts-file "$CONTROLLER_KNOWN_HOSTS" \

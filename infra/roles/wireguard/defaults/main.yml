@@ -1,0 +1,16 @@
+---
+# wireguard-tools comes from the Ubuntu archive, so it is unpinned for the same
+# reason base_packages are: the distro rotates old versions out of the archive
+# and an exact pin would break convergence on a security update. Third-party
+# repositories that retain old versions, such as Docker's, stay exactly pinned.
+wireguard_packages:
+  - wireguard-tools
+wireguard_config_dir: /etc/wireguard
+wireguard_config_mode: "0600"
+wireguard_config_dir_mode: "0700"
+wireguard_key_path: "{{ wireguard_config_dir }}/{{ baseline_vpn.interface }}.key"
+wireguard_key_mode: "0600"
+# Path, inside the controller's mounted operator inputs, to a key exported from
+# the password manager. Supplied only by scripts/infra-apply --wireguard-key-file
+# so a rebuild can restore the previous identity. Never a literal key value.
+wireguard_restore_key_path: ""

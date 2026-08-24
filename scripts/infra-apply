@@ -21,6 +21,8 @@ ADMIN_IDENTITY_FILE=""
 KNOWN_HOSTS_FILE=""
 APPROVED_PLAN=""
 STAGE=converged
+TRANSPORT=auto
+WIREGUARD_KEY_FILE=""
 TEMP_ROOT=""
 SESSION_ROOT=""
 
@@ -51,6 +53,10 @@ converged connects as that administrator. Both stages converge the same
 infra/playbooks/site.yml, so the reviewed desired state never differs between
 them.
 
+--transport selects which path this run connects over. auto follows the
+contract; --transport tunnel performs a reverse cutover over the still-live
+tunnel while desired state re-adds the public rule.
+
 --admin-identity-file names the key authenticating the named administrator when it
 differs from the bootstrap key.
 
@@ -80,6 +86,8 @@ while [ "$#" -gt 0 ]; do
     --known-hosts-file) [ "$#" -ge 2 ] || dholbeat_die "--known-hosts-file requires a path"; KNOWN_HOSTS_FILE="$2"; shift 2 ;;
     --approved-plan) [ "$#" -ge 2 ] || dholbeat_die "--approved-plan requires a path"; APPROVED_PLAN="$2"; shift 2 ;;
     --stage) [ "$#" -ge 2 ] || dholbeat_die "--stage requires bootstrap or converged"; STAGE="$2"; shift 2 ;;
+    --transport) [ "$#" -ge 2 ] || dholbeat_die "--transport requires auto, public, or tunnel"; TRANSPORT="$2"; shift 2 ;;
+    --wireguard-key-file) [ "$#" -ge 2 ] || dholbeat_die "--wireguard-key-file requires a path"; WIREGUARD_KEY_FILE="$2"; shift 2 ;;
     *) dholbeat_die "unexpected argument: $1" ;;
   esac
 done
@@ -94,11 +102,18 @@ case "$STAGE" in
   bootstrap|converged) ;;
   *) dholbeat_die "--stage must be bootstrap or converged" ;;
 esac
+case "$TRANSPORT" in
+  auto|public|tunnel) ;;
+  *) dholbeat_die "--transport must be auto, public, or tunnel" ;;
+esac
 [ -z "${GITHUB_ACTIONS:-}${CI:-}" ] \
   || dholbeat_die "production apply is never permitted in CI; ci_apply_allowed is false"
 [ -t 0 ] || dholbeat_die "production apply requires an interactive terminal for founder confirmation"
 
 IDENTITY_FILE="$(dholbeat_assert_outside_repository "$REPO_ROOT" "$IDENTITY_FILE" "connection identity")"
+if [ -n "$WIREGUARD_KEY_FILE" ]; then
+  WIREGUARD_KEY_FILE="$(dholbeat_assert_outside_repository "$REPO_ROOT" "$WIREGUARD_KEY_FILE" "WireGuard key export")"
+fi
 if [ -n "$ADMIN_IDENTITY_FILE" ]; then
   ADMIN_IDENTITY_FILE="$(dholbeat_assert_outside_repository "$REPO_ROOT" "$ADMIN_IDENTITY_FILE" "administrator identity")"
 else
@@ -178,6 +193,35 @@ printf '\n==> release identity gate\n'
   --tag-commit "$TAG_COMMIT" \
   --reachable-from-main "$REACHABLE_FROM_MAIN"
 
+# Reject an unsafe stage/transport/administration combination, and a tunnel
+# address supplied where a public one belongs, before anything else happens.
+"$SCRIPT_DIR/controller" exec python3 infra/inventories/host_baseline.py \
+  --root /workspace connection-address \
+  --limit "$LIMIT" --address "$ADDRESS" --stage "$STAGE" --transport "$TRANSPORT" >/dev/null \
+  || dholbeat_die "this stage and transport are not a safe combination for the committed contract"
+
+# Derive and check the supplied identity before the founder is asked to confirm,
+# so the confirmation covers the operation actually about to happen.
+if [ -n "$WIREGUARD_KEY_FILE" ]; then
+  CONNECTION_TRANSPORT="$("$SCRIPT_DIR/controller" exec python3 infra/inventories/host_baseline.py \
+    --root /workspace connection-transport \
+    --limit "$LIMIT" --address "$ADDRESS" --stage "$STAGE" --transport "$TRANSPORT")" \
+    || dholbeat_die "could not resolve which path carries this run"
+  [ "$CONNECTION_TRANSPORT" = public ] \
+    || dholbeat_die "refusing to change the WireGuard identity over the tunnel it would restart; \
+roll administration back to public first, rotate over the public path, reissue the peer files, \
+then cut over again"
+  printf '\n==> supplied WireGuard identity\n'
+  RESTORE_FINGERPRINT="$("$SCRIPT_DIR/controller" exec python3 scripts/lib/wireguard_keys.py \
+    --public-of - <"$WIREGUARD_KEY_FILE")" \
+    || dholbeat_die "the supplied WireGuard key export is not a base64 key"
+  EXPECTED_SERVER_KEY="$(awk '$1 == "server_public_key:" {print $2; exit}' "$REPO_ROOT/$BASELINE_RELATIVE")"
+  [ -z "$EXPECTED_SERVER_KEY" ] || [ "$EXPECTED_SERVER_KEY" = "$RESTORE_FINGERPRINT" ] \
+    || dholbeat_die "the supplied key derives to $RESTORE_FINGERPRINT but the contract declares \
+$EXPECTED_SERVER_KEY; nothing was changed"
+  printf 'restoring WireGuard identity: %s\n' "$RESTORE_FINGERPRINT"
+fi
+
 printf '\n==> pre-apply plan must reproduce the approved plan exactly\n'
 PREAPPLY_SUFFIX="preapply-$(printf '%s' "$RELEASE_TAG" | tr -c 'a-z0-9' '-')"
 "$SCRIPT_DIR/infra-plan" \
@@ -186,6 +230,8 @@ PREAPPLY_SUFFIX="preapply-$(printf '%s' "$RELEASE_TAG" | tr -c 'a-z0-9' '-')"
   --identity-file "$IDENTITY_FILE" \
   --known-hosts-file "$KNOWN_HOSTS_FILE" \
   --stage "$STAGE" \
+  --transport "$TRANSPORT" \
+  ${WIREGUARD_KEY_FILE:+--wireguard-key-file "$WIREGUARD_KEY_FILE"} \
   --artifact-suffix "$PREAPPLY_SUFFIX"
 PREAPPLY_PLAN="$REPO_ROOT/.artifacts/infra-plan-$LIMIT-$STAGE-${TAG_COMMIT:0:12}-$PREAPPLY_SUFFIX/plan.yml"
 [ -f "$PREAPPLY_PLAN" ] || dholbeat_die "the pre-apply plan document was not produced"
@@ -248,6 +294,7 @@ render_inventory() {
     --limit "$LIMIT" \
     --address "$ADDRESS" \
     --stage "$stage" \
+    --transport "$TRANSPORT" \
     --identity-file "$CONTROLLER_IDENTITY" \
     --admin-identity-file "$CONTROLLER_ADMIN_IDENTITY" \
     --known-hosts-file "$CONTROLLER_KNOWN_HOSTS" \
@@ -264,6 +311,17 @@ render_inventory converged "$TEMP_ROOT/inputs/inventory-converged.yml"
   <"$RELEASE_DOCUMENT" >"$TEMP_ROOT/inputs/release-vars.yml"
 chmod 0600 "$TEMP_ROOT/inputs/release-vars.yml"
 
+# The escrowed key lives in the bounded inputs directory for the length of the
+# run and is removed with it. Only its public half ever reaches evidence.
+WIREGUARD_KEY_VARS=()
+if [ -n "$WIREGUARD_KEY_FILE" ]; then
+  install -m 0600 "$WIREGUARD_KEY_FILE" "$TEMP_ROOT/inputs/wireguard.key"
+  WIREGUARD_KEY_VARS+=(--extra-vars "wireguard_restore_key_path=$CONTROLLER_INPUTS/wireguard.key")
+  printf 'restored_wireguard_public_key: %s\n' "$RESTORE_FINGERPRINT" \
+    >"$ARTIFACT_ROOT/wireguard-restore-receipt.yml"
+  chmod 0600 "$ARTIFACT_ROOT/wireguard-restore-receipt.yml"
+fi
+
 printf '\n==> converging %s\n' "$LIMIT"
 set +e
 "$SCRIPT_DIR/controller" exec-ssh \
@@ -278,6 +336,7 @@ set +e
   --extra-vars "dholbeat_expected_host=$LIMIT" \
   --extra-vars "dholbeat_expected_role=$HOST_ROLE" \
   --extra-vars "@$CONTROLLER_INPUTS/release-vars.yml" \
+  ${WIREGUARD_KEY_VARS[@]+"${WIREGUARD_KEY_VARS[@]}"} \
   playbooks/site.yml \
   >"$TEMP_ROOT/apply.raw" 2>&1
 APPLY_STATUS=$?
@@ -344,6 +403,7 @@ printf '\n==> read-only host verification\n'
   --identity-file "$ADMIN_IDENTITY_FILE" \
   --admin-identity-file "$ADMIN_IDENTITY_FILE" \
   --known-hosts-file "$KNOWN_HOSTS_FILE" \
+  --transport "$TRANSPORT" \
   --release-tag "$RELEASE_TAG" \
   --artifact-suffix "postapply"
 

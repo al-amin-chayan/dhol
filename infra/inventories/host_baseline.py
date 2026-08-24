@@ -16,6 +16,8 @@ override supplied on the command line and therefore belongs under gitignored
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import importlib.util
 import ipaddress
 import json
@@ -35,6 +37,29 @@ HOST_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 OVERRIDE_VARIABLE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 SUPPORTED_ROLES = {"core", "publisher"}
 BOOTSTRAP_IDENTITIES = {"root", "ubuntu", "debian"}
+VPN_MODES = {"none", "wireguard"}
+# Administration moves in two separately reviewed releases. A host cannot reach
+# its own tunnel before the tunnel exists, its peer is complete, and inbound UDP
+# is admitted, so "public" brings the tunnel up alongside the existing path and
+# "tunnel" only then closes that path.
+VPN_ADMINISTRATION = {"public", "tunnel"}
+# Which path is reachable *now* is not the same question as which path the
+# contract wants next. A rollback re-adds the public rule while only the tunnel
+# is currently live, so the transport must be selectable independently.
+TRANSPORTS = {"auto", "public", "tunnel"}
+# The same ranges infra/roles/base/files/validate_contract.py treats as private.
+# ipaddress.is_private is too permissive here: it accepts documentation ranges
+# such as 203.0.113.0/24, which are not usable private address space.
+VPN_PRIVATE_NETWORKS = tuple(
+    ipaddress.ip_network(network)
+    for network in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7")
+)
+# A shape regex is not enough: "A" * 44 matches one and decodes to 33 bytes.
+# Keys are decoded strictly and must be exactly 32 bytes.
+# Linux interface names are at most 15 characters, and the value is interpolated
+# into root-owned paths and a systemd unit name, so it must be a bare basename.
+WG_INTERFACE_RE = re.compile(r"^[a-z][a-z0-9_-]{0,14}$")
+WIREGUARD_CONFIG_DIR = "/etc/wireguard"
 REQUIRED_TOP_LEVEL = (
     "schema_version",
     "host_id",
@@ -123,7 +148,11 @@ def sensitive_key_findings(value: Any, label: str, path: tuple[str, ...] = ()) -
     return findings
 
 
-ADDRESS_SCAN_EXEMPT_ROOTS = ("application_bindings",)
+# VPN addressing is committed policy, like ssh.allow_cidrs: the subnet, the
+# host's tunnel address, and each peer's allowed IPs are stable declarations
+# that survive a host replacement. The provider-assigned public address is not,
+# and stays an operator argument.
+ADDRESS_SCAN_EXEMPT_ROOTS = ("application_bindings", "vpn")
 
 
 def bare_address_findings(value: Any, label: str, path: tuple[str, ...] = ()) -> list[str]:
@@ -242,6 +271,8 @@ def structural_findings(document: Any, label: str) -> list[str]:
                 except ValueError:
                     findings.append(f"{label}: ssh.allow_cidrs contains an invalid network: {network}")
 
+    findings.extend(vpn_findings(document, label))
+
     directories = document["managed_directories"]
     if not isinstance(directories, list) or not directories:
         findings.append(f"{label}: managed_directories must catalog every baseline writable path")
@@ -253,6 +284,259 @@ def structural_findings(document: Any, label: str) -> list[str]:
             path = PurePosixPath(entry["path"])
             if not path.is_absolute() or ".." in path.parts:
                 findings.append(f"{label}: managed_directories[{index}].path must be a specific absolute path")
+    return findings
+
+
+def is_wireguard_key(value: str) -> bool:
+    """A WireGuard key is exactly 32 bytes of strict base64."""
+
+    try:
+        return len(base64.b64decode(value, validate=True)) == 32
+    except (ValueError, binascii.Error):
+        return False
+
+
+def resolve_connection(
+    vpn: dict[str, Any], address: str, stage: str, transport: str = "auto"
+) -> dict[str, str]:
+    """Resolve both the address and the transport actually carrying this run.
+
+    Callers must not infer the transport by comparing the resolved address with
+    the one they supplied: an operator may legitimately hold the tunnel address
+    in known_hosts and pass it as ``--address``, which makes those two strings
+    equal on a tunnel-carried run. The transport is therefore decided here,
+    alongside the address, from the contract.
+    """
+
+    resolved = resolve_connection_address(vpn, address, stage, transport)
+    tunnel_address = (
+        str(ipaddress.ip_interface(str(vpn["host_address"])).ip)
+        if vpn.get("mode") == "wireguard"
+        else ""
+    )
+    carried_by_tunnel = bool(tunnel_address) and resolved == tunnel_address
+    return {"address": resolved, "transport": "tunnel" if carried_by_tunnel else "public"}
+
+
+def resolve_connection_address(
+    vpn: dict[str, Any], address: str, stage: str, transport: str = "auto"
+) -> str:
+    """Decide which address this run connects over, refusing unsafe combinations.
+
+    One invariant governs every case, and it is the reason this issue exists:
+
+        a run whose desired state can close public SSH must prove the tunnel
+        first, so the path being adopted is verified before the path being
+        removed is taken away.
+
+    The connection address is also the second-connection probe target, so
+    returning the public address for a tunnel-only contract would prove the path
+    about to be deleted. Rather than enumerate the safe cases, every combination
+    of stage, transport, and desired administration is decided here, and the test
+    suite asserts the invariant across the whole matrix.
+    """
+
+    if transport not in TRANSPORTS:
+        raise ValueError(f"transport must be one of {sorted(TRANSPORTS)}")
+    if stage not in {"bootstrap", "converged"}:
+        raise ValueError("stage must be bootstrap or converged")
+
+    is_wireguard = vpn.get("mode") == "wireguard"
+    tunnel_only = is_wireguard and vpn.get("administration") == "tunnel"
+    tunnel_address = (
+        str(ipaddress.ip_interface(str(vpn["host_address"])).ip) if is_wireguard else ""
+    )
+    if tunnel_address and address == tunnel_address:
+        raise ValueError(
+            "--address is the host's public address; the tunnel address is committed policy "
+            "and is selected through the contract, never supplied here"
+        )
+
+    if stage == "bootstrap":
+        # First contact cannot use a tunnel that does not exist, and a contract
+        # that closes public SSH must never be the one being bootstrapped: the
+        # run would prove the path it is about to remove. Phase one carries
+        # administration: public precisely so this combination never arises.
+        if tunnel_only:
+            raise ValueError(
+                "a tunnel-only contract cannot be bootstrapped: first contact is public, so the "
+                "run would prove the path it is about to close. Converge phase one with "
+                "vpn.administration: public first"
+            )
+        if transport == "tunnel":
+            raise ValueError("first contact cannot use a tunnel that does not exist yet")
+        return address
+
+    if transport == "tunnel":
+        if not tunnel_address:
+            raise ValueError("transport tunnel requires a wireguard contract")
+        return tunnel_address
+    if transport == "public":
+        if tunnel_only:
+            raise ValueError(
+                "a tunnel-only contract must be converged over the tunnel: proving the public "
+                "path and then removing it would close administration without ever proving the "
+                "replacement"
+            )
+        return address
+    return tunnel_address if tunnel_only else address
+
+
+def closes_public_administration(vpn: dict[str, Any]) -> bool:
+    """Whether converging this contract can remove the public SSH rule."""
+
+    return vpn.get("mode") == "wireguard" and vpn.get("administration") == "tunnel"
+
+
+def vpn_findings(document: dict[str, Any], label: str) -> list[str]:
+    """Validate tunnel-only administration.
+
+    When the VPN carries administration, the SSH allowlist must be exactly the
+    VPN subnet. Anything else leaves a second administrative path bound to a
+    rotating address, which is the binding this contract exists to remove.
+    """
+
+    findings: list[str] = []
+    vpn = document.get("vpn")
+    if vpn is None:
+        return findings
+    if not isinstance(vpn, dict):
+        return [f"{label}: vpn must be a mapping"]
+
+    mode = vpn.get("mode")
+    if mode not in VPN_MODES:
+        return [f"{label}: vpn.mode must be one of {sorted(VPN_MODES)}"]
+    if mode == "none":
+        return findings
+
+    administration = vpn.get("administration")
+    if administration not in VPN_ADMINISTRATION:
+        return [f"{label}: vpn.administration must be one of {sorted(VPN_ADMINISTRATION)}"]
+
+    for field in ("interface", "listen_port", "subnet", "host_address", "peers"):
+        if field not in vpn:
+            findings.append(f"{label}: vpn.{field} must be declared for wireguard mode")
+    if findings:
+        return findings
+
+    interface = vpn["interface"]
+    if not isinstance(interface, str) or WG_INTERFACE_RE.fullmatch(interface) is None:
+        findings.append(
+            f"{label}: vpn.interface must be a bare Linux interface name; it is interpolated "
+            "into root-owned paths and a systemd unit"
+        )
+
+    port = vpn["listen_port"]
+    if not _positive_int(port) or port > 65535:
+        findings.append(f"{label}: vpn.listen_port must be a valid port")
+    ssh_port = (document.get("ssh") or {}).get("port")
+    if port == ssh_port:
+        findings.append(f"{label}: vpn.listen_port must not reuse the SSH port")
+
+    try:
+        network = ipaddress.ip_network(str(vpn["subnet"]), strict=True)
+    except ValueError:
+        return [*findings, f"{label}: vpn.subnet is not a valid network"]
+    if network.prefixlen == 0:
+        findings.append(f"{label}: vpn.subnet must not be the whole address space")
+    if network.version != 4:
+        # The runtime verifier reads IPv4 interface addresses only. Accepting an
+        # IPv6 contract offline would defer an unverifiable host to production.
+        return [*findings, f"{label}: vpn.subnet must be IPv4 until the verifier supports IPv6"]
+    if not any(network.subnet_of(private) for private in VPN_PRIVATE_NETWORKS
+               if network.version == private.version):
+        findings.append(
+            f"{label}: vpn.subnet must be inside RFC 1918 or unique-local address space"
+        )
+
+    try:
+        host_address = ipaddress.ip_interface(str(vpn["host_address"]))
+    except ValueError:
+        findings.append(f"{label}: vpn.host_address is not a valid address with prefix")
+        host_address = None
+    if host_address is not None:
+        if host_address.network != network:
+            findings.append(
+                f"{label}: vpn.host_address must carry exactly the vpn.subnet prefix, so the "
+                "host does not route a broader range than the declared VPN"
+            )
+        if host_address.ip == network.network_address:
+            findings.append(f"{label}: vpn.host_address must not be the network address")
+        if network.prefixlen < 31 and host_address.ip == network.broadcast_address:
+            findings.append(f"{label}: vpn.host_address must not be the broadcast address")
+
+    peers = vpn["peers"]
+    if not isinstance(peers, list) or not peers:
+        findings.append(f"{label}: vpn.peers must declare at least one administrator peer")
+        peers = []
+    seen_keys: set[str] = set()
+    seen_addresses: set[str] = set()
+    for index, peer in enumerate(peers):
+        entry = f"{label}: vpn.peers[{index}]"
+        if not isinstance(peer, dict):
+            findings.append(f"{entry} must be a mapping")
+            continue
+        if not isinstance(peer.get("id"), str) or not peer["id"].strip():
+            findings.append(f"{entry}.id must be explicit")
+        public_key = peer.get("public_key")
+        if not isinstance(public_key, str) or not is_wireguard_key(public_key):
+            findings.append(f"{entry}.public_key is not a valid WireGuard public key")
+        elif public_key in seen_keys:
+            findings.append(f"{entry}.public_key is declared more than once")
+        else:
+            seen_keys.add(public_key)
+        allowed = peer.get("allowed_ips")
+        if not isinstance(allowed, list) or not allowed:
+            findings.append(f"{entry}.allowed_ips must list at least one address")
+            continue
+        for value in allowed:
+            try:
+                parsed = ipaddress.ip_network(str(value), strict=True)
+            except ValueError:
+                findings.append(f"{entry}.allowed_ips contains an invalid network: {value}")
+                continue
+            if parsed.prefixlen not in {32, 128}:
+                findings.append(f"{entry}.allowed_ips must be single addresses, not ranges")
+            if parsed.network_address not in network:
+                findings.append(f"{entry}.allowed_ips is outside vpn.subnet")
+            if host_address is not None and parsed.network_address == host_address.ip:
+                findings.append(f"{entry}.allowed_ips reuses the host's own tunnel address")
+            if str(value) in seen_addresses:
+                findings.append(f"{entry}.allowed_ips is already assigned to another peer")
+            seen_addresses.add(str(value))
+
+    allow_cidrs = [str(item) for item in (document.get("ssh") or {}).get("allow_cidrs", [])]
+    subnet_text = str(vpn["subnet"])
+    if administration == "tunnel":
+        if allow_cidrs != [subnet_text]:
+            findings.append(
+                f"{label}: tunnel-only administration requires ssh.allow_cidrs to be exactly "
+                "the VPN subnet"
+            )
+    elif subnet_text not in allow_cidrs:
+        findings.append(
+            f"{label}: while administration is public, ssh.allow_cidrs must already include "
+            "the VPN subnet so the next release can connect over the tunnel"
+        )
+
+    server_public_key = vpn.get("server_public_key")
+    if server_public_key is not None and not is_wireguard_key(str(server_public_key)):
+        findings.append(f"{label}: vpn.server_public_key is not a valid WireGuard public key")
+    if administration == "tunnel" and server_public_key is None:
+        findings.append(
+            f"{label}: closing the public path requires vpn.server_public_key, so the running "
+            "interface identity is reviewable and machine-verifiable"
+        )
+
+    catalogued = {
+        entry.get("path")
+        for entry in document.get("managed_directories", [])
+        if isinstance(entry, dict)
+    }
+    if WIREGUARD_CONFIG_DIR not in catalogued:
+        findings.append(
+            f"{label}: {WIREGUARD_CONFIG_DIR} must be catalogued in managed_directories"
+        )
     return findings
 
 
@@ -418,6 +702,7 @@ def render_inventory(
     identity_file: str,
     known_hosts_file: str,
     admin_identity_file: str | None = None,
+    transport: str = "auto",
 ) -> dict[str, Any]:
     """Render the operator inventory for one connection phase.
 
@@ -445,8 +730,18 @@ def render_inventory(
     admin_identity = admin_identity_file or identity_file
     bootstrap_stage = stage == "bootstrap"
     connection_user = document["bootstrap"]["identity"] if bootstrap_stage else admin["user"]
+
+    # Tunnel-only administration moves the administrative path off the public
+    # address entirely. First contact still uses the public address, because the
+    # tunnel does not exist yet; every later connection uses the tunnel.
+    vpn = document.get("vpn") or {}
+    connection_address = resolve_connection_address(vpn, address, stage, transport)
+    # The probe must prove the path that is actually carrying this run, so it
+    # follows the transport rather than the desired administration state.
+    second_connection_host = connection_address
+
     host_vars: dict[str, Any] = {
-        "ansible_host": address,
+        "ansible_host": connection_address,
         "ansible_port": int(ssh["port"]),
         "ansible_user": connection_user,
         "ansible_private_key_file": identity_file if bootstrap_stage else admin_identity,
@@ -462,11 +757,12 @@ def render_inventory(
         "baseline_break_glass": document["break_glass"],
         "baseline_ssh_allow_cidrs": list(ssh["allow_cidrs"]),
         "baseline_public_interface": document["expected_host"]["public_interface"],
-        "baseline_second_connection_host": address,
+        "baseline_second_connection_host": second_connection_host,
         "baseline_second_connection_port": int(ssh["port"]),
         "baseline_second_connection_identity_file": admin_identity,
         "baseline_second_connection_known_hosts_file": known_hosts_file,
         "baseline_application_bindings": list(document["application_bindings"]),
+        "baseline_vpn": vpn or {"mode": "none"},
         "baseline_managed_directories": directories,
         "baseline_role_writable_paths": [entry["path"] for entry in directories],
     }
@@ -497,11 +793,33 @@ def main() -> None:
     )
     render.add_argument("--known-hosts-file", required=True)
     render.add_argument(
+        "--transport", choices=sorted(TRANSPORTS), default="auto",
+        help="override which path this run connects over; auto follows the contract",
+    )
+    render.add_argument(
         "--output", type=Path, required=True, help="destination path, or - to stream to stdout"
     )
 
     contract = subparsers.add_parser("contract", help="print the offline baseline contract payload")
     contract.add_argument("--limit", required=True)
+
+    resolved = subparsers.add_parser(
+        "connection-address",
+        help="print the address a given stage will actually connect over",
+    )
+    resolved.add_argument("--limit", required=True)
+    resolved.add_argument("--address", required=True)
+    resolved.add_argument("--stage", choices=["bootstrap", "converged"], required=True)
+    resolved.add_argument("--transport", choices=sorted(TRANSPORTS), default="auto")
+
+    carrier = subparsers.add_parser(
+        "connection-transport",
+        help="print whether this run is carried by the public path or the tunnel",
+    )
+    carrier.add_argument("--limit", required=True)
+    carrier.add_argument("--address", required=True)
+    carrier.add_argument("--stage", choices=["bootstrap", "converged"], required=True)
+    carrier.add_argument("--transport", choices=sorted(TRANSPORTS), default="auto")
 
     arguments = parser.parse_args()
     root = repository_root(arguments.root)
@@ -514,6 +832,26 @@ def main() -> None:
             raise SystemExit(1)
         committed = sorted(path.stem for path in baseline_directory(root).glob("*.yml"))
         print(f"production host baseline passed: {committed or 'no host contract committed yet'}")
+        return
+
+    if arguments.command == "connection-transport":
+        document = load_yaml(baseline_path(root, arguments.limit))
+        vpn = (document or {}).get("vpn") or {}
+        print(
+            resolve_connection(
+                vpn, arguments.address, arguments.stage, arguments.transport
+            )["transport"]
+        )
+        return
+
+    if arguments.command == "connection-address":
+        document = load_yaml(baseline_path(root, arguments.limit))
+        vpn = (document or {}).get("vpn") or {}
+        print(
+            resolve_connection_address(
+                vpn, arguments.address, arguments.stage, arguments.transport
+            )
+        )
         return
 
     if arguments.command == "contract":
@@ -535,6 +873,7 @@ def main() -> None:
         arguments.identity_file,
         arguments.known_hosts_file,
         arguments.admin_identity_file,
+        arguments.transport,
     )
     if str(arguments.output) == "-":
         # The controller mounts the workspace read-only, so the inventory is

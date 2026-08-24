@@ -4,3 +4,7 @@ firewall_default_incoming: deny
 firewall_default_outgoing: allow
 firewall_public_interface: "{{ baseline_public_interface }}"
 firewall_docker_private_ingress_cidrs: []
+# The VPN listener is the one public entry point when administration is
+# tunnel-only: SSH itself is then reachable only from the VPN subnet.
+firewall_vpn_mode: "{{ baseline_vpn.mode | default('none') }}"
+firewall_vpn_port: "{{ baseline_vpn.listen_port | default(0) }}"

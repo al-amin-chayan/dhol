@@ -415,6 +415,31 @@ def check_gitignore(root: Path) -> list[str]:
     return [f".gitignore: required pattern is missing: {pattern}" for pattern in missing]
 
 
+def check_markdown_fences(root: Path, files: Iterable[Path]) -> list[str]:
+    """Reject an unbalanced code fence.
+
+    A stray closing fence renders every following section as code, which silently
+    hides operational instructions in a runbook.
+    """
+
+    findings: list[str] = []
+    for path in files:
+        rel = relative(path, root)
+        if path.suffix.lower() != ".md":
+            continue
+        text = read_text(path)
+        if text is None:
+            continue
+        fences = [
+            number
+            for number, line in enumerate(text.splitlines(), start=1)
+            if line.lstrip().startswith("```")
+        ]
+        if len(fences) % 2 != 0:
+            findings.append(f"{rel}: unbalanced code fence, last at line {fences[-1]}")
+    return findings
+
+
 def check_executable_entrypoints(root: Path) -> list[str]:
     findings: list[str] = []
     for rel in (
@@ -428,6 +453,8 @@ def check_executable_entrypoints(root: Path) -> list[str]:
         "scripts/infra-apply",
         "scripts/infra-plan",
         "scripts/infra-verify",
+        "scripts/wireguard-peer-config",
+        "scripts/wireguard-server-key",
         "infra/controller/entrypoint.sh",
         "infra/inventories/host_baseline.py",
         "infra/playbooks/files/verify_public_listeners.py",
@@ -456,6 +483,7 @@ def run_policy(root: Path) -> list[str]:
     findings.extend(check_ci_entrypoint(root))
     findings.extend(check_gitignore(root))
     findings.extend(check_executable_entrypoints(root))
+    findings.extend(check_markdown_fences(root, files))
     return sorted(set(findings))
 
 

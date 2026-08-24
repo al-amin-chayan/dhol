@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import subprocess
+import sys
 
 import pytest
 
@@ -426,3 +427,165 @@ def test_an_unsupported_stage_is_refused(command: Path, tmp_path: Path) -> None:
     completed = run(arguments)
     assert completed.returncode != 0
     assert "--stage must be bootstrap or converged" in completed.stderr
+
+
+# --- The renderer CLI every command actually invokes (PR44-B01) ---
+
+RENDER = ROOT / "infra/inventories/host_baseline.py"
+
+
+def render_cli(*extra: str) -> subprocess.CompletedProcess:
+    """Exercise the command line the wrappers use, not the Python function.
+
+    This runs under the interpreter the suite runs under, because the renderer
+    needs the controller's PyYAML rather than a bare system Python.
+    """
+
+    return subprocess.run(
+        [
+            sys.executable, str(RENDER), "--root", str(ROOT), "render",
+            "--limit", ANY_HOST,
+            "--address", "203.0.113.20",
+            "--stage", "converged",
+            "--identity-file", "/tmp/id",
+            "--known-hosts-file", "/tmp/kh",
+            "--output", "-",
+            *extra,
+        ],
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
+    )
+
+
+@pytest.mark.parametrize("transport", ["auto", "public", "tunnel"])
+def test_the_render_cli_accepts_every_transport(transport: str) -> None:
+    """Regression: --transport was wired into the wrappers but never registered.
+
+    A missing option makes argparse exit 2 before any rendering, so every
+    production command stopped. Asserting on the parser, not on the function,
+    is what catches that.
+    """
+
+    completed = render_cli("--transport", transport)
+    assert "unrecognized arguments" not in completed.stderr
+    assert "--transport" not in completed.stderr
+
+
+def test_the_render_cli_refuses_an_unknown_transport() -> None:
+    completed = render_cli("--transport", "sideways")
+    assert completed.returncode != 0
+    assert "invalid choice" in completed.stderr
+
+
+def test_the_render_cli_still_works_without_a_transport() -> None:
+    completed = render_cli()
+    assert "unrecognized arguments" not in completed.stderr
+
+
+@pytest.mark.parametrize("subcommand", [["check"], ["contract", "--limit", ANY_HOST]])
+def test_other_render_subcommands_remain_invocable(subcommand: list) -> None:
+    completed = subprocess.run(
+        [sys.executable, str(RENDER), "--root", str(ROOT), *subcommand],
+        capture_output=True, text=True, stdin=subprocess.DEVNULL,
+    )
+    assert "unrecognized arguments" not in completed.stderr
+
+
+@pytest.mark.parametrize("command", [PLAN, APPLY, VERIFY])
+def test_an_unknown_transport_is_refused_by_every_wrapper(
+    command: Path, tmp_path: Path
+) -> None:
+    identity, known_hosts = local_inputs(tmp_path)
+    arguments = [
+        command, "--limit", ANY_HOST, "--address", "203.0.113.9",
+        "--identity-file", identity, "--known-hosts-file", known_hosts,
+        "--transport", "sideways",
+    ]
+    if command == APPLY:
+        arguments += ["--release", ANY_TAG, "--approved-plan", "/tmp/plan.yml"]
+    completed = run(arguments)
+    assert completed.returncode != 0
+    assert "--transport must be auto, public, or tunnel" in completed.stderr
+
+
+def test_a_wireguard_key_export_inside_the_repository_is_refused(tmp_path: Path) -> None:
+    """A key export under .artifacts/ would leave private material in the checkout.
+
+    Only infra-plan is exercised: infra-apply refuses a non-interactive session
+    before it reaches input validation, which its own test already covers.
+    """
+
+    identity, known_hosts = local_inputs(tmp_path)
+    completed = run(
+        [
+            PLAN, "--limit", ANY_HOST, "--address", "203.0.113.9",
+            "--identity-file", identity, "--known-hosts-file", known_hosts,
+            "--wireguard-key-file", str(ROOT / ".artifacts/wg.key"),
+        ]
+    )
+    assert completed.returncode != 0
+    assert "outside the repository" in completed.stderr
+
+
+# --- Unsafe transitions refused at the command boundary (PR44-B01, PR44-R04) ---
+
+@pytest.mark.parametrize("transport", ["auto", "public", "tunnel"])
+def test_the_render_cli_refuses_bootstrapping_a_tunnel_only_contract(
+    transport: str, tmp_path: Path
+) -> None:
+    """Reproduced through argparse, not the function, because that is what runs."""
+
+    import shutil
+
+    import yaml
+
+    root = tmp_path / "repo"
+    (root / "infra/inventories/production/baseline").mkdir(parents=True)
+    (root / "infra/inventories/production/group_vars").mkdir(parents=True)
+    shutil.copy(
+        ROOT / "infra/inventories/production/group_vars/all.yml",
+        root / "infra/inventories/production/group_vars/all.yml",
+    )
+    document = yaml.safe_load(
+        (ROOT / "infra/inventories/fixtures/host-baseline/positive-wireguard.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    (root / "infra/inventories/production/baseline" / f"{document['host_id']}.yml").write_text(
+        yaml.safe_dump(document, sort_keys=True), encoding="utf-8"
+    )
+    completed = subprocess.run(
+        [
+            sys.executable, str(ROOT / "infra/inventories/host_baseline.py"),
+            "--root", str(root), "connection-address",
+            "--limit", document["host_id"],
+            "--address", "203.0.113.20",
+            "--stage", "bootstrap",
+            "--transport", transport,
+        ],
+        capture_output=True, text=True, stdin=subprocess.DEVNULL,
+    )
+    assert completed.returncode != 0, completed.stdout
+    assert "203.0.113.20" not in completed.stdout
+
+
+@pytest.mark.parametrize("command", [PLAN, APPLY])
+def test_a_key_change_is_refused_before_any_slow_work(
+    command: Path, tmp_path: Path
+) -> None:
+    """The rotation guard must reject bad input paths outright."""
+
+    identity, known_hosts = local_inputs(tmp_path)
+    key_export = tmp_path / "wg0.key"
+    key_export.write_text("not-a-key\n", encoding="utf-8")
+    arguments = [
+        command, "--limit", ANY_HOST, "--address", "203.0.113.9",
+        "--identity-file", identity, "--known-hosts-file", known_hosts,
+        "--wireguard-key-file", str(tmp_path / "absent.key"),
+    ]
+    if command == APPLY:
+        arguments += ["--release", ANY_TAG, "--approved-plan", "/tmp/plan.yml"]
+    completed = run(arguments)
+    assert completed.returncode != 0
+    assert "unavailable" in completed.stderr or "interactive terminal" in completed.stderr

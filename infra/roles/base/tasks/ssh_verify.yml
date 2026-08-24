@@ -6,6 +6,7 @@
   register: base_sshd_effective
 
 - name: Verify key-only SSH is actually in effect
+  when: not ansible_check_mode
   ansible.builtin.assert:
     that:
       - "'passwordauthentication no' in (base_sshd_effective.stdout | lower)"

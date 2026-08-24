@@ -211,17 +211,19 @@ def test_playbook_orders_safety_probes_before_ssh_and_firewall_changes() -> None
     assert play["serial"] == 1
     tasks = play["tasks"]
     names = [task["name"] for task in tasks]
+    tunnel = names.index("Establish the administrative tunnel before any path can close")
     first_probe = names.index("Prove the named administrator can open a second connection")
     firewall = names.index("Apply the default-deny host and container firewall")
     post_firewall_probe = names.index("Prove access after firewall convergence")
     ssh_hardening = names.index("Stage key-only SSH hardening after the firewall probe")
     flush = names.index("Apply pending SSH handlers only after the safety probes")
-    switch_user = names.index("Continue through the proven administrator identity")
+    switch_user = names.index("Continue through the proven administrator identity and path")
     reset = names.index("Reset the bootstrap connection after disabling root login")
     verify = names.index("Verify the effective SSH daemon policy")
     final_probe = names.index("Re-prove access after SSH hardening")
     assert (
-        first_probe
+        tunnel
+        < first_probe
         < firewall
         < post_firewall_probe
         < ssh_hardening
@@ -236,6 +238,23 @@ def test_playbook_orders_safety_probes_before_ssh_and_firewall_changes() -> None
     assert switch_task["ansible_private_key_file"] == (
         "{{ baseline_second_connection_identity_file }}"
     )
+    # Once the firewall scopes SSH to the VPN subnet the public address stops
+    # answering, so the post-hardening reconnect must follow the proven path.
+    assert switch_task["ansible_host"] == "{{ baseline_second_connection_host }}"
+
+
+def test_the_tunnel_is_established_before_any_administrative_path_can_close() -> None:
+    """WP-05C sequencing: a closed firewall must never precede a proven tunnel."""
+
+    playbook = load_yaml(ROOT / "infra/playbooks/baseline.yml")
+    tasks = playbook[0]["tasks"]
+    names = [task["name"] for task in tasks]
+    tunnel_task = tasks[names.index("Establish the administrative tunnel before any path can close")]
+    assert tunnel_task["ansible.builtin.import_role"]["name"] == "wireguard"
+    # The role is skipped entirely while administration is not tunnel-only, so
+    # the interim IP-bound state converges exactly as it did before.
+    assert "baseline_vpn.mode" in tunnel_task["when"]
+    assert "wireguard" in tunnel_task["when"]
 
 
 def test_firewall_ssh_port_follows_the_active_ansible_connection() -> None:

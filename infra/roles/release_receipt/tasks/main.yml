@@ -80,6 +80,7 @@
   changed_when: false
 
 - name: Require a root-owned world-readable receipt
+  when: not ansible_check_mode
   ansible.builtin.assert:
     that:
       - release_receipt_stat.stat.exists
