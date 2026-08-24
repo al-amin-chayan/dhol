@@ -205,9 +205,14 @@
   ansible.builtin.command: /usr/sbin/ufw status verbose
   changed_when: false
   check_mode: false
+  when: not ansible_check_mode
   register: firewall_ufw_after
 
+# These read live state. Check mode deliberately did not apply the rules above,
+# so asserting them here would fail on exactly the additions --report just
+# described. The report is the check-mode evidence; these are the real gate.
 - name: Verify default deny and the explicit SSH allowlist
+  when: not ansible_check_mode
   ansible.builtin.assert:
     that:
       - "'Status: active' in firewall_ufw_after.stdout"
@@ -229,7 +234,9 @@
     fail_msg: >-
       The firewall does not admit the declared WireGuard listener, so closing
       public SSH would leave no administrative path.
-  when: firewall_vpn_mode == 'wireguard'
+  when:
+    - not ansible_check_mode
+    - firewall_vpn_mode == 'wireguard'
 
 - name: Verify the Docker ingress chain is attached
   ansible.builtin.command:

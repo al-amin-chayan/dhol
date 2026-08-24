@@ -222,3 +222,69 @@ def test_a_bad_export_fails_without_echoing_it(material: str) -> None:
     assert completed.returncode != 0
     if material:
         assert material not in completed.stderr
+
+
+# --- Guarded rotation wrapper (PR44-R04) ---
+
+SERVER_KEY_TOOL = ROOT / "scripts/wireguard-server-key"
+
+
+def printed_server_key(stdout: str) -> str:
+    """Read the emitted value, not the prose line that also names the field."""
+
+    return next(
+        line.split(":", 1)[1].strip()
+        for line in stdout.splitlines()
+        if line.strip().startswith("server_public_key:")
+    )
+
+
+def server_key(output: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(SERVER_KEY_TOOL), "--output", str(output)],
+        capture_output=True, text=True,
+    )
+
+
+def test_a_rotated_key_is_written_0600_and_never_printed(tmp_path: Path) -> None:
+    output = tmp_path / "wg0.key"
+    completed = server_key(output)
+    assert completed.returncode == 0, completed.stderr
+    material = output.read_text(encoding="utf-8").strip()
+    assert material not in completed.stdout
+    assert oct(output.stat().st_mode)[-3:] == "600"
+
+
+def test_the_printed_public_half_matches_the_written_key(tmp_path: Path) -> None:
+    output = tmp_path / "wg0.key"
+    completed = server_key(output)
+    printed = printed_server_key(completed.stdout)
+    private_key = KEYS.decode(output.read_text(encoding="utf-8").strip())
+    assert printed == KEYS.encode(KEYS.public_key(private_key))
+
+
+def test_rotation_refuses_to_clobber_an_existing_key(tmp_path: Path) -> None:
+    """Shell redirection would have silently destroyed the live identity."""
+
+    output = tmp_path / "wg0.key"
+    assert server_key(output).returncode == 0
+    original = output.read_text(encoding="utf-8")
+    repeated = server_key(output)
+    assert repeated.returncode != 0
+    assert "refusing to overwrite" in repeated.stderr
+    assert output.read_text(encoding="utf-8") == original
+
+
+def test_rotation_refuses_a_path_inside_the_repository() -> None:
+    completed = server_key(ROOT / ".artifacts/wg0.key")
+    assert completed.returncode != 0
+    assert "outside the repository" in completed.stderr
+
+
+def test_a_rotated_key_round_trips_through_the_derivation_check(tmp_path: Path) -> None:
+    """Rotation and escrow confirmation must agree on the same value."""
+
+    output = tmp_path / "wg0.key"
+    completed = server_key(output)
+    printed = printed_server_key(completed.stdout)
+    assert derive(output.read_text(encoding="utf-8")).stdout.strip() == printed

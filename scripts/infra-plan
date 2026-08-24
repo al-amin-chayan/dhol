@@ -269,6 +269,21 @@ if [ -d "$REPO_ROOT/infra/tofu" ]; then
 the external-state delta cannot be bound, so no approvable plan is produced (WP-06)"
 fi
 
+# A reviewed plan must say whether this release replaces the server identity.
+# Only the public half is derived, and only that reaches the plan document.
+WIREGUARD_RESTORE_PUBLIC_KEY=""
+if [ -n "$WIREGUARD_KEY_FILE" ]; then
+  WIREGUARD_RESTORE_PUBLIC_KEY="$("$SCRIPT_DIR/controller" exec python3 scripts/lib/wireguard_keys.py \
+    --public-of - <"$WIREGUARD_KEY_FILE")" \
+    || dholbeat_die "the supplied WireGuard key export is not a base64 key"
+  EXPECTED_SERVER_KEY="$(awk '$1 == "server_public_key:" {print $2; exit}' "$REPO_ROOT/$BASELINE_RELATIVE")"
+  if [ -n "$EXPECTED_SERVER_KEY" ] && [ "$EXPECTED_SERVER_KEY" != "$WIREGUARD_RESTORE_PUBLIC_KEY" ]; then
+    dholbeat_die "the supplied key derives to $WIREGUARD_RESTORE_PUBLIC_KEY but the contract \
+declares $EXPECTED_SERVER_KEY; commit the new key before planning a rotation"
+  fi
+  printf 'wireguard identity in this plan: %s\n' "$WIREGUARD_RESTORE_PUBLIC_KEY"
+fi
+
 SOPS_CANARY=skipped-no-key
 if [ -n "${SOPS_AGE_KEY:-}" ]; then
   printf '\n==> in-memory SOPS decryption canary\n'
@@ -349,6 +364,8 @@ printf '\n==> redacted plan document\n'
   --ansible-log "/workspace/.artifacts/$ARTIFACT_NAME/ansible-run.log" \
   --ansible-status "$ANSIBLE_STATUS" \
   --sops-canary "$SOPS_CANARY" \
+  --transport "$TRANSPORT" \
+  --wireguard-restore-public-key "$WIREGUARD_RESTORE_PUBLIC_KEY" \
   ${COMPOSE_RENDER_ARGS[@]+"${COMPOSE_RENDER_ARGS[@]}"} \
   >"$ARTIFACT_ROOT/plan.yml" \
   || dholbeat_die "the plan authorizes nothing; see .artifacts/$ARTIFACT_NAME/ansible-run.log"

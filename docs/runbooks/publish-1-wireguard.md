@@ -196,14 +196,15 @@ Because the identity is preserved, every peer configuration keeps working.
   updated afterwards, so schedule it.
 
 ```sh
-scripts/controller exec python3 -c 'import sys; sys.path.insert(0, "scripts/lib"); \
-  import wireguard_keys as k; p = k.generate_private_key(); \
-  print(k.encode(p)); print(k.encode(k.public_key(p)), file=sys.stderr)' \
-  >~/publish-1-wg0.key.new
+scripts/wireguard-server-key --output ~/publish-1-wg0.key.new
 ```
 
-The private half goes to the file, the public half to the terminal for the
-contract.
+It refuses an existing path, creates the file mode `0600`, and prints only the
+public half for `vpn.server_public_key`. Commit that value, then converge with
+`--wireguard-key-file ~/publish-1-wg0.key.new`; planning derives the same public
+half, compares it with the contract, and records it in `plan.yml`, so the apply
+you confirm is the rotation you reviewed.
+```
 
 ## Rollback
 

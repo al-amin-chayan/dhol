@@ -1,0 +1,61 @@
+#!/usr/bin/env python3
+"""Generate a WireGuard server identity for rotation or first escrow.
+
+The private half is written once to a file outside the repository, mode 0600,
+and is never printed. Only the public half reaches the terminal, because that is
+the value committed as `vpn.server_public_key` and recorded in the reviewed plan.
+
+Ordinary shell redirection was doing this before, which neither enforced the
+mode nor refused to clobber an existing key.
+"""
+
+from __future__ import annotations
+
+import argparse
+import importlib.util
+from pathlib import Path
+
+
+def load_keys():
+    path = Path(__file__).resolve().parent / "lib/wireguard_keys.py"
+    spec = importlib.util.spec_from_file_location("dholbeat_wireguard_keys", path)
+    if spec is None or spec.loader is None:  # pragma: no cover - defensive
+        raise RuntimeError(f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+KEYS = load_keys()
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, required=True, help="path outside the repository")
+    arguments = parser.parse_args()
+
+    destination = arguments.output.expanduser().resolve()
+    if destination == REPO_ROOT or REPO_ROOT in destination.parents:
+        raise SystemExit(
+            "wireguard key failure: --output must be outside the repository; "
+            "this file contains a private key"
+        )
+    if destination.exists():
+        raise SystemExit(f"wireguard key failure: refusing to overwrite {destination}")
+
+    private_key = KEYS.generate_private_key()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.touch(mode=0o600)
+    destination.write_text(KEYS.encode(private_key) + "\n", encoding="utf-8")
+    destination.chmod(0o600)
+
+    print(f"server key written: {destination}")
+    print("Store it in the password manager, then delete the local copy.")
+    print()
+    print("Commit this as the host contract's vpn.server_public_key:")
+    print(f"  server_public_key: {KEYS.encode(KEYS.public_key(private_key))}")
+
+
+if __name__ == "__main__":
+    main()

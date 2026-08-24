@@ -319,9 +319,15 @@ def resolve_connection_address(
         if stage == "bootstrap":
             raise ValueError("first contact cannot use a tunnel that does not exist yet")
         return tunnel_address
-    if transport == "public":
-        return address
     tunnel_only = is_wireguard and vpn.get("administration") == "tunnel"
+    if transport == "public":
+        if tunnel_only and stage != "bootstrap":
+            raise ValueError(
+                "a tunnel-only contract must be converged over the tunnel: proving the public "
+                "path and then removing it would close administration without ever proving the "
+                "replacement"
+            )
+        return address
     return tunnel_address if (tunnel_only and stage != "bootstrap") else address
 
 
@@ -729,6 +735,10 @@ def main() -> None:
         help="administrator key when it differs from the bootstrap key; defaults to --identity-file",
     )
     render.add_argument("--known-hosts-file", required=True)
+    render.add_argument(
+        "--transport", choices=sorted(TRANSPORTS), default="auto",
+        help="override which path this run connects over; auto follows the contract",
+    )
     render.add_argument(
         "--output", type=Path, required=True, help="destination path, or - to stream to stdout"
     )

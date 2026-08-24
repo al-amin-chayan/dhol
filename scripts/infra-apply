@@ -193,6 +193,20 @@ printf '\n==> release identity gate\n'
   --tag-commit "$TAG_COMMIT" \
   --reachable-from-main "$REACHABLE_FROM_MAIN"
 
+# Derive and check the supplied identity before the founder is asked to confirm,
+# so the confirmation covers the operation actually about to happen.
+if [ -n "$WIREGUARD_KEY_FILE" ]; then
+  printf '\n==> supplied WireGuard identity\n'
+  RESTORE_FINGERPRINT="$("$SCRIPT_DIR/controller" exec python3 scripts/lib/wireguard_keys.py \
+    --public-of - <"$WIREGUARD_KEY_FILE")" \
+    || dholbeat_die "the supplied WireGuard key export is not a base64 key"
+  EXPECTED_SERVER_KEY="$(awk '$1 == "server_public_key:" {print $2; exit}' "$REPO_ROOT/$BASELINE_RELATIVE")"
+  [ -z "$EXPECTED_SERVER_KEY" ] || [ "$EXPECTED_SERVER_KEY" = "$RESTORE_FINGERPRINT" ] \
+    || dholbeat_die "the supplied key derives to $RESTORE_FINGERPRINT but the contract declares \
+$EXPECTED_SERVER_KEY; nothing was changed"
+  printf 'restoring WireGuard identity: %s\n' "$RESTORE_FINGERPRINT"
+fi
+
 printf '\n==> pre-apply plan must reproduce the approved plan exactly\n'
 PREAPPLY_SUFFIX="preapply-$(printf '%s' "$RELEASE_TAG" | tr -c 'a-z0-9' '-')"
 "$SCRIPT_DIR/infra-plan" \
@@ -202,6 +216,7 @@ PREAPPLY_SUFFIX="preapply-$(printf '%s' "$RELEASE_TAG" | tr -c 'a-z0-9' '-')"
   --known-hosts-file "$KNOWN_HOSTS_FILE" \
   --stage "$STAGE" \
   --transport "$TRANSPORT" \
+  ${WIREGUARD_KEY_FILE:+--wireguard-key-file "$WIREGUARD_KEY_FILE"} \
   --artifact-suffix "$PREAPPLY_SUFFIX"
 PREAPPLY_PLAN="$REPO_ROOT/.artifacts/infra-plan-$LIMIT-$STAGE-${TAG_COMMIT:0:12}-$PREAPPLY_SUFFIX/plan.yml"
 [ -f "$PREAPPLY_PLAN" ] || dholbeat_die "the pre-apply plan document was not produced"
@@ -287,12 +302,9 @@ WIREGUARD_KEY_VARS=()
 if [ -n "$WIREGUARD_KEY_FILE" ]; then
   install -m 0600 "$WIREGUARD_KEY_FILE" "$TEMP_ROOT/inputs/wireguard.key"
   WIREGUARD_KEY_VARS+=(--extra-vars "wireguard_restore_key_path=$CONTROLLER_INPUTS/wireguard.key")
-  RESTORE_FINGERPRINT="$("$SCRIPT_DIR/controller" exec python3 scripts/lib/wireguard_keys.py \
-    --public-of /dev/stdin <"$WIREGUARD_KEY_FILE")"
   printf 'restored_wireguard_public_key: %s\n' "$RESTORE_FINGERPRINT" \
     >"$ARTIFACT_ROOT/wireguard-restore-receipt.yml"
   chmod 0600 "$ARTIFACT_ROOT/wireguard-restore-receipt.yml"
-  printf 'restoring escrowed WireGuard identity: %s\n' "$RESTORE_FINGERPRINT"
 fi
 
 printf '\n==> converging %s\n' "$LIMIT"

@@ -429,6 +429,7 @@ def check_executable_entrypoints(root: Path) -> list[str]:
         "scripts/infra-plan",
         "scripts/infra-verify",
         "scripts/wireguard-peer-config",
+        "scripts/wireguard-server-key",
         "infra/controller/entrypoint.sh",
         "infra/inventories/host_baseline.py",
         "infra/playbooks/files/verify_public_listeners.py",

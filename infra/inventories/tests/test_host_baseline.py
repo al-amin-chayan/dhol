@@ -478,8 +478,19 @@ def test_a_reverse_cutover_connects_over_the_still_live_tunnel() -> None:
     assert resolved(public_phase_document(), "converged", "tunnel") == "10.99.0.1"
 
 
-def test_an_explicit_public_transport_overrides_a_tunnel_contract() -> None:
-    assert resolved(tunnel_document(), "converged", "public") == "203.0.113.20"
+def test_a_tunnel_only_contract_refuses_a_public_transport() -> None:
+    """Proving public SSH and then removing it would never prove the tunnel.
+
+    An earlier revision of this test required the opposite, which would have let
+    an explicit override bypass the interlock the whole issue is built on.
+    """
+
+    with pytest.raises(ValueError):
+        resolved(tunnel_document(), "converged", "public")
+
+
+def test_a_public_transport_is_fine_while_the_contract_is_still_public() -> None:
+    assert resolved(public_phase_document(), "converged", "public") == "203.0.113.20"
 
 
 def test_first_contact_can_never_be_forced_onto_a_tunnel() -> None:

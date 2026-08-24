@@ -76,9 +76,6 @@
   no_log: true
   notify: Restart WireGuard
 
-- name: Apply a restored key before its identity is verified
-  ansible.builtin.meta: flush_handlers
-
 - name: Check whether a server private key already exists
   ansible.builtin.stat:
     path: "{{ wireguard_key_path }}"
@@ -106,6 +103,18 @@
 # Read-only, so it runs in check mode too. On a host that has no key yet the
 # read simply fails and the reported delta stays informational rather than
 # executing a postcondition that cannot exist.
+- name: Derive the restored key's public half before it can take effect
+  ansible.builtin.shell:
+    cmd: set -o pipefail && wg pubkey <{{ wireguard_key_path | quote }}
+    executable: /bin/bash
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  register: wireguard_restored_public_key
+  when:
+    - not wireguard_plan_only
+    - wireguard_restore_key_path | length > 0
+
 - name: Read the server public key for peer configuration
   ansible.builtin.shell:
     cmd: set -o pipefail && wg pubkey <{{ wireguard_key_path | quote }}
@@ -124,6 +133,21 @@
     mode: "{{ wireguard_config_mode }}"
   when: not wireguard_plan_only
   notify: Restart WireGuard
+
+# One deliberate flush, after both the key and a complete configuration exist.
+# Restarting earlier would either have no wg0.conf on a clean rebuild, or drop
+# the live tunnel on a wrong key before the identity check could report it.
+- name: Refuse a restored key whose identity is not the reviewed one
+  ansible.builtin.assert:
+    that:
+      - wireguard_restored_public_key.stdout | default('') | trim == baseline_vpn.server_public_key
+    fail_msg: >-
+      The supplied key does not derive to vpn.server_public_key. Refusing to
+      restart the interface: a wrong key would drop the tunnel this run depends on.
+  when:
+    - not wireguard_plan_only
+    - wireguard_restore_key_path | length > 0
+    - baseline_vpn.server_public_key is defined
 
 - name: Apply pending WireGuard configuration before the tunnel is relied upon
   ansible.builtin.meta: flush_handlers

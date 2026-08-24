@@ -318,6 +318,8 @@ def build_arguments(root: Path, log: Path, contract: Path) -> types.SimpleNamesp
         redact=[],
         applied_playbook="playbooks/site.yml",
         plan_kind="check-diff",
+        transport="auto",
+        wireguard_restore_public_key="",
     )
 
 
@@ -355,6 +357,82 @@ def test_plan_document_is_byte_stable_for_identical_inputs(tmp_path: Path) -> No
     assert first["applied_playbook"] == "playbooks/site.yml"
     assert first["ansible_run"]["diffs"], "the reviewed diff must be bound into the plan"
     assert first["ansible_run"]["transcript_sha256"]
+    # Both are safety-critical and must be reproduced by apply.
+    assert first["transport"] == "auto"
+    assert first["wireguard_restore_public_key"] == ""
+
+
+def test_the_transport_is_bound_into_the_plan_digest(tmp_path: Path) -> None:
+    """A different transport is a different authorization."""
+
+    import json
+    import shutil
+
+    import yaml
+
+    root = tmp_path / "repo"
+    shutil.copytree(ROOT / "infra/inventories/production", root / "infra/inventories/production")
+    shutil.copytree(ROOT / "infra/services", root / "infra/services")
+    shutil.copytree(ROOT / "infra/secrets", root / "infra/secrets")
+    (root / "toolchain.lock.yml").write_bytes((ROOT / "toolchain.lock.yml").read_bytes())
+    source = yaml.safe_load(
+        (ROOT / "infra/inventories/fixtures/host-baseline/positive-wireguard.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    source["host_id"] = "fixture-plan-host"
+    (root / "infra/inventories/production/baseline/fixture-plan-host.yml").write_text(
+        yaml.safe_dump(source, sort_keys=True), encoding="utf-8"
+    )
+    log = tmp_path / "check.log"
+    log.write_text(transcript(failed=False), encoding="utf-8")
+    contract = tmp_path / "contract.json"
+    contract.write_text(json.dumps({"schema_version": 1}), encoding="utf-8")
+
+    digests = []
+    for transport in ("auto", "tunnel"):
+        arguments = build_arguments(root, log, contract)
+        arguments.transport = transport
+        plan, findings = PLAN.build_plan(arguments)
+        assert findings == []
+        digests.append(PLAN.sha256_text(yaml.safe_dump(plan, sort_keys=True)))
+    assert digests[0] != digests[1]
+
+
+def test_a_restored_identity_changes_the_plan_digest(tmp_path: Path) -> None:
+    """Replacing the server identity must not ride in on an unchanged plan."""
+
+    import json
+    import shutil
+
+    import yaml
+
+    root = tmp_path / "repo"
+    shutil.copytree(ROOT / "infra/inventories/production", root / "infra/inventories/production")
+    shutil.copytree(ROOT / "infra/services", root / "infra/services")
+    shutil.copytree(ROOT / "infra/secrets", root / "infra/secrets")
+    (root / "toolchain.lock.yml").write_bytes((ROOT / "toolchain.lock.yml").read_bytes())
+    source = yaml.safe_load(
+        (ROOT / "infra/inventories/fixtures/host-baseline/positive-wireguard.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    source["host_id"] = "fixture-plan-host"
+    (root / "infra/inventories/production/baseline/fixture-plan-host.yml").write_text(
+        yaml.safe_dump(source, sort_keys=True), encoding="utf-8"
+    )
+    log = tmp_path / "check.log"
+    log.write_text(transcript(failed=False), encoding="utf-8")
+    contract = tmp_path / "contract.json"
+    contract.write_text(json.dumps({"schema_version": 1}), encoding="utf-8")
+
+    baseline, _ = PLAN.build_plan(build_arguments(root, log, contract))
+    restoring = build_arguments(root, log, contract)
+    restoring.wireguard_restore_public_key = "RklYVFVSRS1TRVJWRVItUFVCLS0tLS0tLS0tLS0tLS0="
+    replaced, _ = PLAN.build_plan(restoring)
+    assert PLAN.sha256_text(yaml.safe_dump(baseline, sort_keys=True)) != PLAN.sha256_text(
+        yaml.safe_dump(replaced, sort_keys=True)
+    )
 
 
 def test_a_changed_host_cannot_reproduce_an_earlier_plan_digest(tmp_path: Path) -> None:

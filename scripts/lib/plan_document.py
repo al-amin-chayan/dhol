@@ -297,6 +297,11 @@ def build_plan(arguments: argparse.Namespace) -> tuple[dict[str, Any], list[str]
         "target_host_role": baseline["host_role"],
         "target_environment": baseline["target_environment"],
         "plan_kind": arguments.plan_kind,
+        # Both are safety-critical and must be reproduced by apply: the transport
+        # decides which path is proven before another is closed, and the
+        # fingerprint decides whether the host keeps its identity.
+        "transport": arguments.transport,
+        "wireguard_restore_public_key": arguments.wireguard_restore_public_key,
         "planned_playbook": arguments.playbook,
         "applied_playbook": arguments.applied_playbook,
         "stage": arguments.stage,
@@ -357,6 +362,8 @@ def main() -> None:
     render.add_argument("--playbook", required=True)
     render.add_argument("--applied-playbook", required=True)
     render.add_argument("--plan-kind", required=True, choices=["bootstrap-preflight", "check-diff"])
+    render.add_argument("--transport", required=True, choices=["auto", "public", "tunnel"])
+    render.add_argument("--wireguard-restore-public-key", default="")
     render.add_argument("--stage", required=True)
     render.add_argument("--git-commit", required=True)
     render.add_argument("--worktree-clean", type=lambda value: value == "true", required=True)
