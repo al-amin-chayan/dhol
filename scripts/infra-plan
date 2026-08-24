@@ -207,8 +207,16 @@ CONNECTION_ADDRESS="$("$SCRIPT_DIR/controller" exec python3 infra/inventories/ho
 # Replacing the server identity restarts the interface, and every peer still
 # holding the old key is dropped the moment it does. Carrying that over the
 # tunnel would kill the transport running the apply, before verification.
-if [ -n "$WIREGUARD_KEY_FILE" ] && [ "$CONNECTION_ADDRESS" != "$ADDRESS" ]; then
-  dholbeat_die "refusing to change the WireGuard identity over the tunnel it would restart; \
+if [ -n "$WIREGUARD_KEY_FILE" ]; then
+  # Ask the contract which path carries this run. Comparing the resolved address
+  # with the supplied one would pass whenever an operator supplies the tunnel
+  # address, which known_hosts legitimately records.
+  CONNECTION_TRANSPORT="$("$SCRIPT_DIR/controller" exec python3 infra/inventories/host_baseline.py \
+    --root /workspace connection-transport \
+    --limit "$LIMIT" --address "$ADDRESS" --stage "$STAGE" --transport "$TRANSPORT")" \
+    || dholbeat_die "could not resolve which path carries this run"
+  [ "$CONNECTION_TRANSPORT" = public ] \
+    || dholbeat_die "refusing to change the WireGuard identity over the tunnel it would restart; \
 roll administration back to public first, rotate over the public path, reissue the peer files, \
 then cut over again"
 fi

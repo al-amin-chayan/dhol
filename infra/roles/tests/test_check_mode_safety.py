@@ -13,6 +13,7 @@ exempt and listed explicitly, because they must fail fast during planning too.
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 import pytest
 import yaml
@@ -41,9 +42,22 @@ CONTRACT_ASSERTIONS = {
 }
 
 
+# A guard must actually negate. `ansible_check_mode` and
+# `ansible_check_mode is defined` both evaluate true during a check run, so a
+# substring match would accept conditions that guard nothing.
+GUARD_RE = re.compile(r"^not\s+(ansible_check_mode|[a-z_]*plan_only)$")
+
+
+def guard_conditions(task: dict) -> list[str]:
+    when = task.get("when", [])
+    conditions = when if isinstance(when, list) else [when]
+    return [str(condition).strip() for condition in conditions]
+
+
 def guarded(task: dict) -> bool:
-    guard = str(task.get("when", ""))
-    return "ansible_check_mode" in guard or "plan_only" in guard
+    """True only when a condition negates check mode outright."""
+
+    return any(GUARD_RE.match(condition) for condition in guard_conditions(task))
 
 
 def assertion_tasks() -> list[tuple[Path, dict]]:
@@ -83,3 +97,36 @@ def test_the_exemption_list_has_no_stale_entries() -> None:
 
     present = {task.get("name", "") for _, task in assertion_tasks()}
     assert CONTRACT_ASSERTIONS <= present, CONTRACT_ASSERTIONS - present
+
+
+@pytest.mark.parametrize(
+    "condition",
+    [
+        "ansible_check_mode",
+        "ansible_check_mode is defined",
+        "ansible_check_mode | default(false)",
+        "not ansible_check_mode or true",
+        "notansible_check_mode",
+        "",
+    ],
+)
+def test_a_condition_that_does_not_negate_check_mode_is_not_a_guard(condition: str) -> None:
+    """The gate must reject guards that mention check mode without disabling on it."""
+
+    assert not guarded({"when": condition})
+
+
+@pytest.mark.parametrize(
+    "condition",
+    ["not ansible_check_mode", "not wireguard_plan_only", "  not ansible_check_mode  "],
+)
+def test_a_negating_condition_is_a_guard(condition: str) -> None:
+    assert guarded({"when": condition})
+
+
+def test_a_guard_inside_a_condition_list_is_accepted() -> None:
+    assert guarded({"when": ["not ansible_check_mode", "some_other_condition"]})
+
+
+def test_a_list_without_a_negating_condition_is_not_a_guard() -> None:
+    assert not guarded({"when": ["ansible_check_mode", "some_other_condition"]})

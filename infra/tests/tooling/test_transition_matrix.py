@@ -140,3 +140,62 @@ def test_an_unknown_stage_is_refused(stage: str) -> None:
         HOST_BASELINE.resolve_connection_address(
             CONTRACTS["public"], PUBLIC_ADDRESS, stage, "auto"
         )
+
+
+# --- The transport carrying a run is decided, never inferred (PR44-R04) ---
+
+def test_the_tunnel_address_is_refused_where_a_public_one_belongs() -> None:
+    """Supplying the tunnel address made address-equality mistake it for public.
+
+    known_hosts legitimately records the tunnel address, so this was an operator
+    input path, not a theoretical one.
+    """
+
+    with pytest.raises(ValueError):
+        HOST_BASELINE.resolve_connection_address(
+            CONTRACTS["tunnel"], TUNNEL_ADDRESS, "converged", "auto"
+        )
+
+
+@pytest.mark.parametrize("administration", ["public", "tunnel", "none"])
+def test_the_tunnel_address_is_refused_for_every_contract(administration: str) -> None:
+    if administration == "none":
+        return  # No tunnel address exists to confuse.
+    with pytest.raises(ValueError):
+        HOST_BASELINE.resolve_connection_address(
+            CONTRACTS[administration], TUNNEL_ADDRESS, "converged", "auto"
+        )
+
+
+@pytest.mark.parametrize(("administration", "stage", "transport"), COMBINATIONS)
+def test_the_resolved_transport_matches_the_resolved_address(
+    administration: str, stage: str, transport: str
+) -> None:
+    """Transport and address must agree, since a guard depends on the transport."""
+
+    try:
+        resolution = HOST_BASELINE.resolve_connection(
+            CONTRACTS[administration], PUBLIC_ADDRESS, stage, transport
+        )
+    except ValueError:
+        return
+    expected = "tunnel" if resolution["address"] == TUNNEL_ADDRESS else "public"
+    assert resolution["transport"] == expected
+
+
+def test_a_tunnel_carried_run_is_never_reported_as_public() -> None:
+    """The guard that refuses a key change depends on exactly this."""
+
+    for administration, transport in (("tunnel", "auto"), ("public", "tunnel")):
+        resolution = HOST_BASELINE.resolve_connection(
+            CONTRACTS[administration], PUBLIC_ADDRESS, "converged", transport
+        )
+        assert resolution["address"] == TUNNEL_ADDRESS
+        assert resolution["transport"] == "tunnel"
+
+
+def test_a_public_carried_run_is_reported_as_public() -> None:
+    resolution = HOST_BASELINE.resolve_connection(
+        CONTRACTS["public"], PUBLIC_ADDRESS, "converged", "auto"
+    )
+    assert resolution == {"address": PUBLIC_ADDRESS, "transport": "public"}

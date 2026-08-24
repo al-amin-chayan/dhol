@@ -296,6 +296,28 @@ def is_wireguard_key(value: str) -> bool:
         return False
 
 
+def resolve_connection(
+    vpn: dict[str, Any], address: str, stage: str, transport: str = "auto"
+) -> dict[str, str]:
+    """Resolve both the address and the transport actually carrying this run.
+
+    Callers must not infer the transport by comparing the resolved address with
+    the one they supplied: an operator may legitimately hold the tunnel address
+    in known_hosts and pass it as ``--address``, which makes those two strings
+    equal on a tunnel-carried run. The transport is therefore decided here,
+    alongside the address, from the contract.
+    """
+
+    resolved = resolve_connection_address(vpn, address, stage, transport)
+    tunnel_address = (
+        str(ipaddress.ip_interface(str(vpn["host_address"])).ip)
+        if vpn.get("mode") == "wireguard"
+        else ""
+    )
+    carried_by_tunnel = bool(tunnel_address) and resolved == tunnel_address
+    return {"address": resolved, "transport": "tunnel" if carried_by_tunnel else "public"}
+
+
 def resolve_connection_address(
     vpn: dict[str, Any], address: str, stage: str, transport: str = "auto"
 ) -> str:
@@ -324,6 +346,11 @@ def resolve_connection_address(
     tunnel_address = (
         str(ipaddress.ip_interface(str(vpn["host_address"])).ip) if is_wireguard else ""
     )
+    if tunnel_address and address == tunnel_address:
+        raise ValueError(
+            "--address is the host's public address; the tunnel address is committed policy "
+            "and is selected through the contract, never supplied here"
+        )
 
     if stage == "bootstrap":
         # First contact cannot use a tunnel that does not exist, and a contract
@@ -785,6 +812,15 @@ def main() -> None:
     resolved.add_argument("--stage", choices=["bootstrap", "converged"], required=True)
     resolved.add_argument("--transport", choices=sorted(TRANSPORTS), default="auto")
 
+    carrier = subparsers.add_parser(
+        "connection-transport",
+        help="print whether this run is carried by the public path or the tunnel",
+    )
+    carrier.add_argument("--limit", required=True)
+    carrier.add_argument("--address", required=True)
+    carrier.add_argument("--stage", choices=["bootstrap", "converged"], required=True)
+    carrier.add_argument("--transport", choices=sorted(TRANSPORTS), default="auto")
+
     arguments = parser.parse_args()
     root = repository_root(arguments.root)
 
@@ -796,6 +832,16 @@ def main() -> None:
             raise SystemExit(1)
         committed = sorted(path.stem for path in baseline_directory(root).glob("*.yml"))
         print(f"production host baseline passed: {committed or 'no host contract committed yet'}")
+        return
+
+    if arguments.command == "connection-transport":
+        document = load_yaml(baseline_path(root, arguments.limit))
+        vpn = (document or {}).get("vpn") or {}
+        print(
+            resolve_connection(
+                vpn, arguments.address, arguments.stage, arguments.transport
+            )["transport"]
+        )
         return
 
     if arguments.command == "connection-address":

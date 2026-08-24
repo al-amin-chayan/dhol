@@ -176,7 +176,20 @@ alternatives rather than letting you discover them on a host you cannot reach.
    run would prove the public path it is about to close.
 2. Export the escrowed key from the password manager to a path outside the
    repository.
-3. Plan and apply as a bootstrap release, supplying both identities:
+3. Plan the restore as a bootstrap release, supplying both identities and the
+   exported key, so the approved plan carries the identity fingerprint the apply
+   must reproduce:
+
+```sh
+scripts/infra-plan --limit publish-1 --stage bootstrap \
+  --address <public-address> \
+  --identity-file ~/.dholbeat/publish-1-bootstrap \
+  --admin-identity-file ~/.dholbeat/publish-1-admin \
+  --known-hosts-file ~/.dholbeat/publish-1.known_hosts \
+  --wireguard-key-file ~/publish-1-wg0.key
+```
+
+   Review the plan, then release and apply it:
 
 ```sh
 scripts/infra-apply --limit publish-1 --release <tag> --stage bootstrap \
