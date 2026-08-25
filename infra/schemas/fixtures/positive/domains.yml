@@ -1,0 +1,12 @@
+schema_version: 1
+domains:
+  - id: alpha-admin
+    name: alpha.example.test
+    registrar_owner: fixture-operations
+    expected_nameservers: [ns1.example.test, ns2.example.test]
+    renewal_owner: fixture-operations
+  - id: beta-admin
+    name: beta.example.test
+    registrar_owner: fixture-operations
+    expected_nameservers: [ns1.example.test, ns2.example.test]
+    renewal_owner: fixture-operations

@@ -1,0 +1,16 @@
+schema_version: 1
+brand: brand-gamma
+project_id: project-gamma
+languages: [en]
+niche: synthetic gamma fixture
+
+tone: neutral, clear, concise
+channels: {}
+cadence: {static: 1/wk}
+approval_channel: telegram:DHOLBEAT_BRAND_GAMMA_APPROVAL_CHANNEL
+visual:
+  palette: ["#778899"]
+  logo: fixtures/gamma.svg
+  fonts: [Fixture Sans]
+no_go: [AI avatar testimonials, medical claims]
+secret_ids: [secret-gamma-api]

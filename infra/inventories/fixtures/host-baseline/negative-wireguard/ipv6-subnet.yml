@@ -1,0 +1,6 @@
+ssh:
+  allow_cidrs:
+    - fd00::/64
+vpn:
+  host_address: fd00::1/64
+  subnet: fd00::/64

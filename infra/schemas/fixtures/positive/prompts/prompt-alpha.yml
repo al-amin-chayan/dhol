@@ -1,0 +1,32 @@
+schema_version: 1
+prompt_id: prompt-alpha
+scope: generic
+stage: caption
+template: "Draft a fixture caption using {{ brand_profile }} and {{ idea }}."
+input_keys: [brand_profile, idea]
+output_contract: fixture-caption-v1
+output_schema:
+  type: object
+  required: [caption]
+  properties:
+    caption:
+      type: string
+    hashtags:
+      type: array
+      items:
+        type: string
+prohibited_outputs: [AI avatar testimonials, final Bangla text in generated images]
+model:
+  provider: claude
+  model: claude-opus
+  capability: drafting
+max_tokens: 1500
+max_cost_usd: 0.03
+retry_policy:
+  max_attempts: 3
+  backoff_seconds: 5
+safety:
+  disallowed_claims: [medical claims, unsupported claims]
+  required_disclosure_tags: [ai-generated]
+  publish_policy: human-approved-only
+  image_text_policy: overlay-only

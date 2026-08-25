@@ -1,14 +1,20 @@
 # stack/
 
-Docker compose stack for the VPSDime host: n8n + Postiz + postgres/redis, plus
-env templates and host bootstrap notes. Everything here must be reproducible
-from git alone.
+Docker Compose desired state is split by the approved two-host boundary:
+Paperclip, central n8n and per-project Hermes services belong on `core-1`; only
+the founder-selected publisher and its state services belong on `publish-1`.
+Postiz remains the default candidate, not a closed tool decision, and the two
+publisher stacks must never be deployed together.
 
-- `.env.example` templates only — real values live on the host and in the
+- `.env` files are forbidden in Git. Public templates may declare names only;
+  runtime values are rendered from values-only `infra/secrets/**/*.sops.yml`
+  ciphertext. Age private keys and provider recovery logins remain in the
   password manager.
-- Disk is the binding constraint (root `README.md` §5): no unbounded volumes,
-  media is purge-after-publish, keep an alert at 85%.
-- Runtime data (`stack/data/`) is gitignored.
+- Compose source is reproducible from Git, while mutable runtime data is
+  application-consistently backed up to encrypted off-site storage. A laptop
+  or `stack/data/` is never authoritative.
+- Disk is the binding constraint (root `README.md` §5): every writable path
+  needs a bound and retention owner, and generated media is purge-after-publish.
 - Public hostnames, Tunnel/Access controls, origin binding and machine-route
   exceptions must follow the authoritative
   [public namespace and Zero Trust policy](../docs/plans/two-vps-infrastructure-as-code.md#public-namespace-and-zero-trust-policy).

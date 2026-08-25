@@ -1,0 +1,27 @@
+schema_version: 1
+environment: fixture
+ip_override_policy: local-explicit-only
+hosts:
+  - id: fixture-core
+    role: fixture
+    hostname: fixture-core.example.test
+    os: ubuntu-24.04
+    service_ids: [service-alpha, service-beta]
+    owner: fixture-operations
+  - id: fixture-publisher
+    role: fixture
+    hostname: fixture-publisher.example.test
+    os: ubuntu-24.04
+    service_ids: []
+    owner: fixture-operations
+public_endpoints:
+  - id: alpha-admin-endpoint
+    host_id: fixture-core
+    hostname: alpha.example.test
+    interface: fixture alpha administration
+    audiences: [human]
+  - id: beta-admin-endpoint
+    host_id: fixture-core
+    hostname: beta.example.test
+    interface: fixture beta administration
+    audiences: [human]

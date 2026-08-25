@@ -1,0 +1,26 @@
+---
+- name: Guard the exact production host boundary before any mutation
+  hosts: baseline_targets
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Require an explicit single-host production boundary
+      ansible.builtin.assert:
+        that:
+          - dholbeat_expected_host is defined
+          - dholbeat_expected_role is defined
+          - ansible_play_hosts_all | length == 1
+          - ansible_play_hosts_all[0] == dholbeat_expected_host
+          - inventory_hostname == dholbeat_expected_host
+          - dholbeat_host_id is defined
+          - dholbeat_host_id == dholbeat_expected_host
+          - dholbeat_host_role is defined
+          - dholbeat_host_role == dholbeat_expected_role
+          - baseline_target_environment is defined
+          - baseline_target_environment == 'production'
+        fail_msg: >-
+          Refusing to run: this entry point converges exactly one named production
+          host supplied through --limit and the rendered inventory.
+      tags: [always]
+
+- ansible.builtin.import_playbook: baseline.yml

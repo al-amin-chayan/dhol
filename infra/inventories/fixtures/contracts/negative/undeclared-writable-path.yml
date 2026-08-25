@@ -1,0 +1,1 @@
+role_writable_paths: [/etc/dholbeat, /var/lib/uncatalogued, /var/log/dholbeat]

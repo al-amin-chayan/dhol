@@ -1,0 +1,5 @@
+target: routes.yml
+operation: set
+path: [routes, 0, host_id]
+value: fixture-publisher
+expected_error: "route-alpha: route host does not match service host"

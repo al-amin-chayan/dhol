@@ -1,0 +1,181 @@
+---
+- name: Verify the converged host baseline without changing desired state
+  hosts: baseline_targets
+  become: true
+  gather_facts: true
+  serial: 1
+  any_errors_fatal: true
+  # The read-only probes below assert against the same role defaults the
+  # convergence roles use. Load them at play level so a task that runs before
+  # any import_role still sees the declared contract.
+  vars_files:
+    - ../roles/base/defaults/main.yml
+    - ../roles/docker/defaults/main.yml
+    - ../roles/firewall/defaults/main.yml
+  tasks:
+    - name: Require an explicit single-host verification boundary
+      ansible.builtin.assert:
+        that:
+          - dholbeat_expected_host is defined
+          - dholbeat_expected_role is defined
+          - ansible_play_hosts_all | length == 1
+          - inventory_hostname == dholbeat_expected_host
+          - dholbeat_host_id == dholbeat_expected_host
+          - dholbeat_host_role == dholbeat_expected_role
+        fail_msg: >-
+          Refusing to verify: this entry point inspects exactly one named host
+          supplied through --limit.
+      tags: [always]
+
+    - name: Verify the declared operating system, architecture, and resources
+      ansible.builtin.assert:
+        that:
+          - ansible_facts['distribution'] == 'Ubuntu'
+          - ansible_facts['distribution_version'] == '24.04'
+          - ansible_facts['architecture'] in ['aarch64', 'x86_64']
+          - ansible_facts['memtotal_mb'] | int >= base_minimum_memory_mb | int
+        fail_msg: The host no longer satisfies the declared baseline resource contract.
+      tags: [host]
+
+    - name: Read root filesystem capacity
+      ansible.builtin.command:
+        argv: [df, "--output=size,avail", -BM, /]
+      changed_when: false
+      register: verify_root_disk
+      tags: [host]
+
+    - name: Verify bounded root filesystem headroom
+      ansible.builtin.assert:
+        that:
+          - verify_root_disk.stdout_lines[-1].split()[0] | regex_replace('M$', '') | int >= base_minimum_disk_total_mb | int
+          - verify_root_disk.stdout_lines[-1].split()[1] | regex_replace('M$', '') | int >= base_minimum_disk_free_mb | int
+        fail_msg: The host root filesystem is below the declared total or free minimum.
+      tags: [host]
+
+    - name: Verify the effective Docker daemon contract
+      ansible.builtin.import_role:
+        name: docker
+        tasks_from: verify
+      tags: [docker]
+
+    - name: Verify the administrative tunnel still matches its contract
+      ansible.builtin.import_role:
+        name: wireguard
+        tasks_from: verify
+      when: baseline_vpn is defined and baseline_vpn.mode | default('none') == 'wireguard'
+      tags: [wireguard, connection-safety]
+
+    - name: Read the converged firewall policy
+      ansible.builtin.command: /usr/sbin/ufw status verbose
+      changed_when: false
+      register: verify_firewall
+      tags: [firewall]
+
+    - name: Verify default-deny ingress and the explicit SSH allowlist
+      ansible.builtin.assert:
+        that:
+          - "'Status: active' in verify_firewall.stdout"
+          - "'deny (incoming)' in verify_firewall.stdout"
+          - >-
+            (item | regex_replace('/32$', '') | regex_replace('/128$', ''))
+            in verify_firewall.stdout
+        fail_msg: The host firewall no longer enforces the reviewed allowlist.
+      loop: "{{ baseline_ssh_allow_cidrs }}"
+      loop_control:
+        label: "{{ item }}"
+      tags: [firewall]
+
+    - name: Verify the Docker ingress chain is still attached
+      ansible.builtin.command:
+        argv: [iptables, -w, -C, DOCKER-USER, -j, DHOLBEAT-DOCKER-INGRESS]
+      changed_when: false
+      tags: [firewall]
+
+    - name: Verify the Docker policy still drops public-interface ingress
+      ansible.builtin.command:
+        argv:
+          - iptables
+          - -w
+          - -C
+          - DHOLBEAT-DOCKER-INGRESS
+          - -i
+          - "{{ firewall_public_interface }}"
+          - -j
+          - DROP
+      changed_when: false
+      tags: [firewall]
+
+    # sshd binds every interface regardless of policy, so tcp/22 stays declared:
+    # the firewall is what scopes it to the VPN subnet, and that is asserted
+    # separately above. Tunnel mode adds the WireGuard listener, which is the one
+    # entry point that must answer publicly.
+    - name: Verify no undeclared service answers on a public address
+      ansible.builtin.script:
+        cmd: >-
+          files/verify_public_listeners.py
+          --allow-public tcp/{{ base_ssh_port | int }}
+          {% if baseline_vpn is defined and baseline_vpn.mode | default('none') == 'wireguard' %}
+          --allow-public udp/{{ baseline_vpn.listen_port | int }}
+          {% endif %}
+      args:
+        executable: /usr/bin/python3
+      changed_when: false
+      register: verify_public_listeners
+      tags: [firewall, network]
+
+    - name: Verify every catalogued baseline directory still matches its contract
+      ansible.builtin.stat:
+        path: "{{ item.path }}"
+      loop: "{{ baseline_managed_directories }}"
+      loop_control:
+        label: "{{ item.path }}"
+      register: verify_managed_directories
+      changed_when: false
+      tags: [directories]
+
+    - name: Require catalogued ownership and mode on every baseline directory
+      ansible.builtin.assert:
+        that:
+          - item.stat.exists
+          - item.stat.isdir
+          - item.stat.pw_name == item.item.owner
+          - item.stat.gr_name == item.item.group
+          - item.stat.mode == item.item.mode
+        fail_msg: "Baseline directory drifted from its catalogued contract: {{ item.item.path }}"
+      loop: "{{ verify_managed_directories.results }}"
+      loop_control:
+        label: "{{ item.item.path }}"
+      tags: [directories]
+
+    - name: Verify the effective SSH daemon policy
+      ansible.builtin.import_role:
+        name: base
+        tasks_from: ssh_verify
+      tags: [ssh]
+
+    - name: Prove the named administrator can still open a second connection
+      ansible.builtin.import_role:
+        name: base
+        tasks_from: connection_probe
+      tags: [ssh, connection-safety]
+
+    - name: Read the host runtime receipt
+      ansible.builtin.slurp:
+        src: "{{ release_receipt_path }}"
+      register: verify_receipt
+      failed_when: false
+      changed_when: false
+      tags: [release]
+
+    - name: Require a release receipt when a reviewed release is being verified
+      ansible.builtin.assert:
+        that:
+          - verify_receipt.content is defined
+          - (verify_receipt.content | b64decode | from_yaml).tag == dholbeat_expected_release_tag
+          - (verify_receipt.content | b64decode | from_yaml).host_id == dholbeat_expected_host
+          - (verify_receipt.content | b64decode | from_yaml).host_role == dholbeat_expected_role
+        fail_msg: >-
+          The host runtime receipt is missing or does not identify the reviewed
+          release being verified.
+      when: dholbeat_expected_release_tag is defined
+      tags: [release]

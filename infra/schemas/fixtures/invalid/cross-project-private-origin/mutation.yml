@@ -1,0 +1,5 @@
+target: routes.yml
+operation: set
+path: [routes, 0, origin]
+value: {kind: private-address, scheme: http, host: 172.18.0.3, port: 18081}
+expected_error: "route-alpha: private-address origin 172.18.0.3 is not declared by service-alpha"

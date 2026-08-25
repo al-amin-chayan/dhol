@@ -1,0 +1,129 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)"
+# shellcheck source=scripts/lib/common.sh
+source "$SCRIPT_DIR/lib/common.sh"
+REPO_ROOT="$(dholbeat_repo_root "$SCRIPT_PATH")"
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/check [--inside-controller]
+
+Run every read-only repository validation in the pinned controller. This is the
+single entry point used locally and by CI. --inside-controller is reserved for
+the controller wrapper and refuses an unmarked host environment.
+EOF
+}
+
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  "") ;;
+  --inside-controller) ;;
+  *) dholbeat_die "unexpected check argument: $1" ;;
+esac
+
+if [ "${1:-}" != "--inside-controller" ]; then
+  exec "$SCRIPT_DIR/controller" exec scripts/check --inside-controller
+fi
+
+[ "${DHOLBEAT_IN_CONTROLLER:-}" = "1" ] || dholbeat_die "--inside-controller may run only through scripts/controller"
+[ "${REPO_ROOT:-}" = "/workspace" ] || dholbeat_die "controller repository root must be /workspace"
+cd "$REPO_ROOT"
+
+run_step() {
+  printf '\n==> %s\n' "$1"
+  shift
+  "$@"
+}
+
+run_step "verify installed tool versions" python /opt/dholbeat/runtime_versions.py --verify-only
+run_step "repository policy" python infra/controller/repo_policy.py --root "$REPO_ROOT"
+run_step "branch route policy" python infra/controller/branch_policy.py
+
+yaml_files=()
+while IFS= read -r -d '' yaml_file; do
+  yaml_files+=("$yaml_file")
+done < <(
+  find . \
+    \( -path './.artifacts' -o -path './.controller-cache' -o -path './.git' -o -path './.worktrees' \) -prune \
+    -o -type f \( -name '*.yml' -o -name '*.yaml' \) -print0
+)
+run_step "YAML lint" yamllint --config-file infra/controller/yamllint.yml "${yaml_files[@]}"
+run_step "shell lint" shellcheck \
+  scripts/check \
+  scripts/controller \
+  scripts/eof-marker.sh \
+  scripts/github-app-gh \
+  scripts/github-app-git \
+  scripts/github-app-token.sh \
+  infra/tests/disposable/run.sh \
+  scripts/infra-apply \
+  scripts/infra-plan \
+  scripts/infra-verify \
+  scripts/lanes.sh \
+  scripts/lib/common.sh \
+  scripts/rm-worktree.sh \
+  infra/controller/entrypoint.sh \
+  infra/controller/tests/fixtures/bin/docker
+run_step "existing worktree helper shell lint" shellcheck --exclude=SC2086 scripts/new-worktree.sh
+run_step "prepare bounded secret scan" python infra/controller/secret_scan.py \
+  --root "$REPO_ROOT" --destination /tmp/dholbeat-secret-scan
+run_step "secret scan" gitleaks dir --no-banner --no-color --redact /tmp/dholbeat-secret-scan
+run_step "foundation tests" pytest -q -p no:cacheprovider infra/controller/tests
+
+schema_files=()
+while IFS= read -r -d '' schema_file; do
+  schema_files+=("$schema_file")
+done < <(
+  find . \
+    \( -path './.artifacts' -o -path './.controller-cache' -o -path './.git' -o -path './.worktrees' \) -prune \
+    -o -type f -name '*.schema.json' -print0
+)
+if [ "${#schema_files[@]}" -gt 0 ]; then
+  run_step "JSON Schema metaschemas" check-jsonschema --check-metaschema "${schema_files[@]}"
+fi
+
+run_step "versioned schema contracts" python infra/schemas/validate.py \
+  --root "$REPO_ROOT" \
+  --bundle infra/schemas/fixtures/positive
+run_step "schema contract tests" pytest -q -p no:cacheprovider infra/schemas/tests
+run_step "production inventory contract" python infra/inventories/validate.py --root "$REPO_ROOT"
+run_step "production host baseline contract" python infra/inventories/host_baseline.py \
+  --root "$REPO_ROOT" check
+run_step "SOPS policy and catalog" python infra/sops/validate.py --root "$REPO_ROOT"
+run_step "inventory, SOPS, and release tests" pytest -q -p no:cacheprovider \
+  infra/inventories/tests \
+  infra/sops/tests \
+  infra/release/tests
+run_step "shared host baseline tests" pytest -q -p no:cacheprovider infra/roles/tests
+run_step "production plan, apply, and verify tooling tests" pytest -q -p no:cacheprovider \
+  infra/tests/tooling
+
+compose_files=()
+while IFS= read -r -d '' compose_file; do
+  compose_files+=("$compose_file")
+done < <(find stack -type f \( -name 'compose.yml' -o -name 'compose.yaml' \) -print0)
+for compose_file in "${compose_files[@]}"; do
+  run_step "Compose config: $compose_file" docker-compose --file "$compose_file" config --quiet
+done
+
+if [ -d infra/tofu ]; then
+  run_step "OpenTofu formatting" tofu fmt -check -recursive infra/tofu
+fi
+
+if [ -d infra/playbooks ] || [ -d infra/roles ]; then
+  # Run from the infra tree so the committed roles_path resolves. Linting from
+  # the repository root classified only 9 of 57 files as Ansible content and
+  # silently skipped every playbook and role; from here the same command covers
+  # them all. SOPS ciphertext is policy-validated separately and is not
+  # parseable Ansible YAML.
+  run_step "Ansible lint" env ANSIBLE_CONFIG="$REPO_ROOT/infra/ansible.cfg" \
+    sh -c 'cd infra && exec ansible-lint --offline --exclude secrets playbooks roles'
+fi
+
+printf '\nall repository checks passed\n'

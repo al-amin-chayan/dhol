@@ -1,0 +1,16 @@
+schema_version: 1
+scope: all
+host_timezone: UTC
+business_timezone: Asia/Dhaka
+release_receipt_path: /etc/dholbeat-release
+infra_controller_principal_id: infra-controller
+local_ip_overrides:
+  tracked_in_git: false
+  source: operator-extra-vars
+  requires_exact_host_limit: true
+release_policy:
+  tag_pattern: infra-prod-YYYYMMDD-N
+  annotated_tag_required: true
+  reviewed_commit_required: true
+  approved_plan_digest_required: true
+  ci_apply_allowed: false

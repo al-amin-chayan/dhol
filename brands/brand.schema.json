@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.dholbeat.local/v1/brand.schema.json",
+  "title": "Brand profile version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "brand", "project_id", "languages", "niche", "tone", "channels", "cadence", "approval_channel", "visual", "no_go", "secret_ids"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "brand": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+    "project_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+    "languages": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^[a-z]{2,3}$"}, "uniqueItems": true},
+    "niche": {"type": "string", "minLength": 1},
+    "tone": {"type": "string", "minLength": 1},
+    "channels": {
+      "type": "object",
+      "propertyNames": {"pattern": "^[a-z][a-z0-9-]*$"},
+      "additionalProperties": {"type": ["string", "null"]}
+    },
+    "cadence": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"pattern": "^[a-z][a-z0-9-]*$"},
+      "additionalProperties": {"type": "string", "pattern": "^[0-9]+(?:-[0-9]+)?/wk$"}
+    },
+    "approval_channel": {"type": "string", "pattern": "^[a-z][a-z0-9-]*:DHOLBEAT_[A-Z0-9_]+$"},
+    "visual": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["palette", "logo", "fonts"],
+      "properties": {
+        "palette": {"type": "array", "items": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"}, "uniqueItems": true},
+        "logo": {"type": "string"},
+        "fonts": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true}
+      }
+    },
+    "no_go": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1},
+      "contains": {"const": "AI avatar testimonials"},
+      "uniqueItems": true
+    },
+    "secret_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true}
+  }
+}

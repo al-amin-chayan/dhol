@@ -1,0 +1,15 @@
+schema_version: 1
+brand: brand-beta
+project_id: project-beta
+languages: [en]
+niche: synthetic beta fixture
+tone: direct, helpful, synthetic
+channels: {}
+cadence: {static: 1/wk}
+approval_channel: telegram:DHOLBEAT_BRAND_BETA_APPROVAL_CHANNEL
+visual:
+  palette: ["#445566"]
+  logo: fixtures/beta.svg
+  fonts: [Fixture Sans]
+no_go: [AI avatar testimonials, medical claims]
+secret_ids: [secret-beta-api]

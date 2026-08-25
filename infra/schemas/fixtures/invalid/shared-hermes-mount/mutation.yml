@@ -1,0 +1,5 @@
+target: hermes-projects/project-beta.yml
+operation: set
+path: [data_mount]
+value: /srv/fixtures/project-alpha/hermes/data
+expected_error: "hermes-beta: shared Hermes data mount /srv/fixtures/project-alpha/hermes/data with hermes-alpha"

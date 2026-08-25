@@ -1,0 +1,16 @@
+schema_version: 1
+images:
+  - id: image-alpha
+    repository: registry.example.test/fixture/alpha
+    tag: 1.0.0
+    digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    source_url: https://example.test/images/alpha
+    license: Apache-2.0
+    verified_on: "2026-08-16"
+  - id: image-beta
+    repository: registry.example.test/fixture/beta
+    tag: 1.0.0
+    digest: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+    source_url: https://example.test/images/beta
+    license: Apache-2.0
+    verified_on: "2026-08-16"

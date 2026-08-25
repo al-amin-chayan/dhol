@@ -1,0 +1,268 @@
+---
+- name: Install the host firewall package
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+
+- name: Read the current firewall policy
+  ansible.builtin.command: /usr/sbin/ufw status verbose
+  changed_when: false
+  check_mode: false
+  register: firewall_ufw_before
+
+- name: Set default-deny inbound policy
+  ansible.builtin.command: /usr/sbin/ufw default deny incoming
+  when: "'deny (incoming)' not in firewall_ufw_before.stdout"
+  changed_when: true
+
+- name: Allow outbound connections by default
+  ansible.builtin.command: /usr/sbin/ufw default allow outgoing
+  when: "'allow (outgoing)' not in firewall_ufw_before.stdout"
+  changed_when: true
+
+- name: Allow SSH only from declared controller networks
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/ufw
+      - allow
+      - from
+      - "{{ item }}"
+      - to
+      - any
+      - port
+      - "{{ firewall_ssh_port }}"
+      - proto
+      - tcp
+      - comment
+      - dholbeat-admin-ssh
+  loop: "{{ baseline_ssh_allow_cidrs }}"
+  register: firewall_ufw_ssh_rules
+  changed_when: "'Skipping adding existing rule' not in firewall_ufw_ssh_rules.stdout"
+
+- name: Allow the WireGuard listener from any source when administration is tunnel-only
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/ufw
+      - allow
+      - proto
+      - udp
+      - from
+      - any
+      - to
+      - any
+      - port
+      - "{{ firewall_vpn_port | int }}"
+      - comment
+      - dholbeat-wireguard
+  when: firewall_vpn_mode == 'wireguard'
+  register: firewall_ufw_vpn_rule
+  changed_when: "'Skipping adding existing rule' not in firewall_ufw_vpn_rule.stdout"
+
+- name: Enable the firewall after the successful administrator probe
+  ansible.builtin.command: /usr/sbin/ufw --force enable
+  when: "'Status: active' not in firewall_ufw_before.stdout"
+  changed_when: true
+
+- name: Install the bounded Docker ingress policy
+  ansible.builtin.template:
+    src: dholbeat-docker-firewall.sh.j2
+    dest: /usr/local/sbin/dholbeat-docker-firewall
+    owner: root
+    group: root
+    mode: "0755"
+  notify: Restart Dholbeat Docker firewall
+
+- name: Install the Docker ingress firewall unit
+  ansible.builtin.template:
+    src: dholbeat-docker-firewall.service.j2
+    dest: /etc/systemd/system/dholbeat-docker-firewall.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart Dholbeat Docker firewall
+
+- name: Apply firewall handlers before verification
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable and start the Docker ingress firewall
+  ansible.builtin.systemd_service:
+    name: dholbeat-docker-firewall.service
+    enabled: true
+    state: started
+
+# ufw allow is additive, so converging a narrower contract would otherwise leave
+# the previous, broader rule in place. Reconciliation runs only after the
+# administrator connection has already been proven above, so removing a path can
+# never be the step that locks the operator out.
+- name: Build the complete set of firewall rules this repository owns
+  ansible.builtin.set_fact:
+    firewall_desired_rules: >-
+      {{
+        (
+          baseline_ssh_allow_cidrs
+          | map('regex_replace', '/32$', '')
+          | map('regex_replace', '/128$', '')
+          | map('regex_replace', '^(.*)$', (base_ssh_port | int | string) ~ '/tcp|\1|dholbeat-admin-ssh')
+          | list
+        )
+        + (
+          [(firewall_vpn_port | int | string) ~ '/udp|Anywhere|dholbeat-wireguard']
+          if firewall_vpn_mode == 'wireguard' else []
+        )
+      }}
+
+- name: Read the numbered firewall rules
+  ansible.builtin.command: /usr/sbin/ufw status numbered
+  changed_when: false
+  check_mode: false
+  register: firewall_ufw_numbered
+
+- name: Identify owned firewall rules that are no longer declared
+  ansible.builtin.command:
+    argv: >-
+      {{
+        ['python3', role_path ~ '/files/reconcile_ufw_rules.py',
+         '--owned-comment', 'dholbeat-admin-ssh',
+         '--owned-comment', 'dholbeat-wireguard']
+        + (firewall_desired_rules | map('regex_replace', '^', '--desired=') | list)
+      }}
+    stdin: "{{ firewall_ufw_numbered.stdout }}"
+  become: false
+  changed_when: false
+  check_mode: false
+  delegate_to: localhost
+  register: firewall_obsolete_rules
+  when: not ansible_check_mode
+  vars:
+    ansible_remote_tmp: /tmp/ansible-controller
+
+# Check mode deliberately does not apply the ufw rules above, so asserting
+# closure against unchanged live state would fail every plan. Describe the delta
+# instead: that is what a reviewer needs from a plan.
+- name: Report the planned firewall delta
+  ansible.builtin.command:
+    argv: >-
+      {{
+        ['python3', role_path ~ '/files/reconcile_ufw_rules.py', '--report',
+         '--owned-comment', 'dholbeat-admin-ssh',
+         '--owned-comment', 'dholbeat-wireguard']
+        + (firewall_desired_rules | map('regex_replace', '^', '--desired=') | list)
+      }}
+    stdin: "{{ firewall_ufw_numbered.stdout }}"
+  become: false
+  changed_when: false
+  check_mode: false
+  delegate_to: localhost
+  register: firewall_planned_delta
+  when: ansible_check_mode
+  vars:
+    ansible_remote_tmp: /tmp/ansible-controller
+
+- name: Show the planned firewall delta
+  ansible.builtin.debug:
+    msg: "{{ firewall_planned_delta.stdout_lines | default([]) }}"
+  when: ansible_check_mode
+
+- name: Remove owned firewall rules that are no longer declared
+  ansible.builtin.command:
+    argv: [/usr/sbin/ufw, --force, delete, "{{ item }}"]
+  loop: "{{ firewall_obsolete_rules.stdout_lines | default([]) }}"
+  changed_when: true
+  when: not ansible_check_mode
+
+- name: Re-read the numbered firewall rules after reconciliation
+  ansible.builtin.command: /usr/sbin/ufw status numbered
+  changed_when: false
+  check_mode: false
+  register: firewall_ufw_reconciled
+  when: not ansible_check_mode
+
+- name: Prove the owned rule set is exactly what the contract declares
+  ansible.builtin.command:
+    argv: >-
+      {{
+        ['python3', role_path ~ '/files/reconcile_ufw_rules.py', '--require-complete',
+         '--owned-comment', 'dholbeat-admin-ssh',
+         '--owned-comment', 'dholbeat-wireguard']
+        + (firewall_desired_rules | map('regex_replace', '^', '--desired=') | list)
+      }}
+    stdin: "{{ firewall_ufw_reconciled.stdout }}"
+  become: false
+  changed_when: false
+  check_mode: false
+  delegate_to: localhost
+  register: firewall_closure
+  when: not ansible_check_mode
+  failed_when:
+    - not ansible_check_mode
+    - firewall_closure.rc | default(0) != 0 or (firewall_closure.stdout | default('') | trim | length) > 0
+  vars:
+    ansible_remote_tmp: /tmp/ansible-controller
+
+- name: Read the converged firewall policy
+  ansible.builtin.command: /usr/sbin/ufw status verbose
+  changed_when: false
+  check_mode: false
+  when: not ansible_check_mode
+  register: firewall_ufw_after
+
+# These read live state. Check mode deliberately did not apply the rules above,
+# so asserting them here would fail on exactly the additions --report just
+# described. The report is the check-mode evidence; these are the real gate.
+- name: Verify default deny and the explicit SSH allowlist
+  when: not ansible_check_mode
+  ansible.builtin.assert:
+    that:
+      - "'Status: active' in firewall_ufw_after.stdout"
+      - "'deny (incoming)' in firewall_ufw_after.stdout"
+      - "'allow (outgoing)' in firewall_ufw_after.stdout"
+      # UFW renders host routes as bare addresses instead of /32 or /128 CIDRs.
+      - >-
+        (item | regex_replace('/32$', '') | regex_replace('/128$', ''))
+        in firewall_ufw_after.stdout
+  loop: "{{ baseline_ssh_allow_cidrs }}"
+  loop_control:
+    label: "{{ item }}"
+
+- name: Verify the WireGuard listener is admitted and SSH is tunnel-scoped
+  ansible.builtin.assert:
+    that:
+      - "(firewall_vpn_port | int | string) in firewall_ufw_after.stdout"
+      - "'dholbeat-wireguard' in firewall_ufw_after.stdout"
+    fail_msg: >-
+      The firewall does not admit the declared WireGuard listener, so closing
+      public SSH would leave no administrative path.
+  when:
+    - not ansible_check_mode
+    - firewall_vpn_mode == 'wireguard'
+
+- name: Verify the Docker ingress chain is attached
+  when: not ansible_check_mode
+  ansible.builtin.command:
+    argv: [iptables, -w, -C, DOCKER-USER, -j, DHOLBEAT-DOCKER-INGRESS]
+  changed_when: false
+  check_mode: false
+
+- name: Verify the Docker policy drops only public-interface ingress
+  when: not ansible_check_mode
+  ansible.builtin.command:
+    argv:
+      - iptables
+      - -w
+      - -C
+      - DHOLBEAT-DOCKER-INGRESS
+      - -i
+      - "{{ firewall_public_interface }}"
+      - -j
+      - DROP
+  changed_when: false
+  check_mode: false
+
+- name: Verify non-ingress Docker forwarding returns to Docker policy
+  when: not ansible_check_mode
+  ansible.builtin.command:
+    argv: [iptables, -w, -C, DHOLBEAT-DOCKER-INGRESS, -j, RETURN]
+  changed_when: false
+  check_mode: false

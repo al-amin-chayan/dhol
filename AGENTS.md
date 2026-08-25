@@ -28,6 +28,13 @@ ambiguous calls, not the dispatcher.
 3. **Disk is the binding constraint** on the VPSDime host (§5 of `README.md`).
    Anything that grows unboundedly on disk is a bug.
 
+## Top-level response footer
+
+Every top-level interactive response to the founder ends with the EOF marker
+produced under `docs/agents/response-format.md`. The rule excludes subagent and
+workflow returns, structured output, repository content, commits, PRs, and
+reviews.
+
 ## Parallel work — lane discipline (the core rule here)
 
 Both agents may be running right now. Assume the other one is editing files you
@@ -55,36 +62,77 @@ cannot see.
 - **`README.md` and `AGENTS.md` are shared, high-contention files.** Append to
   the change log / open decisions; do not restructure them while another lane
   is open. Announce restructures before starting.
+- **Develop-first branch flow.** Routine lanes branch from local `develop` and
+  PR into `develop`. `main` is promotion-only: the only valid PR source for
+  `main` is `develop`. Never push directly to either protected branch.
 - **Rebase before merging, never force-push a branch the other agent may have
-  based work on.** `git fetch` is a no-op here until a remote exists; rebase on
-  local `main`.
-- **Small, complete commits.** Conventional Commits. Merge into `main` only
-  when the lane is complete and cross-reviewed.
+  based work on.** Fetch with the acting agent's App identity and rebase
+  routine work on local `develop`.
+- **Small, complete commits.** Conventional Commits. Merge into a protected
+  branch only when the lane is complete and cross-reviewed.
 
 Detail — worktree lifecycle, conflict recovery, handoff notes:
-`docs/agents/parallel-work.md`.
+`docs/agents/parallel-work.md`. Protected-branch topology and reproducible
+GitHub rulesets: `docs/agents/branch-workflow.md`.
 
 ## Cross-review rule
 
 - Work authored by **Claude Code** is reviewed by **Codex**, and work authored
-  by **Codex** is reviewed by **Claude Code**, before it merges into `main`.
+  by **Codex** is reviewed by **Claude Code**, before it merges into `develop`
+  or `main`.
   A fresh session of the *same* model does not count — correlated failure
   modes are the whole reason the rule exists.
+- **Cross-review is human-triggered only.** The author stops after publishing
+  the exact head SHA and handoff. It must not invoke the other model, spawn a
+  reviewer, enqueue an automated review, or otherwise trigger its own review.
+  The founder starts every review round in a separate session of the other
+  model. Any author fix changes the head and needs a new founder-triggered
+  cross-review before merge.
+- **Completed PRs are ready for review, not drafts.** Open or convert a PR as
+  ready once implementation and author verification are complete. Pending CI
+  or founder-triggered cross-review is not a reason to leave it draft. Use a
+  draft only while the task is genuinely incomplete or blocked, and state the
+  unfinished work in the PR body.
 - Cheap-tier subagents inherit their parent's brain: a Sonnet subagent under
   Claude is still Claude and does not satisfy cross-review.
 - Reviewer mindset is adversarial: verify claims against files and against
   `README.md`'s constraints (cost, disk, disclosure rules), not against the
   author's summary.
+- The first formal review is a full end-to-end **Baseline** review: inspect the
+  entire implementation and return one consolidated finding set, including a
+  probable fix for every finding. Do not stop at the first failure. Every
+  later review is a **Follow-up** that verifies every prior disposition/fix,
+  accepts sound explanations, and checks the fix delta for introduced issues.
 - Record the review verdict in the merge commit body or in the lane's handoff
   note: `Reviewer: <Codex|Claude Code>` + `Reviewed head: <sha>`.
 - Findings are `blocker` / `required` / `suggestion`. The implementer
-  adjudicates each (`accept` / `already-done` / `reject` with evidence) before
-  fixing. Two rounds max; still contested → stop and ask the founder.
+  adjudicates each with evidence before editing and never applies a suggested
+  fix blindly. Baseline plus one follow-up is the normal limit; still
+  contested → stop and ask the founder. Full contract:
+  `docs/agents/pr-review-workflow.md`.
+
+## GitHub identity
+
+- Every GitHub command must use `scripts/github-app-gh ...`; authenticated Git
+  must use `scripts/github-app-git ...` with an explicit HTTPS GitHub URL.
+  Both wrappers mint a fresh, short-lived token and fail closed before invoking
+  `gh` or `git`; never fall back to ambient authentication, a personal token,
+  SSH credentials, or a connected personal account.
+- The helper infers the running agent and loads only its personal profile from
+  `~/.config/github-agent-apps/`: Codex uses `codex.env` and Claude Code uses
+  `claude.env`. An agent must never request, read, copy, or use the other
+  agent's profile or private key.
+- The personal Apps are repository-agnostic. To authorize another personal
+  repository, enable that repository on each App installation; do not create
+  repository-specific Apps or copy private keys into a repository.
+- After any GitHub write, verify that GitHub recorded the expected App bot
+  identity reported by `scripts/github-app-token.sh --expected-login`.
 
 ## Repo layout & ownership
 
 | Path | Contents | Typical lane |
 |---|---|---|
+| `.github/` | Read-only CI workflows and repository automation | tooling lane |
 | `README.md` | Founding plan, decisions, change log | shared — append only |
 | `brands/` | Per-brand profile YAML (the extension point, §4) | brand lane |
 | `infra/` | Ansible/OpenTofu desired state, inventory, SOPS policy/ciphertext | infra lane |

@@ -10,7 +10,7 @@
 #   1. Resolves the primary checkout (safe to run from inside a worktree) and
 #      creates the new worktree under <primary>/.worktrees/<slug>/ — never a
 #      sibling directory, never nested inside another worktree.
-#   2. Creates branch <agent>/<slug> from --base (default: main).
+#   2. Creates branch <agent>/<slug> from --base (default: develop).
 #   3. Writes .dholbeat-agent inside the worktree so any session opened there
 #      knows which agent owns the lane, and appends an "Agent: <agent>" commit
 #      trailer template via .git config commit.template.
@@ -28,7 +28,7 @@ usage:
 examples:
   scripts/new-worktree.sh --name compose-stack --agent claude
   scripts/new-worktree.sh --name brand-profile-schema --agent codex
-  scripts/new-worktree.sh --name hotfix-disk-alert --agent codex --base main
+  scripts/new-worktree.sh --name promotion-fix --agent codex --base develop
 EOF
   exit "${1:-2}"
 }
@@ -40,7 +40,7 @@ cd "$REPO_ROOT"
 NAME=""
 AGENT=""
 BRANCH=""
-BASE_REF="main"
+BASE_REF="develop"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in

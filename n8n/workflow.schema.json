@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.dholbeat.local/v1/workflow.schema.json",
+  "title": "Workflow manifest version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "workflow_id",
+    "project_id",
+    "brand_id",
+    "stage",
+    "source_path",
+    "source_commit",
+    "credential_ids",
+    "states",
+    "transitions",
+    "retention",
+    "input_schema_id",
+    "output_schema_id",
+    "trigger",
+    "timeout_seconds",
+    "revision_key_template",
+    "idempotency_key_template"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "workflow_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+    "project_id": {"type": "string", "minLength": 1},
+    "brand_id": {"type": "string", "minLength": 1},
+    "stage": {"enum": ["research", "ideation", "drafting", "approval", "publishing", "metrics"]},
+    "source_path": {"type": "string", "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"},
+    "source_commit": {"type": "string", "minLength": 1},
+    "credential_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "input_schema_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?:-[a-z0-9]+)*$"},
+    "output_schema_id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*(?:-[a-z0-9]+)*$"},
+    "trigger": {"enum": ["manual", "webhook", "schedule", "event"]},
+    "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 1200},
+    "states": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"enum": ["idea", "idea-approved", "draft", "final-approved", "scheduled", "published", "cancelled"]},
+      "uniqueItems": true
+    },
+    "transitions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["from", "to", "approval"],
+        "properties": {
+          "from": {"type": "string", "minLength": 1},
+          "to": {"type": "string", "minLength": 1},
+          "approval": {
+            "oneOf": [
+              {"type": "null"},
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["type", "binds_content_hash"],
+                "properties": {
+                  "type": {"enum": ["human-idea", "human-final"]},
+                  "binds_content_hash": {"type": "boolean"}
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["success_days", "failure_days", "owner"],
+      "properties": {
+        "success_days": {"type": "integer", "minimum": 0},
+        "failure_days": {"type": "integer", "minimum": 1},
+        "owner": {"type": "string", "minLength": 1}
+      }
+    },
+    "revision_key_template": {"const": "project/{project_id}/brand/{brand_id}/content/{content_id}/revision/{revision}"},
+    "idempotency_key_template": {"const": "project/{project_id}/brand/{brand_id}/content/{content_id}/revision/{revision}/{channel}/{scheduled_at}"}
+  }
+}

@@ -1,0 +1,410 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)"
+# shellcheck source=scripts/lib/common.sh
+source "$SCRIPT_DIR/lib/common.sh"
+REPO_ROOT="$(dholbeat_repo_root "$SCRIPT_PATH")"
+
+CONTROLLER_IDENTITY=/tmp/controller-home/.ssh/id_target
+CONTROLLER_ADMIN_IDENTITY=/tmp/controller-home/.ssh/id_admin
+CONTROLLER_KNOWN_HOSTS=/tmp/controller-home/.ssh/known_hosts
+CONTROLLER_INPUTS=/tmp/controller-inputs
+LOG_LIMIT_BYTES=8388608
+APPLIED_PLAYBOOK="playbooks/site.yml"
+
+LIMIT=""
+ADDRESS=""
+IDENTITY_FILE=""
+ADMIN_IDENTITY_FILE=""
+KNOWN_HOSTS_FILE=""
+STAGE=bootstrap
+TRANSPORT=auto
+WIREGUARD_KEY_FILE=""
+REHEARSAL=false
+ARTIFACT_SUFFIX=""
+TEMP_ROOT=""
+SESSION_ROOT=""
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/infra-plan --limit <host> --address <ip> --identity-file <path>
+                          --known-hosts-file <path>
+                          [--stage bootstrap|converged]
+                          [--admin-identity-file <path>] [--rehearsal]
+                          [--artifact-suffix <slug>]
+
+Produce a redacted, reproducible plan for exactly one production host.
+
+The command reads live state only and writes a normalized plan document whose
+SHA-256 is the digest a release must approve.
+
+Two stages exist because a bare host cannot produce a meaningful check-mode
+diff: ufw, Docker, and chrony are absent, so the probes those roles depend on
+cannot run.
+
+  --stage bootstrap  connects as the provider bootstrap identity and runs the
+                     read-only preflight. The reviewable plan is the declared
+                     contract validated against the host's real facts plus the
+                     current package, directory, listener, and firewall state.
+
+  --stage converged  connects as the named administrator and runs Ansible in
+                     check/diff mode. Every diff hunk is bound into the plan
+                     document, so a host that changes cannot reproduce an
+                     earlier digest.
+
+Either way the plan fails closed: a nonzero run, an unreachable host, a failed
+task, or a missing recap produces no approvable digest.
+
+Required arguments:
+  --limit             exact host ID that also owns a committed baseline contract
+  --address           literal IP address of that host; never committed to Git
+  --identity-file     private key for this connection; must live outside the
+                      repository, with symlinked parents resolved
+  --known-hosts-file  pre-verified host key; a new key is never auto-trusted.
+                      Only a redacted fingerprint receipt is retained.
+
+Options:
+  --admin-identity-file
+                      key authenticating the named administrator, if it differs
+                      from the bootstrap key. The second-connection probe always
+                      authenticates as the administrator.
+  --rehearsal         allow a commit that is not yet reachable from main. The
+                      plan is marked rehearsal and scripts/infra-apply refuses
+                      it.
+  --transport         which path this run connects over: auto follows the
+                      contract, public and tunnel override it. Use --transport
+                      tunnel to roll administration back onto the public path,
+                      because only the tunnel is reachable at that moment.
+  --artifact-suffix   distinguish this run's evidence from an earlier plan for
+                      the same host, stage, and commit
+
+Evidence is written under .artifacts/ and is never a repository input.
+EOF
+}
+
+cleanup() {
+  if [ -n "$SESSION_ROOT" ] && [ -d "$SESSION_ROOT" ]; then
+    rm -rf -- "$SESSION_ROOT"
+  fi
+  if [ -n "$TEMP_ROOT" ] && [ -d "$TEMP_ROOT" ]; then
+    rm -rf -- "$TEMP_ROOT"
+  fi
+}
+trap cleanup EXIT INT TERM
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --limit) [ "$#" -ge 2 ] || dholbeat_die "--limit requires a host ID"; LIMIT="$2"; shift 2 ;;
+    --address) [ "$#" -ge 2 ] || dholbeat_die "--address requires an IP address"; ADDRESS="$2"; shift 2 ;;
+    --identity-file) [ "$#" -ge 2 ] || dholbeat_die "--identity-file requires a path"; IDENTITY_FILE="$2"; shift 2 ;;
+    --known-hosts-file) [ "$#" -ge 2 ] || dholbeat_die "--known-hosts-file requires a path"; KNOWN_HOSTS_FILE="$2"; shift 2 ;;
+    --admin-identity-file) [ "$#" -ge 2 ] || dholbeat_die "--admin-identity-file requires a path"; ADMIN_IDENTITY_FILE="$2"; shift 2 ;;
+    --stage) [ "$#" -ge 2 ] || dholbeat_die "--stage requires bootstrap or converged"; STAGE="$2"; shift 2 ;;
+    --transport) [ "$#" -ge 2 ] || dholbeat_die "--transport requires auto, public, or tunnel"; TRANSPORT="$2"; shift 2 ;;
+    --wireguard-key-file) [ "$#" -ge 2 ] || dholbeat_die "--wireguard-key-file requires a path"; WIREGUARD_KEY_FILE="$2"; shift 2 ;;
+    --rehearsal) REHEARSAL=true; shift ;;
+    --artifact-suffix) [ "$#" -ge 2 ] || dholbeat_die "--artifact-suffix requires a slug"; ARTIFACT_SUFFIX="$2"; shift 2 ;;
+    *) dholbeat_die "unexpected argument: $1" ;;
+  esac
+done
+
+[ -n "$LIMIT" ] || dholbeat_die "--limit is required and must name exactly one host"
+[ -n "$ADDRESS" ] || dholbeat_die "--address is required; addresses are never committed"
+[ -n "$IDENTITY_FILE" ] || dholbeat_die "--identity-file is required"
+[ -n "$KNOWN_HOSTS_FILE" ] || dholbeat_die "--known-hosts-file is required; host keys are never auto-trusted"
+case "$STAGE" in
+  bootstrap) PLAN_KIND=bootstrap-preflight; PLANNED_PLAYBOOK="playbooks/preflight.yml" ;;
+  converged) PLAN_KIND=check-diff; PLANNED_PLAYBOOK="playbooks/bootstrap.yml" ;;
+  *) dholbeat_die "--stage must be bootstrap or converged" ;;
+esac
+case "$ARTIFACT_SUFFIX" in
+  "") ;;
+  *[!a-z0-9-]*) dholbeat_die "--artifact-suffix must be lowercase letters, digits, and hyphens" ;;
+esac
+case "$TRANSPORT" in
+  auto|public|tunnel) ;;
+  *) dholbeat_die "--transport must be auto, public, or tunnel" ;;
+esac
+[ -z "${GITHUB_ACTIONS:-}${CI:-}" ] \
+  || dholbeat_die "planning against a production host is never permitted in CI"
+
+IDENTITY_FILE="$(dholbeat_assert_outside_repository "$REPO_ROOT" "$IDENTITY_FILE" "connection identity")"
+if [ -n "$WIREGUARD_KEY_FILE" ]; then
+  WIREGUARD_KEY_FILE="$(dholbeat_assert_outside_repository "$REPO_ROOT" "$WIREGUARD_KEY_FILE" "WireGuard key export")"
+fi
+if [ -n "$ADMIN_IDENTITY_FILE" ]; then
+  ADMIN_IDENTITY_FILE="$(dholbeat_assert_outside_repository "$REPO_ROOT" "$ADMIN_IDENTITY_FILE" "administrator identity")"
+else
+  ADMIN_IDENTITY_FILE="$IDENTITY_FILE"
+fi
+KNOWN_HOSTS_FILE="$(dholbeat_canonical_path "$KNOWN_HOSTS_FILE")"
+[ ! -L "$KNOWN_HOSTS_FILE" ] || dholbeat_die "the known-hosts file must not be a symbolic link"
+[ -f "$KNOWN_HOSTS_FILE" ] || dholbeat_die "known-hosts file is unavailable: $KNOWN_HOSTS_FILE"
+[ -s "$KNOWN_HOSTS_FILE" ] || dholbeat_die "known-hosts file is empty; verify the host key first"
+
+BASELINE_RELATIVE="infra/inventories/production/baseline/$LIMIT.yml"
+[ -f "$REPO_ROOT/$BASELINE_RELATIVE" ] \
+  || dholbeat_die "no committed baseline contract for host: $LIMIT"
+HOST_ROLE="$(awk '$1 == "host_role:" {print $2; exit}' "$REPO_ROOT/$BASELINE_RELATIVE")"
+[ -n "$HOST_ROLE" ] || dholbeat_die "baseline contract declares no host_role: $BASELINE_RELATIVE"
+
+dholbeat_require_command git
+git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+  || dholbeat_die "scripts/infra-plan must run inside the repository checkout"
+[ -z "$(git -C "$REPO_ROOT" status --porcelain)" ] \
+  || dholbeat_die "refusing to plan from a dirty worktree; commit or stash first"
+WORKTREE_CLEAN=true
+
+GIT_COMMIT="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+REACHABLE_FROM_MAIN=true
+if ! git -C "$REPO_ROOT" merge-base --is-ancestor "$GIT_COMMIT" refs/heads/main >/dev/null 2>&1; then
+  REACHABLE_FROM_MAIN=false
+fi
+if [ "$REACHABLE_FROM_MAIN" != true ] && [ "$REHEARSAL" != true ]; then
+  dholbeat_die "commit $GIT_COMMIT is not reachable from protected main; use --rehearsal for a non-authorizing plan"
+fi
+
+ARTIFACT_NAME="infra-plan-$LIMIT-$STAGE-${GIT_COMMIT:0:12}${ARTIFACT_SUFFIX:+-$ARTIFACT_SUFFIX}"
+ARTIFACT_ROOT="$REPO_ROOT/.artifacts/$ARTIFACT_NAME"
+[ ! -L "$REPO_ROOT/.artifacts" ] || dholbeat_die ".artifacts must not be a symbolic link"
+[ ! -e "$ARTIFACT_ROOT" ] \
+  || dholbeat_die "plan evidence already exists; inspect and remove: .artifacts/$ARTIFACT_NAME"
+mkdir -p "$ARTIFACT_ROOT"
+chmod 0700 "$ARTIFACT_ROOT"
+
+# Operational host-key material stays in a bounded session directory that is
+# removed on exit. Only a redacted fingerprint receipt survives as evidence.
+SESSION_NAME="session-plan-$$"
+SESSION_ROOT="$REPO_ROOT/.artifacts/$SESSION_NAME"
+[ ! -e "$SESSION_ROOT" ] || dholbeat_die "a stale plan session directory exists: .artifacts/$SESSION_NAME"
+mkdir -p "$SESSION_ROOT"
+chmod 0700 "$SESSION_ROOT"
+install -m 0600 "$KNOWN_HOSTS_FILE" "$SESSION_ROOT/known_hosts"
+
+TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/dholbeat-infra-plan.XXXXXX")"
+chmod 0700 "$TEMP_ROOT"
+mkdir -p "$TEMP_ROOT/inputs"
+chmod 0700 "$TEMP_ROOT/inputs"
+
+cat >"$TEMP_ROOT/inputs/run-ansible.sh" <<'RUNNER'
+#!/bin/sh
+# Run Ansible from the infra tree so the committed roles_path resolves.
+set -eu
+cd /workspace/infra
+exec ansible-playbook "$@"
+RUNNER
+chmod 0700 "$TEMP_ROOT/inputs/run-ansible.sh"
+
+# Resolved once from the contract so every later guard uses the same answer.
+CONNECTION_ADDRESS="$("$SCRIPT_DIR/controller" exec python3 infra/inventories/host_baseline.py \
+  --root /workspace connection-address \
+  --limit "$LIMIT" --address "$ADDRESS" --stage "$STAGE" --transport "$TRANSPORT")" \
+  || dholbeat_die "this stage and transport are not a safe combination for the committed contract"
+
+# Replacing the server identity restarts the interface, and every peer still
+# holding the old key is dropped the moment it does. Carrying that over the
+# tunnel would kill the transport running the apply, before verification.
+if [ -n "$WIREGUARD_KEY_FILE" ]; then
+  # Ask the contract which path carries this run. Comparing the resolved address
+  # with the supplied one would pass whenever an operator supplies the tunnel
+  # address, which known_hosts legitimately records.
+  CONNECTION_TRANSPORT="$("$SCRIPT_DIR/controller" exec python3 infra/inventories/host_baseline.py \
+    --root /workspace connection-transport \
+    --limit "$LIMIT" --address "$ADDRESS" --stage "$STAGE" --transport "$TRANSPORT")" \
+    || dholbeat_die "could not resolve which path carries this run"
+  [ "$CONNECTION_TRANSPORT" = public ] \
+    || dholbeat_die "refusing to change the WireGuard identity over the tunnel it would restart; \
+roll administration back to public first, rotate over the public path, reissue the peer files, \
+then cut over again"
+fi
+
+printf '\n==> read-only repository checks\n'
+"$SCRIPT_DIR/check"
+
+printf '\n==> locked controller identity\n'
+"$SCRIPT_DIR/controller" digest >"$ARTIFACT_ROOT/controller-digest.txt"
+CONTROLLER_IMAGE_ID="$(awk -F= '$1 == "image_id" {print $2}' "$ARTIFACT_ROOT/controller-digest.txt")"
+CONTROLLER_SOURCE_LOCK="$(awk -F= '$1 == "source_lock_sha256" {print $2}' "$ARTIFACT_ROOT/controller-digest.txt")"
+{ [ -n "$CONTROLLER_IMAGE_ID" ] && [ -n "$CONTROLLER_SOURCE_LOCK" ]; } \
+  || dholbeat_die "could not resolve the locked controller identity"
+
+printf '\n==> offline baseline contract for %s\n' "$LIMIT"
+"$SCRIPT_DIR/controller" exec python3 infra/inventories/host_baseline.py \
+  --root /workspace contract --limit "$LIMIT" >"$ARTIFACT_ROOT/contract.json"
+chmod 0600 "$ARTIFACT_ROOT/contract.json"
+
+printf '\n==> operator inventory (the address stays local)\n'
+"$SCRIPT_DIR/controller" exec python3 infra/inventories/host_baseline.py \
+  --root /workspace render \
+  --limit "$LIMIT" \
+  --address "$ADDRESS" \
+  --stage "$STAGE" \
+  --transport "$TRANSPORT" \
+  --identity-file "$CONTROLLER_IDENTITY" \
+  --admin-identity-file "$CONTROLLER_ADMIN_IDENTITY" \
+  --known-hosts-file "$CONTROLLER_KNOWN_HOSTS" \
+  --output - >"$TEMP_ROOT/inputs/inventory.yml"
+chmod 0600 "$TEMP_ROOT/inputs/inventory.yml"
+# The connection address is not always the supplied one: once administration
+# moves onto the tunnel, every non-bootstrap run connects over the tunnel
+# instead. Ask the contract which address this stage resolves to rather than
+# assuming, so a tunnel-only host can still be planned.
+grep -q "ansible_host: $CONNECTION_ADDRESS" "$TEMP_ROOT/inputs/inventory.yml" \
+  || dholbeat_die "the rendered inventory does not target the resolved connection address"
+
+printf '\n==> Compose scope for %s\n' "$LIMIT"
+COMPOSE_STACKS="$("$SCRIPT_DIR/controller" exec python3 scripts/lib/plan_document.py compose-scope \
+  --root /workspace --limit "$LIMIT")"
+COMPOSE_RENDER_ARGS=()
+while IFS= read -r stack_id; do
+  [ -n "$stack_id" ] || continue
+  printf 'rendering Compose configuration: %s\n' "$stack_id"
+  compose_file=""
+  for candidate in "stack/$stack_id/compose.yml" "stack/$stack_id/compose.yaml"; do
+    if [ -f "$REPO_ROOT/$candidate" ]; then
+      compose_file="$candidate"
+      break
+    fi
+  done
+  [ -n "$compose_file" ] || dholbeat_die "no Compose file found for owned stack: $stack_id"
+  compose_digest="$(
+    "$SCRIPT_DIR/controller" exec docker-compose --file "$compose_file" config \
+      | "$SCRIPT_DIR/controller" exec python3 -c \
+        'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'
+  )" || dholbeat_die "Compose configuration could not be rendered for stack: $stack_id"
+  COMPOSE_RENDER_ARGS+=(--compose-render "$stack_id=$compose_digest")
+done <<EOF
+$COMPOSE_STACKS
+EOF
+
+# There is no OpenTofu plan adapter yet. Hashing an operator-supplied file
+# would let a zero-byte or unrelated file satisfy the external-state gate, so
+# committed declarations fail closed until WP-06 implements a real adapter that
+# renders and binds a deterministic redacted change representation.
+if [ -d "$REPO_ROOT/infra/tofu" ]; then
+  dholbeat_die "committed OpenTofu declarations exist but no plan adapter is implemented; \
+the external-state delta cannot be bound, so no approvable plan is produced (WP-06)"
+fi
+
+# A reviewed plan must say whether this release replaces the server identity.
+# Only the public half is derived, and only that reaches the plan document.
+WIREGUARD_RESTORE_PUBLIC_KEY=""
+if [ -n "$WIREGUARD_KEY_FILE" ]; then
+  WIREGUARD_RESTORE_PUBLIC_KEY="$("$SCRIPT_DIR/controller" exec python3 scripts/lib/wireguard_keys.py \
+    --public-of - <"$WIREGUARD_KEY_FILE")" \
+    || dholbeat_die "the supplied WireGuard key export is not a base64 key"
+  EXPECTED_SERVER_KEY="$(awk '$1 == "server_public_key:" {print $2; exit}' "$REPO_ROOT/$BASELINE_RELATIVE")"
+  if [ -n "$EXPECTED_SERVER_KEY" ] && [ "$EXPECTED_SERVER_KEY" != "$WIREGUARD_RESTORE_PUBLIC_KEY" ]; then
+    dholbeat_die "the supplied key derives to $WIREGUARD_RESTORE_PUBLIC_KEY but the contract \
+declares $EXPECTED_SERVER_KEY; commit the new key before planning a rotation"
+  fi
+  printf 'wireguard identity in this plan: %s\n' "$WIREGUARD_RESTORE_PUBLIC_KEY"
+fi
+
+SOPS_CANARY=skipped-no-key
+if [ -n "${SOPS_AGE_KEY:-}" ]; then
+  printf '\n==> in-memory SOPS decryption canary\n'
+  "$SCRIPT_DIR/controller" exec bash -c \
+    'sops --decrypt --output-type json infra/secrets/canary.sops.yml | python3 -c "import json,sys; json.load(sys.stdin)"' \
+    >/dev/null \
+    || dholbeat_die "the SOPS decryption canary failed; refusing to plan with unusable secret roots"
+  SOPS_CANARY=verified
+fi
+
+ANSIBLE_ARGS=(
+  --inventory "$CONTROLLER_INPUTS/inventory.yml"
+  --limit "$LIMIT"
+)
+if [ "$PLAN_KIND" = check-diff ]; then
+  ANSIBLE_ARGS+=(--check --diff)
+fi
+ANSIBLE_ARGS+=(
+  --extra-vars "dholbeat_expected_host=$LIMIT"
+  --extra-vars "dholbeat_expected_role=$HOST_ROLE"
+  "$PLANNED_PLAYBOOK"
+)
+
+printf '\n==> %s against %s\n' "$PLAN_KIND" "$LIMIT"
+set +e
+"$SCRIPT_DIR/controller" exec-ssh \
+  --known-hosts ".artifacts/$SESSION_NAME/known_hosts" \
+  --identity "$IDENTITY_FILE" \
+  --admin-identity "$ADMIN_IDENTITY_FILE" \
+  --inputs "$TEMP_ROOT/inputs" \
+  --confirm production-host \
+  sh "$CONTROLLER_INPUTS/run-ansible.sh" "${ANSIBLE_ARGS[@]}" \
+  >"$TEMP_ROOT/ansible.raw" 2>&1
+ANSIBLE_STATUS=$?
+set -e
+
+RAW_BYTES="$(wc -c <"$TEMP_ROOT/ansible.raw" | tr -d ' ')"
+if [ "$RAW_BYTES" -gt "$LOG_LIMIT_BYTES" ]; then
+  head -c "$LOG_LIMIT_BYTES" "$TEMP_ROOT/ansible.raw" >"$TEMP_ROOT/ansible.trimmed"
+  printf '\n[transcript truncated at %s bytes]\n' "$LOG_LIMIT_BYTES" >>"$TEMP_ROOT/ansible.trimmed"
+  mv -- "$TEMP_ROOT/ansible.trimmed" "$TEMP_ROOT/ansible.raw"
+fi
+
+"$SCRIPT_DIR/controller" exec python3 scripts/lib/plan_document.py redact \
+  --redact "$ADDRESS" \
+  --redact "$IDENTITY_FILE" \
+  --redact "$ADMIN_IDENTITY_FILE" \
+  --redact "$KNOWN_HOSTS_FILE" \
+  <"$TEMP_ROOT/ansible.raw" >"$ARTIFACT_ROOT/ansible-run.log"
+chmod 0600 "$ARTIFACT_ROOT/ansible-run.log"
+
+# Retain proof that a specific host key was pinned, without the address.
+"$SCRIPT_DIR/controller" exec-ssh \
+  --known-hosts ".artifacts/$SESSION_NAME/known_hosts" \
+  --identity "$IDENTITY_FILE" \
+  --admin-identity "$ADMIN_IDENTITY_FILE" \
+  --inputs "$TEMP_ROOT/inputs" \
+  --confirm production-host \
+  ssh-keygen -lf "$CONTROLLER_KNOWN_HOSTS" \
+  | awk '{print $1, $2, $4}' >"$ARTIFACT_ROOT/known-hosts-fingerprint.txt"
+chmod 0600 "$ARTIFACT_ROOT/known-hosts-fingerprint.txt"
+
+printf '\n==> redacted plan document\n'
+"$SCRIPT_DIR/controller" exec python3 scripts/lib/plan_document.py render \
+  --root /workspace \
+  --limit "$LIMIT" \
+  --playbook "$PLANNED_PLAYBOOK" \
+  --applied-playbook "$APPLIED_PLAYBOOK" \
+  --plan-kind "$PLAN_KIND" \
+  --stage "$STAGE" \
+  --git-commit "$GIT_COMMIT" \
+  --worktree-clean "$WORKTREE_CLEAN" \
+  --reachable-from-main "$REACHABLE_FROM_MAIN" \
+  --rehearsal "$REHEARSAL" \
+  --controller-image-id "$CONTROLLER_IMAGE_ID" \
+  --controller-source-lock "$CONTROLLER_SOURCE_LOCK" \
+  --contract "/workspace/.artifacts/$ARTIFACT_NAME/contract.json" \
+  --ansible-log "/workspace/.artifacts/$ARTIFACT_NAME/ansible-run.log" \
+  --ansible-status "$ANSIBLE_STATUS" \
+  --sops-canary "$SOPS_CANARY" \
+  --transport "$TRANSPORT" \
+  --wireguard-restore-public-key "$WIREGUARD_RESTORE_PUBLIC_KEY" \
+  ${COMPOSE_RENDER_ARGS[@]+"${COMPOSE_RENDER_ARGS[@]}"} \
+  >"$ARTIFACT_ROOT/plan.yml" \
+  || dholbeat_die "the plan authorizes nothing; see .artifacts/$ARTIFACT_NAME/ansible-run.log"
+chmod 0600 "$ARTIFACT_ROOT/plan.yml"
+
+dholbeat_assert_absent_from_evidence "$ARTIFACT_ROOT" "$ADDRESS" "$IDENTITY_FILE" \
+  "$ADMIN_IDENTITY_FILE" "$KNOWN_HOSTS_FILE"
+
+PLAN_DIGEST="$(dholbeat_sha256_path "$ARTIFACT_ROOT/plan.yml")"
+printf '%s\n' "$PLAN_DIGEST" >"$ARTIFACT_ROOT/plan.sha256"
+
+printf '\n'
+printf 'plan host            : %s (%s)\n' "$LIMIT" "$HOST_ROLE"
+printf 'plan kind            : %s\n' "$PLAN_KIND"
+printf 'planned playbook     : %s\n' "$PLANNED_PLAYBOOK"
+printf 'applied playbook     : %s\n' "$APPLIED_PLAYBOOK"
+printf 'plan commit          : %s\n' "$GIT_COMMIT"
+printf 'reachable from main  : %s\n' "$REACHABLE_FROM_MAIN"
+printf 'rehearsal only       : %s\n' "$REHEARSAL"
+printf 'approved_plan_sha256 : %s\n' "$PLAN_DIGEST"
+printf 'evidence             : .artifacts/%s\n' "$ARTIFACT_NAME"
+printf '\nReview .artifacts/%s/plan.yml before recording this digest in a release.\n' "$ARTIFACT_NAME"

@@ -1,0 +1,27 @@
+---
+# Read-only verification shared by convergence and infra/playbooks/verify.yml.
+# The probe runs on the host because `wg show <interface> dump` prints the
+# server private key in its first field; parsing there keeps that key out of the
+# controller, the transcript, and .artifacts/ evidence entirely.
+- name: Prove the WireGuard interface matches its declared contract
+  ansible.builtin.script:
+    cmd: >-
+      verify_wireguard_state.py
+      --interface {{ baseline_vpn.interface | quote }}
+      --listen-port {{ baseline_vpn.listen_port | int }}
+      --subnet {{ baseline_vpn.subnet | quote }}
+      --host-address {{ baseline_vpn.host_address | quote }}
+      {% if baseline_vpn.server_public_key is defined %}
+      --expect-public-key {{ baseline_vpn.server_public_key | quote }}
+      {% endif %}
+      {% for peer in baseline_vpn.peers %}
+      --peer {{ (peer.public_key ~ '|' ~ (peer.allowed_ips | join(','))) | quote }}
+      {% endfor %}
+  args:
+    executable: /usr/bin/python3
+  changed_when: false
+  register: wireguard_state
+
+- name: Report the verified WireGuard contract
+  ansible.builtin.debug:
+    msg: "{{ wireguard_state.stdout | trim }}"

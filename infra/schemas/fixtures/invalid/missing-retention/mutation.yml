@@ -1,0 +1,4 @@
+target: volumes.yml
+operation: delete
+path: [volumes, 0, retention]
+expected_error: "volumes.yml: schema at volumes.0: 'retention' is a required property"

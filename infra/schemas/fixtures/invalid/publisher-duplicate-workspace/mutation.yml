@@ -1,0 +1,5 @@
+target: publisher-mappings/project-beta.yml
+operation: set
+path: [workspace_id]
+value: fixture-workspace-alpha
+expected_error: "publisher-beta: duplicate publisher workspace_id fixture-workspace-alpha"

@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.dholbeat.local/v1/inventory.schema.json",
+  "title": "Host inventory version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "environment", "ip_override_policy", "hosts", "public_endpoints"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "environment": {"enum": ["production", "fixture"]},
+    "ip_override_policy": {"const": "local-explicit-only"},
+    "hosts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "role", "hostname", "os", "service_ids", "owner"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+          "role": {"enum": ["core", "publisher", "fixture"]},
+          "hostname": {"type": "string", "minLength": 1},
+          "os": {"const": "ubuntu-24.04"},
+          "service_ids": {
+            "type": "array",
+            "items": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+            "uniqueItems": true
+          },
+          "owner": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "public_endpoints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "host_id", "hostname", "interface", "audiences"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+          "host_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+          "hostname": {
+            "type": "string",
+            "pattern": "^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z][a-z0-9-]{0,62}$"
+          },
+          "interface": {"type": "string", "minLength": 1},
+          "audiences": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"enum": ["human", "machine"]},
+            "uniqueItems": true
+          }
+        }
+      }
+    }
+  }
+}

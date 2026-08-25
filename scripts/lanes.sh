@@ -8,6 +8,8 @@ set -euo pipefail
 REPO_ROOT="$(git worktree list --porcelain | awk '/^worktree / { sub(/^worktree /, ""); print; exit }')"
 [ -n "$REPO_ROOT" ] || REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
+BASE_REF="develop"
+git show-ref --verify --quiet refs/heads/develop || BASE_REF="main"
 
 printf '\n== active lanes (worktrees) ==\n'
 found=0
@@ -18,13 +20,13 @@ while IFS= read -r wt; do
   agent="unknown"
   [ -f "$wt/.dholbeat-agent" ] && agent="$(tr -d '[:space:]' < "$wt/.dholbeat-agent")"
   branch="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
-  ahead="$(git -C "$wt" rev-list --count "main..$branch" 2>/dev/null || echo '?')"
+  ahead="$(git -C "$wt" rev-list --count "$BASE_REF..$branch" 2>/dev/null || echo '?')"
   dirty="clean"
   [ -n "$(git -C "$wt" status --porcelain 2>/dev/null)" ] && dirty="DIRTY"
   printf '  %-24s agent=%-7s branch=%-32s +%s commits  %s\n' \
     "$slug" "$agent" "$branch" "$ahead" "$dirty"
   # Touched top-level paths — the overlap signal that matters.
-  paths="$(git -C "$wt" diff --name-only "main...$branch" 2>/dev/null \
+  paths="$(git -C "$wt" diff --name-only "$BASE_REF...$branch" 2>/dev/null \
     | cut -d/ -f1 | sort -u | tr '\n' ' ')"
   uncommitted="$(git -C "$wt" status --porcelain 2>/dev/null \
     | awk '{print $NF}' | cut -d/ -f1 | sort -u | tr '\n' ' ')"

@@ -1,0 +1,6 @@
+vpn:
+  peers:
+    - allowed_ips:
+        - 10.99.0.2/32
+      id: founder-laptop
+      public_key: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.dholbeat.local/v1/volume.schema.json",
+  "title": "Writable volume registry version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "volumes"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "volumes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "service_id", "owner_project_id", "mount_path", "classification", "data_classification", "size_limit_mb", "backup_adapter_id", "retention"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+          "service_id": {"type": "string", "minLength": 1},
+          "owner_project_id": {"type": "string", "minLength": 1},
+          "mount_path": {"type": "string", "pattern": "^/"},
+          "classification": {"enum": ["rebuildable", "ephemeral", "retained", "provider-owned"]},
+          "data_classification": {"enum": ["public", "internal", "confidential", "pii"]},
+          "size_limit_mb": {"type": "integer", "minimum": 1},
+          "backup_adapter_id": {"type": ["string", "null"]},
+          "retention": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["max_age_days", "purge_events", "owner"],
+            "properties": {
+              "max_age_days": {"type": "integer", "minimum": 1},
+              "purge_events": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+              "owner": {"type": "string", "minLength": 1}
+            }
+          },
+          "rpo_hours": {"type": "integer", "minimum": 1},
+          "rto_hours": {"type": "integer", "minimum": 1},
+          "restore_probe": {"type": "string", "minLength": 1},
+          "reconciliation_probe": {"type": "string", "minLength": 1}
+        },
+        "allOf": [
+          {
+            "if": {"properties": {"classification": {"const": "retained"}}},
+            "then": {"required": ["rpo_hours", "rto_hours", "restore_probe"], "properties": {"backup_adapter_id": {"type": "string", "minLength": 1}}}
+          },
+          {
+            "if": {"properties": {"classification": {"const": "provider-owned"}}},
+            "then": {"required": ["reconciliation_probe"]}
+          }
+        ]
+      }
+    }
+  }
+}

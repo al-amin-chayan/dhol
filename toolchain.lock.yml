@@ -1,0 +1,159 @@
+schema_version: 1
+verified_on: "2026-08-15"
+
+controller:
+  local_image: dholbeat/controller
+  base_image: python:3.13.7-slim-bookworm@sha256:adafcc17694d715c905b4c7bebd96907a1fd5cf183395f0ebc4d3428bd22d92d
+  buildkit_image: moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
+  cache_label: io.dholbeat.controller.cache
+  cache_value: wp00-v1
+  max_cache_bytes: 2147483648
+  supported_platforms:
+    - linux/amd64
+    - linux/arm64
+  source_inputs:
+    - toolchain.lock.yml
+    - infra/controller/Containerfile
+    - infra/controller/entrypoint.sh
+    - infra/controller/install_tools.py
+    - infra/controller/requirements.in
+    - infra/controller/requirements.txt
+    - infra/controller/requirements.yml
+    - infra/controller/runtime_versions.py
+
+python:
+  version: 3.13.7
+  license: PSF-2.0
+  direct_packages:
+    ansible-core: 2.21.3
+    ansible-lint: 26.8.0
+    check-jsonschema: 0.38.0
+    paramiko: 5.0.0
+    pip: 26.2.1
+    pytest: 9.1.1
+    yamllint: 1.38.0
+
+system_packages:
+  libbsd0: 0.11.7-2
+  libcbor0.8: 0.8.0-2+b1
+  libedit2: 3.1-20221030-2
+  libfido2-1: 1.12.0-2+b1
+  libgssapi-krb5-2: 1.20.1-2+deb12u5
+  libk5crypto3: 1.20.1-2+deb12u5
+  libkeyutils1: 1.6.3-2
+  libkrb5-3: 1.20.1-2+deb12u5
+  libkrb5support0: 1.20.1-2+deb12u5
+  libssl3: 3.0.20-1~deb12u2
+  openssh-client: 1:9.2p1-2+deb12u10
+  openssl: 3.0.20-1~deb12u2
+
+ansible_collections:
+  community.library_inventory_filtering_v1:
+    version: 1.1.5
+    license: GPL-3.0-or-later
+    url: https://galaxy.ansible.com/api/v3/plugin/ansible/content/published/collections/artifacts/community-library_inventory_filtering_v1-1.1.5.tar.gz
+    sha256: cbb9e86c5b1720df21e940cedcd2f3e1226c38262623e090a883712610733851
+  community.docker:
+    version: 5.2.2
+    license: GPL-3.0-or-later
+    url: https://galaxy.ansible.com/api/v3/plugin/ansible/content/published/collections/artifacts/community-docker-5.2.2.tar.gz
+    sha256: 96f30eea08f719918bb223a3777271bf82ef72076eef204a4986dfcea94ce3f7
+  community.sops:
+    version: 2.4.0
+    license: GPL-3.0-or-later
+    url: https://galaxy.ansible.com/api/v3/plugin/ansible/content/published/collections/artifacts/community-sops-2.4.0.tar.gz
+    sha256: 45dfe907aa79ea3e9b104de83a43e2e86b0b275661bddcc678403c1ca2f9c19e
+
+tools:
+  sops:
+    version: 3.13.3
+    license: MPL-2.0
+    format: binary
+    install:
+      - archive_path: null
+        install_path: /usr/local/bin/sops
+    artifacts:
+      amd64:
+        url: https://github.com/getsops/sops/releases/download/v3.13.3/sops-v3.13.3.linux.amd64
+        sha256: e5bec3346a873ae91d871550f3e698c1aad962aff462a080e40f25fde17fef6b
+      arm64:
+        url: https://github.com/getsops/sops/releases/download/v3.13.3/sops-v3.13.3.linux.arm64
+        sha256: 53b0abacd38ef1b12a66d6c100956691b9cefce018d91f81e73ddf7438b94d77
+  age:
+    version: 1.3.1
+    license: BSD-3-Clause
+    format: tar.gz
+    install:
+      - archive_path: age/age
+        install_path: /usr/local/bin/age
+      - archive_path: age/age-keygen
+        install_path: /usr/local/bin/age-keygen
+    artifacts:
+      amd64:
+        url: https://github.com/FiloSottile/age/releases/download/v1.3.1/age-v1.3.1-linux-amd64.tar.gz
+        sha256: bdc69c09cbdd6cf8b1f333d372a1f58247b3a33146406333e30c0f26e8f51377
+      arm64:
+        url: https://github.com/FiloSottile/age/releases/download/v1.3.1/age-v1.3.1-linux-arm64.tar.gz
+        sha256: c6878a324421b69e3e20b00ba17c04bc5c6dab0030cfe55bf8f68fa8d9e9093a
+  tofu:
+    version: 1.12.5
+    license: MPL-2.0
+    format: zip
+    install:
+      - archive_path: tofu
+        install_path: /usr/local/bin/tofu
+    artifacts:
+      amd64:
+        url: https://github.com/opentofu/opentofu/releases/download/v1.12.5/tofu_1.12.5_linux_amd64.zip
+        sha256: dade9650e6b74fc7a8b986bd8717497d32f9e09cf82e479afef4977fa3085536
+      arm64:
+        url: https://github.com/opentofu/opentofu/releases/download/v1.12.5/tofu_1.12.5_linux_arm64.zip
+        sha256: 528f4eea63452bbddb30fa4f1780b57fac8d7676f9dda0f772e847bb62c1260a
+  shellcheck:
+    version: 0.11.0
+    license: GPL-3.0-or-later
+    format: tar.xz
+    install:
+      - archive_path: shellcheck-v0.11.0/shellcheck
+        install_path: /usr/local/bin/shellcheck
+    artifacts:
+      amd64:
+        url: https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz
+        sha256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+      arm64:
+        url: https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.aarch64.tar.xz
+        sha256: 12b331c1d2db6b9eb13cfca64306b1b157a86eb69db83023e261eaa7e7c14588
+  gitleaks:
+    version: 8.30.1
+    license: MIT
+    format: tar.gz
+    install:
+      - archive_path: gitleaks
+        install_path: /usr/local/bin/gitleaks
+    artifacts:
+      amd64:
+        url: https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+        sha256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+      arm64:
+        url: https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_arm64.tar.gz
+        sha256: e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080
+  docker-compose:
+    version: 5.4.0
+    license: Apache-2.0
+    format: binary
+    install:
+      - archive_path: null
+        install_path: /usr/local/bin/docker-compose
+    artifacts:
+      amd64:
+        url: https://github.com/docker/compose/releases/download/v5.4.0/docker-compose-linux-x86_64
+        sha256: 837fd1d35bf6a494f41b5b5988269a7be79de337cf1a1a6ff0e45ab51bb4e9be
+      arm64:
+        url: https://github.com/docker/compose/releases/download/v5.4.0/docker-compose-linux-aarch64
+        sha256: fc5d1371f1ec7987e703da94ede49af3fbfb240b83f22991a98511de7bc4b93b
+
+actions:
+  actions/checkout:
+    version: v7.0.1
+    license: MIT
+    commit: 3d3c42e5aac5ba805825da76410c181273ba90b1

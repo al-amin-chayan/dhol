@@ -1,0 +1,4 @@
+schema_version: 1
+scope: publisher
+host_ids: [publish-1]
+public_endpoint_ids: [publisher-admin-api]

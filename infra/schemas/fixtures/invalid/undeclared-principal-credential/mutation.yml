@@ -1,0 +1,5 @@
+target: workflows/workflow-alpha.yml
+operation: set
+path: [credential_ids]
+value: [secret-alpha-api]
+expected_error: "workflow-alpha: credential secret-alpha-api is not allowed for principal workflow-alpha"

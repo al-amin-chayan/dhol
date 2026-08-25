@@ -2,7 +2,9 @@
 # Adding a brand must require no code changes. If something about a brand
 # cannot be expressed here, the abstraction is wrong — fix it, don't hard-code.
 
+schema_version: 1
 brand: example                 # slug, lowercase; matches the filename
+project_id: project-example     # project owning the profile
 languages: [bn, en]            # first entry is the primary language
 niche: "what this brand sells, and where"
 tone: "three or four adjectives"
@@ -21,7 +23,7 @@ cadence:
   reels: 3/wk
   static: 1-2/wk
 
-approval_channel: telegram:<chat-id>   # human approval gate; required
+approval_channel: telegram:DHOLBEAT_BRAND_EXAMPLE_APPROVAL_CHANNEL   # human approval gate; required
 
 visual:
   palette: []
@@ -32,5 +34,5 @@ no_go:                         # hard content bans for this brand
   - "AI avatar testimonials"   # platform-wide rule, never remove
   - "medical claims"
 
-secrets:                       # env-var NAMES only, never values
-  telegram_bot_token: DHOLBEAT_EXAMPLE_TELEGRAM_BOT_TOKEN
+secret_ids:                    # secret catalog IDs only, never values
+  - DHOLBEAT_EXAMPLE_BRAND_SECRET_ID

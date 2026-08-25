@@ -1,0 +1,2 @@
+firewall:
+  public_interface: eth9

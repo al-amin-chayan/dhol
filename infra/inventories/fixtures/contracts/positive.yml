@@ -1,0 +1,105 @@
+schema_version: 1
+target_environment: fixture
+facts:
+  distribution: Ubuntu
+  distribution_version: "24.04"
+  architecture: aarch64
+  memory_mb: 6144
+  disk_total_mb: 30720
+  disk_free_mb: 25000
+resource_minimums:
+  memory_mb: 5500
+  disk_total_mb: 30000
+  disk_free_mb: 8192
+admin:
+  user: dholbeat-admin
+  uid: 1100
+  authorized_keys:
+    - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixtureOnlyPublicKeyMaterial000000 fixture@dholbeat
+break_glass:
+  method: container-console
+  owner: platform-operations
+  recovery_identity: disposable-container-console
+  verification: docker exec is verified before fixture convergence
+ssh:
+  allow_cidrs: [172.16.0.0/12]
+  connection_transport: community.docker.docker_api
+  controller_source: ""
+  port: 22
+  active_connection_port: 22
+  password_authentication: false
+  root_login: "no"
+  second_connection_port: 22
+  second_connection_required: true
+application_bindings:
+  - {address: 127.0.0.1, port: 8080, protocol: tcp}
+firewall:
+  public_interface: eth0
+  host_interfaces: [lo, eth0]
+  default_interface: eth0
+docker:
+  apt_signing_checksum: 1500c1f56fa9e26b9b8f42452a553675796ade0807cdce11975eb98170b3a570
+  daemon_hosts: [unix:///var/run/docker.sock]
+  data_root: /var/lib/docker
+  storage_driver: vfs
+  live_restore: true
+  logging: {driver: json-file, max_size: 10m, max_files: 3}
+  packages:
+    containerd.io: 2.3.3-1~ubuntu.24.04~noble
+    docker-buildx-plugin: 0.36.1-1~ubuntu.24.04~noble
+    docker-ce: 5:29.7.2-1~ubuntu.24.04~noble
+    docker-ce-cli: 5:29.7.2-1~ubuntu.24.04~noble
+    docker-compose-plugin: 5.4.0-1~ubuntu.24.04~noble
+host_timezone: UTC
+managed_directories:
+  - path: /home/dholbeat-admin
+    owner: dholbeat-admin
+    group: dholbeat-admin
+    mode: "0750"
+    classification: rebuildable
+    data_classification: internal
+    size_limit_mb: 64
+    retention: {max_age_days: 3650, purge_events: [account-removed], owner: platform-operations}
+    backup: {required: false, owner: platform-operations}
+  - path: /home/dholbeat-admin/.ssh
+    owner: dholbeat-admin
+    group: dholbeat-admin
+    mode: "0700"
+    classification: rebuildable
+    data_classification: confidential
+    size_limit_mb: 1
+    retention: {max_age_days: 3650, purge_events: [key-rotated, account-removed], owner: platform-operations}
+    backup: {required: false, owner: platform-operations}
+  - path: /etc/dholbeat
+    owner: root
+    group: root
+    mode: "0755"
+    classification: rebuildable
+    data_classification: internal
+    size_limit_mb: 16
+    retention: {max_age_days: 3650, purge_events: [release-replaced], owner: platform-operations}
+    backup: {required: false, owner: platform-operations}
+  - path: /var/log/dholbeat
+    owner: root
+    group: adm
+    mode: "0750"
+    classification: ephemeral
+    data_classification: internal
+    size_limit_mb: 64
+    retention: {max_age_days: 7, purge_events: [logrotate], owner: platform-operations}
+    backup: {required: false, owner: platform-operations}
+  - path: /var/lib/docker
+    owner: root
+    group: root
+    mode: "0710"
+    classification: rebuildable
+    data_classification: internal
+    size_limit_mb: 8192
+    retention: {max_age_days: 30, purge_events: [reviewed-cache-cleanup, host-rebuilt], owner: platform-operations}
+    backup: {required: false, owner: platform-operations}
+role_writable_paths:
+  - /home/dholbeat-admin
+  - /home/dholbeat-admin/.ssh
+  - /etc/dholbeat
+  - /var/log/dholbeat
+  - /var/lib/docker

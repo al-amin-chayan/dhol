@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.dholbeat.local/v1/runtime-receipt.schema.json",
+  "title": "Host runtime receipt version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "receipt_type", "release_id", "git_commit", "tag", "host_id", "host_role", "applied_at", "toolchain_lock_sha256", "approved_plan_sha256", "applied_plan_sha256", "required_backup_snapshot_id", "schema_versions", "images"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "receipt_type": {"const": "host-runtime"},
+    "release_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+    "git_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "tag": {"type": "string", "pattern": "^infra-prod-[0-9]{8}-[0-9]+$"},
+    "host_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+    "host_role": {"enum": ["core", "publisher", "fixture"]},
+    "applied_at": {"type": "string", "format": "date-time"},
+    "toolchain_lock_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "approved_plan_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "applied_plan_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "required_backup_snapshot_id": {"type": "string", "minLength": 1},
+    "schema_versions": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"type": "integer", "minimum": 1}
+    },
+    "images": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["image_id", "digest"],
+        "properties": {
+          "image_id": {"type": "string", "minLength": 1},
+          "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+        }
+      }
+    }
+  }
+}

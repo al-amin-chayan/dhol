@@ -1,0 +1,36 @@
+---
+name: Cross-review
+
+on:
+  pull_request:
+    branches: [develop, main]
+    types: [opened, reopened, ready_for_review, synchronize, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: cross-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: Cross-review gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out trusted governance from develop
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: develop
+          persist-credentials: false
+      - name: Verify the formal review for the exact PR head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ ! -f infra/controller/review_gate.py ]; then
+            echo "trusted review gate is missing from develop" >&2
+            exit 1
+          fi
+          python infra/controller/review_gate.py

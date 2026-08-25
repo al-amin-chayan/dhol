@@ -24,14 +24,13 @@ cd .worktrees/brand-profile-schema
 # 3. Work. Commit small and complete. Conventional Commits.
 git add brands/ && git commit        # commit.template adds the Agent: trailer
 
-# 4. Rebase on main before asking for review
-git rebase main
+# 4. Rebase on develop before asking for review
+git rebase develop
 
 # 5. Cross-review: the OTHER model reviews this branch (see below)
 
-# 6. Merge from the primary checkout
-cd ~/Projects/dholbeat
-git merge --no-ff codex/brand-profile-schema
+# 6. Merge the approved PR into develop with GitHub's squash method.
+#    Do not merge or push directly from the primary checkout.
 
 # 7. Remove the lane
 scripts/rm-worktree.sh brand-profile-schema --delete-branch
@@ -39,8 +38,8 @@ scripts/rm-worktree.sh brand-profile-schema --delete-branch
 
 `new-worktree.sh` refuses to reuse an existing branch or path, and warns when
 the other agent has open lanes. `rm-worktree.sh` refuses to delete a lane with
-uncommitted changes or with commits not yet in `main` unless you pass
-`--force` — that guard exists specifically so one agent cannot delete the
+uncommitted changes or with commits not yet in `develop` or `main` unless you
+pass `--force` — that guard exists specifically so one agent cannot delete the
 other's unmerged work.
 
 ## Avoiding collisions
@@ -62,7 +61,7 @@ Ranked, cheapest first:
 
 ## Conflict recovery
 
-- Conflict during `git rebase main`: resolve in your lane, never in the
+- Conflict during `git rebase develop`: resolve in your lane, never in the
   primary checkout, and never `git checkout --ours/--theirs` wholesale on a
   shared doc — read both sides and merge the intent.
 - If the other agent has already merged an equivalent change, drop your commit
@@ -71,34 +70,46 @@ Ranked, cheapest first:
   With no remote configured, the risk is local: check `scripts/lanes.sh` for
   a lane branched off yours before any history rewrite.
 
-## Cross-review in practice (no GitHub remote yet)
+## Cross-review in practice
 
-Until the GitHub repo exists (`README.md` §9), review happens locally against
-the branch:
+Every tracked implementation task requires review by the other model at the
+exact head that may merge. The complete baseline/follow-up contract, finding
+format, labels, and auto-merge rules live in
+[`pr-review-workflow.md`](pr-review-workflow.md). Review is never
+author-triggered or automated:
 
-1. Author finishes the lane, rebases on `main`, and writes a handoff note at
-   `docs/agents/handoffs/<branch-slug>.md` — what changed, why, what to check,
-   what was deliberately left out.
-2. The founder starts a session of the **other** model, pointed at the lane:
-   `cd .worktrees/<slug>` and ask it to review `git diff main...HEAD` against
-   the handoff note, `README.md` constraints, and the hard rules in
-   `AGENTS.md`.
-3. The reviewer posts findings as `blocker` / `required` / `suggestion`, each
-   with a citation (a rule in `AGENTS.md` / `README.md`, or a concrete failure
-   scenario). No citation → it is a `suggestion` and does not gate the merge.
-4. The author adjudicates every finding (`accept` / `already-done` / `reject`
-   with evidence / `out-of-scope`), fixes the whole class, and re-checks its
-   own diff before replying.
-5. Merge commit body records:
+1. The author finishes the lane, rebases on `develop`, runs the required checks,
+   and publishes a ready-for-review PR or local handoff containing the exact
+   head SHA, what changed, what to check, and what was deliberately left out.
+   Draft status is reserved for genuinely incomplete or blocked work; pending
+   CI or cross-review does not justify it. Then the author stops and returns
+   control to the founder. The author must not invoke the other model, spawn a
+   reviewer, or enqueue review automation.
+2. The founder explicitly starts a separate session of the **other** model and
+   asks it to review that SHA. For a local lane, point it at
+   `.worktrees/<slug>`; for a PR, provide the PR number and head SHA.
+3. The reviewer verifies the requested SHA, performs the one full-scope
+   `Baseline` review without stopping at the first failure, and returns one
+   consolidated finding set with evidence, an ask, and a probable fix for each
+   finding.
+4. Before editing, the author adjudicates every finding with evidence. It does
+   not blindly copy the suggested fix. Accepted findings are fixed by failure
+   class and the new full SHA goes back to the founder.
+5. Every founder-triggered review after the baseline is a `Follow-up`: verify
+   all dispositions and fixes, accept sound explanations, and inspect the fix
+   delta for introduced regressions or additional findings.
+6. Merge evidence records:
    ```
    Reviewer: Codex
    Reviewed head: <sha>
    ```
-6. Two rounds max. Still contested → both stop, write a
-   `Needs founder decision` block, and ask.
+7. Baseline plus one follow-up is the normal limit. Still contested → both
+   stop, write a `Needs founder decision` block, and ask. Any later
+   founder-directed review remains a follow-up.
 
-When the GitHub repo lands, this moves to PRs and the handoff note becomes the
-PR body; the rules are unchanged.
+The reviewer uses its own personal GitHub App identity for any GitHub read or
+write. Codex never uses Claude Code's App profile, and Claude Code never uses
+Codex's.
 
 ## Handoff notes
 

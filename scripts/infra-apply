@@ -1,0 +1,427 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)"
+# shellcheck source=scripts/lib/common.sh
+source "$SCRIPT_DIR/lib/common.sh"
+REPO_ROOT="$(dholbeat_repo_root "$SCRIPT_PATH")"
+
+CONTROLLER_IDENTITY=/tmp/controller-home/.ssh/id_target
+CONTROLLER_ADMIN_IDENTITY=/tmp/controller-home/.ssh/id_admin
+CONTROLLER_KNOWN_HOSTS=/tmp/controller-home/.ssh/known_hosts
+CONTROLLER_INPUTS=/tmp/controller-inputs
+LOG_LIMIT_BYTES=8388608
+
+LIMIT=""
+RELEASE_TAG=""
+ADDRESS=""
+IDENTITY_FILE=""
+ADMIN_IDENTITY_FILE=""
+KNOWN_HOSTS_FILE=""
+APPROVED_PLAN=""
+STAGE=converged
+TRANSPORT=auto
+WIREGUARD_KEY_FILE=""
+TEMP_ROOT=""
+SESSION_ROOT=""
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/infra-apply --limit <host> --release <tag> --address <ip>
+                           --identity-file <path> --known-hosts-file <path>
+                           --approved-plan <path> [--stage bootstrap|converged]
+
+Mutate exactly one production host, and only under a complete authorization.
+
+Every one of these must hold or the command stops before touching the host:
+
+  * the run is not in CI;
+  * the worktree is clean and HEAD is the commit the annotated release tag
+    resolves to, reachable from protected main;
+  * the release document at .artifacts/releases/<tag>.yml passes the committed
+    release-identity contract against the approved plan, including
+    opposite-model-family review of that exact commit;
+  * a freshly generated pre-apply plan is byte-identical to the approved plan,
+    so a changed host or repository invalidates the approval;
+  * the founder confirms interactively at the terminal.
+
+--stage must match the stage the approved plan was generated with, and selects
+only the identity used for first contact: bootstrap connects as the provider
+bootstrap login on a host whose named administrator does not exist yet, and
+converged connects as that administrator. Both stages converge the same
+infra/playbooks/site.yml, so the reviewed desired state never differs between
+them.
+
+--transport selects which path this run connects over. auto follows the
+contract; --transport tunnel performs a reverse cutover over the still-live
+tunnel while desired state re-adds the public rule.
+
+--admin-identity-file names the key authenticating the named administrator when it
+differs from the bootstrap key.
+
+After convergence the command independently re-reads /etc/dholbeat-release,
+validates it against the reviewed release, and runs scripts/infra-verify.
+EOF
+}
+
+cleanup() {
+  if [ -n "$SESSION_ROOT" ] && [ -d "$SESSION_ROOT" ]; then
+    rm -rf -- "$SESSION_ROOT"
+  fi
+  if [ -n "$TEMP_ROOT" ] && [ -d "$TEMP_ROOT" ]; then
+    rm -rf -- "$TEMP_ROOT"
+  fi
+}
+trap cleanup EXIT INT TERM
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --limit) [ "$#" -ge 2 ] || dholbeat_die "--limit requires a host ID"; LIMIT="$2"; shift 2 ;;
+    --release) [ "$#" -ge 2 ] || dholbeat_die "--release requires an annotated tag"; RELEASE_TAG="$2"; shift 2 ;;
+    --address) [ "$#" -ge 2 ] || dholbeat_die "--address requires an IP address"; ADDRESS="$2"; shift 2 ;;
+    --identity-file) [ "$#" -ge 2 ] || dholbeat_die "--identity-file requires a path"; IDENTITY_FILE="$2"; shift 2 ;;
+    --admin-identity-file) [ "$#" -ge 2 ] || dholbeat_die "--admin-identity-file requires a path"; ADMIN_IDENTITY_FILE="$2"; shift 2 ;;
+    --known-hosts-file) [ "$#" -ge 2 ] || dholbeat_die "--known-hosts-file requires a path"; KNOWN_HOSTS_FILE="$2"; shift 2 ;;
+    --approved-plan) [ "$#" -ge 2 ] || dholbeat_die "--approved-plan requires a path"; APPROVED_PLAN="$2"; shift 2 ;;
+    --stage) [ "$#" -ge 2 ] || dholbeat_die "--stage requires bootstrap or converged"; STAGE="$2"; shift 2 ;;
+    --transport) [ "$#" -ge 2 ] || dholbeat_die "--transport requires auto, public, or tunnel"; TRANSPORT="$2"; shift 2 ;;
+    --wireguard-key-file) [ "$#" -ge 2 ] || dholbeat_die "--wireguard-key-file requires a path"; WIREGUARD_KEY_FILE="$2"; shift 2 ;;
+    *) dholbeat_die "unexpected argument: $1" ;;
+  esac
+done
+
+[ -n "$LIMIT" ] || dholbeat_die "--limit is required and must name exactly one host"
+[ -n "$RELEASE_TAG" ] || dholbeat_die "--release is required and must name an annotated production tag"
+[ -n "$ADDRESS" ] || dholbeat_die "--address is required; addresses are never committed"
+[ -n "$IDENTITY_FILE" ] || dholbeat_die "--identity-file is required"
+[ -n "$KNOWN_HOSTS_FILE" ] || dholbeat_die "--known-hosts-file is required; host keys are never auto-trusted"
+[ -n "$APPROVED_PLAN" ] || dholbeat_die "--approved-plan is required and must name the reviewed plan document"
+case "$STAGE" in
+  bootstrap|converged) ;;
+  *) dholbeat_die "--stage must be bootstrap or converged" ;;
+esac
+case "$TRANSPORT" in
+  auto|public|tunnel) ;;
+  *) dholbeat_die "--transport must be auto, public, or tunnel" ;;
+esac
+[ -z "${GITHUB_ACTIONS:-}${CI:-}" ] \
+  || dholbeat_die "production apply is never permitted in CI; ci_apply_allowed is false"
+[ -t 0 ] || dholbeat_die "production apply requires an interactive terminal for founder confirmation"
+
+IDENTITY_FILE="$(dholbeat_assert_outside_repository "$REPO_ROOT" "$IDENTITY_FILE" "connection identity")"
+if [ -n "$WIREGUARD_KEY_FILE" ]; then
+  WIREGUARD_KEY_FILE="$(dholbeat_assert_outside_repository "$REPO_ROOT" "$WIREGUARD_KEY_FILE" "WireGuard key export")"
+fi
+if [ -n "$ADMIN_IDENTITY_FILE" ]; then
+  ADMIN_IDENTITY_FILE="$(dholbeat_assert_outside_repository "$REPO_ROOT" "$ADMIN_IDENTITY_FILE" "administrator identity")"
+else
+  ADMIN_IDENTITY_FILE="$IDENTITY_FILE"
+fi
+KNOWN_HOSTS_FILE="$(dholbeat_canonical_path "$KNOWN_HOSTS_FILE")"
+[ ! -L "$KNOWN_HOSTS_FILE" ] || dholbeat_die "the known-hosts file must not be a symbolic link"
+[ -s "$KNOWN_HOSTS_FILE" ] || dholbeat_die "known-hosts file is missing or empty: $KNOWN_HOSTS_FILE"
+
+BASELINE_RELATIVE="infra/inventories/production/baseline/$LIMIT.yml"
+[ -f "$REPO_ROOT/$BASELINE_RELATIVE" ] \
+  || dholbeat_die "no committed baseline contract for host: $LIMIT"
+HOST_ROLE="$(awk '$1 == "host_role:" {print $2; exit}' "$REPO_ROOT/$BASELINE_RELATIVE")"
+[ -n "$HOST_ROLE" ] || dholbeat_die "baseline contract declares no host_role: $BASELINE_RELATIVE"
+
+RELEASE_RELATIVE=".artifacts/releases/$RELEASE_TAG.yml"
+RELEASE_DOCUMENT="$REPO_ROOT/$RELEASE_RELATIVE"
+[ -f "$RELEASE_DOCUMENT" ] \
+  || dholbeat_die "reviewed release document is unavailable: $RELEASE_RELATIVE"
+case "$APPROVED_PLAN" in
+  /*) APPROVED_PLAN_ABS="$APPROVED_PLAN" ;;
+  *) APPROVED_PLAN_ABS="$REPO_ROOT/$APPROVED_PLAN" ;;
+esac
+[ -f "$APPROVED_PLAN_ABS" ] || dholbeat_die "approved plan is unavailable: $APPROVED_PLAN"
+case "$APPROVED_PLAN_ABS" in
+  "$REPO_ROOT"/.artifacts/*) ;;
+  *) dholbeat_die "the approved plan must live under .artifacts/ and never in Git" ;;
+esac
+APPROVED_PLAN_RELATIVE="${APPROVED_PLAN_ABS#"$REPO_ROOT"/}"
+
+dholbeat_require_command git
+[ -z "$(git -C "$REPO_ROOT" status --porcelain)" ] \
+  || dholbeat_die "refusing to apply from a dirty worktree"
+
+TAG_REF="refs/tags/$RELEASE_TAG"
+TAG_OBJECT_TYPE="$(git -C "$REPO_ROOT" cat-file -t "$TAG_REF" 2>/dev/null || true)"
+[ "$TAG_OBJECT_TYPE" = tag ] \
+  || dholbeat_die "release $RELEASE_TAG is not an annotated tag in this checkout"
+TAG_COMMIT="$(git -C "$REPO_ROOT" rev-parse "$TAG_REF^{commit}")"
+HEAD_COMMIT="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+[ "$TAG_COMMIT" = "$HEAD_COMMIT" ] \
+  || dholbeat_die "checkout HEAD is $HEAD_COMMIT but $RELEASE_TAG resolves to $TAG_COMMIT"
+REACHABLE_FROM_MAIN=true
+if ! git -C "$REPO_ROOT" merge-base --is-ancestor "$TAG_COMMIT" refs/heads/main >/dev/null 2>&1; then
+  REACHABLE_FROM_MAIN=false
+fi
+[ "$REACHABLE_FROM_MAIN" = true ] \
+  || dholbeat_die "release commit $TAG_COMMIT is not reachable from protected main"
+
+TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/dholbeat-infra-apply.XXXXXX")"
+chmod 0700 "$TEMP_ROOT"
+mkdir -p "$TEMP_ROOT/inputs"
+chmod 0700 "$TEMP_ROOT/inputs"
+
+ARTIFACT_NAME="infra-apply-$LIMIT-$STAGE-$RELEASE_TAG"
+ARTIFACT_ROOT="$REPO_ROOT/.artifacts/$ARTIFACT_NAME"
+[ ! -e "$ARTIFACT_ROOT" ] \
+  || dholbeat_die "apply evidence already exists; inspect and remove: .artifacts/$ARTIFACT_NAME"
+mkdir -p "$ARTIFACT_ROOT"
+chmod 0700 "$ARTIFACT_ROOT"
+
+# Operational host-key material stays in a bounded session directory removed on
+# exit; only the plan's redacted fingerprint receipt survives as evidence.
+SESSION_NAME="session-apply-$$"
+SESSION_ROOT="$REPO_ROOT/.artifacts/$SESSION_NAME"
+[ ! -e "$SESSION_ROOT" ] || dholbeat_die "a stale apply session directory exists: .artifacts/$SESSION_NAME"
+mkdir -p "$SESSION_ROOT"
+chmod 0700 "$SESSION_ROOT"
+install -m 0600 "$KNOWN_HOSTS_FILE" "$SESSION_ROOT/known_hosts"
+
+printf '\n==> release identity gate\n'
+"$SCRIPT_DIR/controller" exec python3 scripts/lib/release_gate.py \
+  --root /workspace \
+  --release "/workspace/$RELEASE_RELATIVE" \
+  --plan "/workspace/$APPROVED_PLAN_RELATIVE" \
+  --tag-object-type "$TAG_OBJECT_TYPE" \
+  --tag-commit "$TAG_COMMIT" \
+  --reachable-from-main "$REACHABLE_FROM_MAIN"
+
+# Reject an unsafe stage/transport/administration combination, and a tunnel
+# address supplied where a public one belongs, before anything else happens.
+"$SCRIPT_DIR/controller" exec python3 infra/inventories/host_baseline.py \
+  --root /workspace connection-address \
+  --limit "$LIMIT" --address "$ADDRESS" --stage "$STAGE" --transport "$TRANSPORT" >/dev/null \
+  || dholbeat_die "this stage and transport are not a safe combination for the committed contract"
+
+# Derive and check the supplied identity before the founder is asked to confirm,
+# so the confirmation covers the operation actually about to happen.
+if [ -n "$WIREGUARD_KEY_FILE" ]; then
+  CONNECTION_TRANSPORT="$("$SCRIPT_DIR/controller" exec python3 infra/inventories/host_baseline.py \
+    --root /workspace connection-transport \
+    --limit "$LIMIT" --address "$ADDRESS" --stage "$STAGE" --transport "$TRANSPORT")" \
+    || dholbeat_die "could not resolve which path carries this run"
+  [ "$CONNECTION_TRANSPORT" = public ] \
+    || dholbeat_die "refusing to change the WireGuard identity over the tunnel it would restart; \
+roll administration back to public first, rotate over the public path, reissue the peer files, \
+then cut over again"
+  printf '\n==> supplied WireGuard identity\n'
+  RESTORE_FINGERPRINT="$("$SCRIPT_DIR/controller" exec python3 scripts/lib/wireguard_keys.py \
+    --public-of - <"$WIREGUARD_KEY_FILE")" \
+    || dholbeat_die "the supplied WireGuard key export is not a base64 key"
+  EXPECTED_SERVER_KEY="$(awk '$1 == "server_public_key:" {print $2; exit}' "$REPO_ROOT/$BASELINE_RELATIVE")"
+  [ -z "$EXPECTED_SERVER_KEY" ] || [ "$EXPECTED_SERVER_KEY" = "$RESTORE_FINGERPRINT" ] \
+    || dholbeat_die "the supplied key derives to $RESTORE_FINGERPRINT but the contract declares \
+$EXPECTED_SERVER_KEY; nothing was changed"
+  printf 'restoring WireGuard identity: %s\n' "$RESTORE_FINGERPRINT"
+fi
+
+printf '\n==> pre-apply plan must reproduce the approved plan exactly\n'
+PREAPPLY_SUFFIX="preapply-$(printf '%s' "$RELEASE_TAG" | tr -c 'a-z0-9' '-')"
+"$SCRIPT_DIR/infra-plan" \
+  --limit "$LIMIT" \
+  --address "$ADDRESS" \
+  --identity-file "$IDENTITY_FILE" \
+  --known-hosts-file "$KNOWN_HOSTS_FILE" \
+  --stage "$STAGE" \
+  --transport "$TRANSPORT" \
+  ${WIREGUARD_KEY_FILE:+--wireguard-key-file "$WIREGUARD_KEY_FILE"} \
+  --artifact-suffix "$PREAPPLY_SUFFIX"
+PREAPPLY_PLAN="$REPO_ROOT/.artifacts/infra-plan-$LIMIT-$STAGE-${TAG_COMMIT:0:12}-$PREAPPLY_SUFFIX/plan.yml"
+[ -f "$PREAPPLY_PLAN" ] || dholbeat_die "the pre-apply plan document was not produced"
+APPROVED_DIGEST="$(dholbeat_sha256_path "$APPROVED_PLAN_ABS")"
+PREAPPLY_DIGEST="$(dholbeat_sha256_path "$PREAPPLY_PLAN")"
+[ "$APPROVED_DIGEST" = "$PREAPPLY_DIGEST" ] \
+  || dholbeat_die "the host or repository changed since approval: approved $APPROVED_DIGEST but planned $PREAPPLY_DIGEST"
+
+printf '\n'
+printf 'host                 : %s (%s)\n' "$LIMIT" "$HOST_ROLE"
+printf 'release tag          : %s\n' "$RELEASE_TAG"
+printf 'release commit       : %s\n' "$TAG_COMMIT"
+printf 'approved_plan_sha256 : %s\n' "$APPROVED_DIGEST"
+printf 'stage                : %s\n' "$STAGE"
+printf 'playbook             : infra/playbooks/site.yml\n'
+printf '\nThis mutates the production host named above.\n'
+printf 'Type exactly "apply %s %s" to continue: ' "$LIMIT" "$RELEASE_TAG"
+IFS= read -r CONFIRMATION </dev/tty
+[ "$CONFIRMATION" = "apply $LIMIT $RELEASE_TAG" ] \
+  || dholbeat_die "founder confirmation did not match; nothing was changed"
+
+cat >"$TEMP_ROOT/inputs/run-ansible.sh" <<'RUNNER'
+#!/bin/sh
+# Run Ansible from the infra tree so the committed roles_path resolves.
+set -eu
+cd /workspace/infra
+exec ansible-playbook "$@"
+RUNNER
+cat >"$TEMP_ROOT/inputs/fetch-receipt.sh" <<'FETCH'
+#!/bin/sh
+# Read the host runtime receipt without changing desired state.
+set -eu
+cd /workspace/infra
+ansible \
+  --inventory "$1" \
+  --become \
+  --module-name ansible.builtin.slurp \
+  --args "src=$2" \
+  "$3" \
+  | python3 -c 'import base64, json, sys
+text = sys.stdin.read()
+start = text.index("{")
+sys.stdout.write(base64.b64decode(json.loads(text[start:])["content"]).decode("utf-8"))'
+FETCH
+cat >"$TEMP_ROOT/inputs/run-ansible-adhoc.sh" <<'ADHOC'
+#!/bin/sh
+# Run an ad-hoc Ansible module from the infra tree.
+set -eu
+cd /workspace/infra
+exec ansible "$@"
+ADHOC
+chmod 0700 "$TEMP_ROOT/inputs/run-ansible.sh" "$TEMP_ROOT/inputs/fetch-receipt.sh" \
+  "$TEMP_ROOT/inputs/run-ansible-adhoc.sh"
+
+render_inventory() {
+  local stage="$1"
+  local destination="$2"
+  "$SCRIPT_DIR/controller" exec python3 infra/inventories/host_baseline.py \
+    --root /workspace render \
+    --limit "$LIMIT" \
+    --address "$ADDRESS" \
+    --stage "$stage" \
+    --transport "$TRANSPORT" \
+    --identity-file "$CONTROLLER_IDENTITY" \
+    --admin-identity-file "$CONTROLLER_ADMIN_IDENTITY" \
+    --known-hosts-file "$CONTROLLER_KNOWN_HOSTS" \
+    --output - >"$destination"
+  chmod 0600 "$destination"
+}
+
+# The convergence inventory reflects the requested stage. Convergence then
+# disables root login and restricts AllowUsers to the named administrator, so
+# every later Ansible process must connect as that administrator instead.
+render_inventory "$STAGE" "$TEMP_ROOT/inputs/inventory.yml"
+render_inventory converged "$TEMP_ROOT/inputs/inventory-converged.yml"
+"$SCRIPT_DIR/controller" exec python3 scripts/lib/release_vars.py \
+  <"$RELEASE_DOCUMENT" >"$TEMP_ROOT/inputs/release-vars.yml"
+chmod 0600 "$TEMP_ROOT/inputs/release-vars.yml"
+
+# The escrowed key lives in the bounded inputs directory for the length of the
+# run and is removed with it. Only its public half ever reaches evidence.
+WIREGUARD_KEY_VARS=()
+if [ -n "$WIREGUARD_KEY_FILE" ]; then
+  install -m 0600 "$WIREGUARD_KEY_FILE" "$TEMP_ROOT/inputs/wireguard.key"
+  WIREGUARD_KEY_VARS+=(--extra-vars "wireguard_restore_key_path=$CONTROLLER_INPUTS/wireguard.key")
+  printf 'restored_wireguard_public_key: %s\n' "$RESTORE_FINGERPRINT" \
+    >"$ARTIFACT_ROOT/wireguard-restore-receipt.yml"
+  chmod 0600 "$ARTIFACT_ROOT/wireguard-restore-receipt.yml"
+fi
+
+printf '\n==> converging %s\n' "$LIMIT"
+set +e
+"$SCRIPT_DIR/controller" exec-ssh \
+  --known-hosts ".artifacts/$SESSION_NAME/known_hosts" \
+  --identity "$IDENTITY_FILE" \
+  --admin-identity "$ADMIN_IDENTITY_FILE" \
+  --inputs "$TEMP_ROOT/inputs" \
+  --confirm production-host \
+  sh "$CONTROLLER_INPUTS/run-ansible.sh" \
+  --inventory "$CONTROLLER_INPUTS/inventory.yml" \
+  --limit "$LIMIT" \
+  --extra-vars "dholbeat_expected_host=$LIMIT" \
+  --extra-vars "dholbeat_expected_role=$HOST_ROLE" \
+  --extra-vars "@$CONTROLLER_INPUTS/release-vars.yml" \
+  ${WIREGUARD_KEY_VARS[@]+"${WIREGUARD_KEY_VARS[@]}"} \
+  playbooks/site.yml \
+  >"$TEMP_ROOT/apply.raw" 2>&1
+APPLY_STATUS=$?
+set -e
+
+RAW_BYTES="$(wc -c <"$TEMP_ROOT/apply.raw" | tr -d ' ')"
+if [ "$RAW_BYTES" -gt "$LOG_LIMIT_BYTES" ]; then
+  head -c "$LOG_LIMIT_BYTES" "$TEMP_ROOT/apply.raw" >"$TEMP_ROOT/apply.trimmed"
+  printf '\n[transcript truncated at %s bytes]\n' "$LOG_LIMIT_BYTES" >>"$TEMP_ROOT/apply.trimmed"
+  mv -- "$TEMP_ROOT/apply.trimmed" "$TEMP_ROOT/apply.raw"
+fi
+"$SCRIPT_DIR/controller" exec python3 scripts/lib/plan_document.py redact \
+  --redact "$ADDRESS" \
+  --redact "$IDENTITY_FILE" \
+  --redact "$ADMIN_IDENTITY_FILE" \
+  --redact "$KNOWN_HOSTS_FILE" \
+  <"$TEMP_ROOT/apply.raw" >"$ARTIFACT_ROOT/apply.log"
+chmod 0600 "$ARTIFACT_ROOT/apply.log"
+[ "$APPLY_STATUS" -eq 0 ] \
+  || dholbeat_die "convergence failed for $LIMIT; see .artifacts/$ARTIFACT_NAME/apply.log"
+
+# The host is hardened now: prove the administrator path works before relying
+# on it, so a broken transition surfaces here rather than as an opaque failure.
+printf '\n==> administrator connection after hardening\n'
+"$SCRIPT_DIR/controller" exec-ssh \
+  --known-hosts ".artifacts/$SESSION_NAME/known_hosts" \
+  --identity "$IDENTITY_FILE" \
+  --admin-identity "$ADMIN_IDENTITY_FILE" \
+  --inputs "$TEMP_ROOT/inputs" \
+  --confirm production-host \
+  sh "$CONTROLLER_INPUTS/run-ansible-adhoc.sh" \
+  --inventory "$CONTROLLER_INPUTS/inventory-converged.yml" \
+  --module-name ansible.builtin.ping \
+  "$LIMIT" >/dev/null \
+  || dholbeat_die "the named administrator could not reconnect after SSH hardening; \
+the host is converged but unverified -- recover through the provider console"
+
+printf '\n==> independent receipt verification\n'
+"$SCRIPT_DIR/controller" exec-ssh \
+  --known-hosts ".artifacts/$SESSION_NAME/known_hosts" \
+  --identity "$IDENTITY_FILE" \
+  --admin-identity "$ADMIN_IDENTITY_FILE" \
+  --inputs "$TEMP_ROOT/inputs" \
+  --confirm production-host \
+  sh "$CONTROLLER_INPUTS/fetch-receipt.sh" \
+  "$CONTROLLER_INPUTS/inventory-converged.yml" /etc/dholbeat-release "$LIMIT" \
+  >"$TEMP_ROOT/inputs/runtime-receipt.yml"
+install -m 0600 "$TEMP_ROOT/inputs/runtime-receipt.yml" "$ARTIFACT_ROOT/runtime-receipt.yml"
+dholbeat_assert_absent_from_evidence "$ARTIFACT_ROOT" "$ADDRESS" "$IDENTITY_FILE" \
+  "$ADMIN_IDENTITY_FILE" "$KNOWN_HOSTS_FILE"
+"$SCRIPT_DIR/controller" exec python3 scripts/lib/release_gate.py \
+  --root /workspace \
+  --release "/workspace/$RELEASE_RELATIVE" \
+  --plan "/workspace/$APPROVED_PLAN_RELATIVE" \
+  --tag-object-type "$TAG_OBJECT_TYPE" \
+  --tag-commit "$TAG_COMMIT" \
+  --reachable-from-main "$REACHABLE_FROM_MAIN" \
+  --runtime-receipt "/workspace/.artifacts/$ARTIFACT_NAME/runtime-receipt.yml"
+
+printf '\n==> read-only host verification\n'
+"$SCRIPT_DIR/infra-verify" \
+  --limit "$LIMIT" \
+  --address "$ADDRESS" \
+  --identity-file "$ADMIN_IDENTITY_FILE" \
+  --admin-identity-file "$ADMIN_IDENTITY_FILE" \
+  --known-hosts-file "$KNOWN_HOSTS_FILE" \
+  --transport "$TRANSPORT" \
+  --release-tag "$RELEASE_TAG" \
+  --artifact-suffix "postapply"
+
+printf '%s\n' \
+  'schema_version: 1' \
+  'document_type: infra-apply' \
+  "target_host_id: $LIMIT" \
+  "target_host_role: $HOST_ROLE" \
+  "release_tag: $RELEASE_TAG" \
+  "release_commit: $TAG_COMMIT" \
+  "stage: $STAGE" \
+  "approved_plan_sha256: $APPROVED_DIGEST" \
+  "applied_plan_sha256: $PREAPPLY_DIGEST" \
+  'receipt_verified: true' \
+  'host_verified: true' \
+  >"$ARTIFACT_ROOT/summary.yml"
+dholbeat_assert_absent_from_evidence "$ARTIFACT_ROOT" "$ADDRESS" "$IDENTITY_FILE" \
+  "$ADMIN_IDENTITY_FILE" "$KNOWN_HOSTS_FILE"
+
+printf '\napply complete: %s at %s\n' "$LIMIT" "$RELEASE_TAG"
+printf 'evidence: .artifacts/%s\n' "$ARTIFACT_NAME"

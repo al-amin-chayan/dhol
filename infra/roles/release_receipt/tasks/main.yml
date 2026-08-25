@@ -1,0 +1,90 @@
+---
+- name: Require the complete reviewed release identity before writing a receipt
+  ansible.builtin.assert:
+    that:
+      - dholbeat_release is defined
+      - dholbeat_release is mapping
+      - dholbeat_release.release_id is defined
+      - dholbeat_release.git_commit is defined
+      - dholbeat_release.tag is defined
+      - dholbeat_release.target_roles is defined
+      - dholbeat_release.toolchain_lock_sha256 is defined
+      - dholbeat_release.approved_plan_sha256 is defined
+      - dholbeat_release.required_backup_snapshot_id is defined
+      - dholbeat_release.schema_versions is defined
+      - dholbeat_release.images is defined
+      - dholbeat_applied_plan_sha256 is defined
+      - dholbeat_applied_at is defined
+      - dholbeat_host_id is defined
+      - dholbeat_host_role is defined
+    fail_msg: >-
+      Refusing to write a release receipt: the reviewed release identity and the
+      applied plan digest must both be supplied by the apply command.
+
+- name: Refuse to record a receipt outside the reviewed authorization
+  ansible.builtin.assert:
+    that:
+      - dholbeat_applied_plan_sha256 == dholbeat_release.approved_plan_sha256
+      - dholbeat_host_role in dholbeat_release.target_roles
+    fail_msg: >-
+      Refusing to write a release receipt: the applied plan digest or the host role
+      is outside the reviewed authorization.
+
+- name: Read any existing host runtime receipt
+  ansible.builtin.slurp:
+    src: "{{ release_receipt_path }}"
+  register: release_receipt_existing
+  failed_when: false
+  changed_when: false
+
+- name: Decode the existing receipt text and its recorded application time
+  ansible.builtin.set_fact:
+    release_receipt_existing_text: "{{ release_receipt_existing.content | default('') | b64decode }}"
+    release_receipt_previous: >-
+      {{
+        (release_receipt_existing.content | b64decode | from_yaml)
+        if release_receipt_existing.content is defined
+        else {}
+      }}
+
+- name: Start from the previously recorded application time
+  ansible.builtin.set_fact:
+    release_receipt_applied_at: >-
+      {{
+        release_receipt_previous.applied_at
+        if (release_receipt_previous is mapping and release_receipt_previous.applied_at is defined)
+        else dholbeat_applied_at
+      }}
+
+- name: Render the receipt with the previously recorded application time
+  ansible.builtin.set_fact:
+    release_receipt_candidate: "{{ lookup('ansible.builtin.template', 'receipt.yml.j2') }}"
+
+- name: Stamp a new application time only when the release identity changed
+  ansible.builtin.set_fact:
+    release_receipt_applied_at: "{{ dholbeat_applied_at }}"
+  when: release_receipt_candidate | trim != release_receipt_existing_text | trim
+
+- name: Write the redacted host runtime receipt atomically
+  ansible.builtin.template:
+    src: receipt.yml.j2
+    dest: "{{ release_receipt_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Confirm the receipt ownership and mode on the host
+  ansible.builtin.stat:
+    path: "{{ release_receipt_path }}"
+  register: release_receipt_stat
+  changed_when: false
+
+- name: Require a root-owned world-readable receipt
+  when: not ansible_check_mode
+  ansible.builtin.assert:
+    that:
+      - release_receipt_stat.stat.exists
+      - release_receipt_stat.stat.pw_name == 'root'
+      - release_receipt_stat.stat.gr_name == 'root'
+      - release_receipt_stat.stat.mode == '0644'
+    fail_msg: The host runtime receipt is not root-owned mode 0644.

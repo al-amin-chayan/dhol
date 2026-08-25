@@ -1,0 +1,10 @@
+vpn:
+  peers:
+    - allowed_ips:
+        - 10.99.0.2/32
+      id: a
+      public_key: RklYVFVSRS1QRUVSLU9ORS0tLS0tLS0tLS0tLS0tLS0=
+    - allowed_ips:
+        - 10.99.0.3/32
+      id: b
+      public_key: RklYVFVSRS1QRUVSLU9ORS0tLS0tLS0tLS0tLS0tLS0=

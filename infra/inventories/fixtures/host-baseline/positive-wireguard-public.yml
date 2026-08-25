@@ -1,0 +1,156 @@
+# Synthetic production-shaped host baseline, phase one of the tunnel cutover. It names no real host
+# and carries fixture-only public key material. The VPN subnet, host address,
+# and peer addresses are committed policy; the provider-assigned public
+# address is never committed.
+admin:
+  authorized_keys:
+    - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFixtureOnlyPublicKeyMaterial000000 fixture@dholbeat
+  uid: 1100
+  user: dholbeat-admin
+application_bindings: []
+bootstrap:
+  address_source: operator-extra-vars
+  address_variable: fixture_1_address
+  authentication: public-key-only
+  identity: root
+  known_hosts_source: operator-verified-console-fingerprint
+break_glass:
+  method: provider-console
+  owner: founder
+  recovery_identity: fixture-provider-control-panel
+  verification: console session opened and closed before convergence
+expected_host:
+  architecture: x86_64
+  disk_free_mb: 24576
+  disk_total_mb: 30720
+  distribution: Ubuntu
+  distribution_version: '24.04'
+  memory_mb: 6144
+  os_image: ubuntu-24.04
+  public_interface: eth0
+host_id: fixture-1
+host_role: publisher
+managed_directories:
+  - backup:
+      owner: platform-operations
+      required: false
+    classification: rebuildable
+    data_classification: internal
+    group: dholbeat-admin
+    mode: '0750'
+    owner: dholbeat-admin
+    path: /home/dholbeat-admin
+    retention:
+      max_age_days: 3650
+      owner: platform-operations
+      purge_events:
+        - account-removed
+    size_limit_mb: 64
+  - backup:
+      owner: platform-operations
+      required: false
+    classification: rebuildable
+    data_classification: confidential
+    group: dholbeat-admin
+    mode: '0700'
+    owner: dholbeat-admin
+    path: /home/dholbeat-admin/.ssh
+    retention:
+      max_age_days: 3650
+      owner: platform-operations
+      purge_events:
+        - key-rotated
+        - account-removed
+    size_limit_mb: 1
+  - backup:
+      owner: platform-operations
+      required: false
+    classification: rebuildable
+    data_classification: internal
+    group: root
+    mode: '0755'
+    owner: root
+    path: /etc/dholbeat
+    retention:
+      max_age_days: 3650
+      owner: platform-operations
+      purge_events:
+        - release-replaced
+    size_limit_mb: 16
+  - backup:
+      owner: platform-operations
+      required: false
+    classification: ephemeral
+    data_classification: internal
+    group: adm
+    mode: '0750'
+    owner: root
+    path: /var/log/dholbeat
+    retention:
+      max_age_days: 7
+      owner: platform-operations
+      purge_events:
+        - logrotate
+    size_limit_mb: 64
+  - backup:
+      owner: platform-operations
+      required: false
+    classification: rebuildable
+    data_classification: internal
+    group: root
+    mode: '0710'
+    owner: root
+    path: /var/lib/docker
+    retention:
+      max_age_days: 30
+      owner: platform-operations
+      purge_events:
+        - reviewed-cache-cleanup
+        - host-rebuilt
+    size_limit_mb: 8192
+  - backup:
+      owner: platform-operations
+      required: false
+    classification: rebuildable
+    data_classification: confidential
+    group: root
+    mode: '0700'
+    owner: root
+    path: /etc/wireguard
+    retention:
+      max_age_days: 3650
+      owner: platform-operations
+      purge_events:
+        - key-rotated
+        - host-rebuilt
+    size_limit_mb: 1
+provider:
+  account_boundary: existing-founder-account
+  datacenter: fixture-datacenter
+  monthly_cost_usd: 7
+  plan: Linux6GB
+  purchase_receipt_location: provider-console
+  vendor: fixture-provider
+schema_version: 1
+ssh:
+  allow_cidrs:
+    - 10.99.0.0/24
+    - 203.0.113.0/24
+  port: 22
+target_environment: production
+vpn:
+  administration: public
+  host_address: 10.99.0.1/24
+  interface: wg0
+  listen_port: 51820
+  mode: wireguard
+  peers:
+    - allowed_ips:
+        - 10.99.0.2/32
+      id: founder-laptop
+      public_key: RklYVFVSRS1QRUVSLU9ORS0tLS0tLS0tLS0tLS0tLS0=
+    - allowed_ips:
+        - 10.99.0.3/32
+      id: founder-recovery
+      public_key: RklYVFVSRS1QRUVSLVRXTy0tLS0tLS0tLS0tLS0tLS0=
+  subnet: 10.99.0.0/24

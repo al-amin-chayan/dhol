@@ -1,0 +1,5 @@
+target: volumes.yml
+operation: set
+path: [volumes, 0, owner_project_id]
+value: project-beta
+expected_error: "service-alpha: wrong owner for volume volume-alpha; expected project-alpha"

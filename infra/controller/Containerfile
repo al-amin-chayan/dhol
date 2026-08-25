@@ -1,0 +1,57 @@
+FROM python:3.13.7-slim-bookworm@sha256:adafcc17694d715c905b4c7bebd96907a1fd5cf183395f0ebc4d3428bd22d92d
+
+ARG TARGETARCH
+ARG CONTROLLER_LOCK_DIGEST
+
+LABEL org.opencontainers.image.title="Dholbeat repository controller" \
+      org.opencontainers.image.source="https://github.com/al-amin-chayan/dhol" \
+      io.dholbeat.controller.cache="wp00-v1" \
+      io.dholbeat.controller.lock="${CONTROLLER_LOCK_DIGEST}"
+
+ENV ANSIBLE_COLLECTIONS_PATH=/usr/share/ansible/collections \
+    ANSIBLE_LOCAL_TEMP=/tmp/ansible-local \
+    ANSIBLE_REMOTE_TEMP=~/.ansible/tmp \
+    HOME=/tmp/controller-home \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_ROOT_USER_ACTION=ignore \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends \
+      libbsd0=0.11.7-2 \
+      libcbor0.8=0.8.0-2+b1 \
+      libedit2=3.1-20221030-2 \
+      libfido2-1=1.12.0-2+b1 \
+      libgssapi-krb5-2=1.20.1-2+deb12u5 \
+      libk5crypto3=1.20.1-2+deb12u5 \
+      libkeyutils1=1.6.3-2 \
+      libkrb5-3=1.20.1-2+deb12u5 \
+      libkrb5support0=1.20.1-2+deb12u5 \
+      libssl3=3.0.20-1~deb12u2 \
+      openssh-client=1:9.2p1-2+deb12u10 \
+      openssl=3.0.20-1~deb12u2 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY infra/controller/requirements.txt /tmp/controller-requirements.txt
+RUN python -m pip install --require-hashes --no-deps -r /tmp/controller-requirements.txt
+
+COPY toolchain.lock.yml /opt/dholbeat/toolchain.lock.yml
+COPY infra/controller/install_tools.py /opt/dholbeat/install_tools.py
+RUN mkdir -p "${HOME}" "${ANSIBLE_LOCAL_TEMP}" \
+    && python /opt/dholbeat/install_tools.py \
+      --lock /opt/dholbeat/toolchain.lock.yml \
+      --arch "${TARGETARCH}" \
+    && python -m pip check
+
+COPY infra/controller/runtime_versions.py /opt/dholbeat/runtime_versions.py
+COPY infra/controller/entrypoint.sh /usr/local/bin/controller-entrypoint
+RUN chmod 0755 /usr/local/bin/controller-entrypoint \
+    && mkdir -p /workspace \
+    && python /opt/dholbeat/runtime_versions.py --verify-only
+
+WORKDIR /workspace
+USER 65534:65534
+ENTRYPOINT ["/usr/local/bin/controller-entrypoint"]
+CMD ["versions"]

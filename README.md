@@ -76,6 +76,8 @@ No per-project rebuild: adding a brand = adding a **brand profile**, not code.
 ## 4. Brand profile (the extension point)
 
 ```yaml
+schema_version: 1
+project_id: poripati      # owner for approvals, credentials, and workflow/project scope
 brand: poripati            # or w3exam, or any future project
 languages: [bn, en]        # bn-first for poripati
 niche: "salon & beauty services, Bangladesh"
@@ -90,7 +92,7 @@ channels:                  # Postiz workspace mapping
   threads: poripati.app    # via Postiz
   bluesky: poripati.app
 cadence: {reels: 3/wk, static: 1-2/wk}
-approval_channel: telegram:<chat-id>
+approval_channel: telegram:DHOLBEAT_PORIPATI_APPROVAL_CHANNEL
 visual: {palette: ..., logo: ..., fonts: ...}
 no_go: ["AI avatar testimonials", "medical claims", ...]
 ```
@@ -224,6 +226,11 @@ requires a fresh founder cost decision. See the linked IaC plan for thresholds.
 - [ ] Approval bot: custom Telegram bot vs Hermes gateway
 - [ ] Per-brand X usage (worth $2–3/mo per brand?)
 - [ ] Media archival: purge-only vs B2 push
+- [ ] Run a second-device break-glass retrieval drill for the two Dholbeat age
+      keys (public-recipient SHA-256 fingerprints `32a10a74…0f849` and
+      `bed909c0…a969b`). Deferred 2026-08-17 until a device is available; this
+      drill is required before the first provider-issued production secret is
+      encrypted to these recipients.
 
 ## 10. Change log
 
@@ -236,3 +243,12 @@ requires a fresh founder cost decision. See the linked IaC plan for thresholds.
 | 2026-08-13 | Reserved `chayan.me` as the two-VPS operations/admin namespace, preserved Paperclip at `team.chayan.me`, and required Cloudflare Tunnel plus default-deny Cloudflare Zero Trust Access for every human-facing interface; `dholbeat.com` remains the product/marketing domain decision. |
 | 2026-08-14 | Founder approved `core-1` n8n as the central trusted workflow runtime for Dholbeat and registered founder-owned external workloads, initially PoriPati Track-1. Dholbeat owns runtime/security/recovery; each consumer repository owns its workflows and product rules. No separate PoriPati n8n stack is planned. |
 | 2026-08-14 | Generalized the two-host plan so shared tools are multi-project-ready from first deployment: manifest-scoped n8n consumers, one same-image Hermes container with a verified data/state boundary per project, and separate publisher organizations/workspaces. This is trusted logical/process separation with measured shared capacity, not universal tenant isolation; product applications, databases and Paperclip remain isolated. |
+| 2026-08-16 | Founder approved native auto-merge for `develop` and `main`, accepting that an exact-head opposite-model approval plus green required checks may merge without a separate final human merge click; the founder must still initiate every review round. |
+| 2026-08-17 | Issue #9: updated brand template and contract checks for prompt/publish policy safety, workflow source/index/schema validation, and prompt/brand documentation drift correction (`brands/README.md` §4, `_template.yaml`, `README.md`); added bounded-cost and workflow normalization checks in fixtures/tests. |
+| 2026-08-17 | Issue #10: defined production inventory, secret ownership/SOPS, and immutable release-identity contracts with fail-closed validation. |
+| 2026-08-17 | Founder accepted a byte-identical NordPass download-and-restore round trip for both Dholbeat age keys as satisfying the initial recovery gate; the second-device break-glass drill is deferred until a device is available and remains required before encrypting the first provider-issued production secret. |
+| 2026-08-17 | Standardized top-level Claude Code and Codex response EOF markers with shell-measured GMT+6 timestamps, elapsed duration, deterministic status precedence, and an explicit non-interactive-output boundary. |
+| 2026-08-22 | Issue #11: founder approved one disposable VPSDime Linux6GB ($7, single month) as the WP-05A acceptance target for the shared-host baseline. Cancel it manually once the evidence is accepted; no automation deletes provider resources. Platform marginal cost remains unchanged at $0. |
+| 2026-08-23 | Issue #13: added the production host baseline contract for `publish-1` plus the `scripts/infra-plan`, `scripts/infra-apply`, and `scripts/infra-verify` command contract. Production mutation now requires an annotated release, a byte-identical pre-apply plan digest, and interactive founder confirmation; CI can never apply. Adds the already-approved `$7/month` `publish-1` line, taking two-VPS infrastructure to about `$14-15/month` including expected R2. |
+| 2026-08-23 | Founder directed that `publish-1` administration must not be bound to a specific source IP and should use WireGuard as w3exam and PoriPati do, with `publish-1` running its own WireGuard server so the two hosts stay independently operable; `core-1` may join later as a separate decision. Split into its own issue: issue #13 bootstraps with an interim IP-bound SSH allowlist and the follow-up converts `publish-1` to VPN-only administration. |
+| 2026-08-23 | Issue #42: implemented tunnel-only `publish-1` administration as a two-release cutover — `vpn.administration: public` brings WireGuard up beside the existing path, then `tunnel` closes the public one after the replacement is proven. The firewall now reconciles the rules it owns instead of only adding them, so the interim allowlist is actually removed. The server key is generated on the host once; escrow to the password manager is a documented step with a machine-verifiable postcondition, and is **not yet done** because no host has been converged. Monthly cost unchanged at `$0`. |

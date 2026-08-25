@@ -1,0 +1,11 @@
+ssh:
+  allow_cidrs:
+    - 203.0.113.0/24
+vpn:
+  host_address: 203.0.113.1/24
+  peers:
+    - allowed_ips:
+        - 203.0.113.2/32
+      id: p
+      public_key: RklYVFVSRS1QRUVSLU9ORS0tLS0tLS0tLS0tLS0tLS0=
+  subnet: 203.0.113.0/24
