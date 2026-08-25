@@ -12,6 +12,19 @@ kept. IPv4/IPv6 addresses and hardware addresses identify the host and are
 replaced before the text reaches `.artifacts/`. A line that still looks
 address-shaped after redaction is withheld rather than emitted.
 
+Two ways this could report green while the policy was wrong, both refused:
+
+- An interface name is contract-valid up to `[A-Za-z0-9_.-]{1,15}`, so it can
+  itself be address-shaped. Redacting one would collapse distinct interfaces
+  into a single `<IP>` token and make a DROP rule aimed at the wrong NIC
+  compare equal to the real one. Such a transcript is reported incomplete
+  rather than judged, and the raw name is still never emitted.
+- A DROP rule only counts when it can do what the verdict claims: it must
+  belong to the owned chain, carry no predicate narrower than `-i`, and be
+  reachable. A rule from another chain, one narrowed by protocol, port or
+  source, or one behind an unconditional terminal rule is reported rather than
+  counted.
+
 Input is the collector transcript on stdin: one `## <key> status=<status>
 [reason=<reason>]` header per section, followed by that command's output.
 """
@@ -43,6 +56,18 @@ RESIDUE = re.compile(r"\d+\.\d+\.\d+|[0-9A-Fa-f]{2}:[0-9A-Fa-f]{2}:")
 LINK_NAME = re.compile(r"^\d+:\s+([^\s:@]+)(?:@[^\s:]+)?:")
 ROUTE_DEVICE = re.compile(r"(?:^|\s)dev\s+(\S+)")
 
+# The only chain this evidence speaks for. A rule from anywhere else says
+# nothing about the policy under review.
+OWNED_CHAIN = "DHOLBEAT-DOCKER-INGRESS"
+INTERFACE_FLAGS = ("-i", "--in-interface")
+# Anything that narrows a rule below "this interface". A DROP carrying one of
+# these does not drop the interface it names, it drops a subset of it.
+NARROWING_FLAGS = (
+    "-s", "--source", "-d", "--destination", "-p", "--protocol",
+    "-m", "--match", "-o", "--out-interface", "--sport", "--dport",
+)
+TERMINAL_TARGETS = ("ACCEPT", "DROP", "RETURN", "REJECT")
+
 
 @dataclass
 class Section:
@@ -51,6 +76,9 @@ class Section:
     status: str
     reason: str = ""
     lines: list[str] = field(default_factory=list)
+    # The unredacted lines, kept only so interface identity can be compared
+    # before redaction. They are never rendered.
+    raw_lines: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -96,26 +124,27 @@ def parse(text: str) -> tuple[dict[str, Section], list[str]]:
                 findings.append("output-before-first-section")
             continue
         current.lines.append(sanitize(raw))
+        current.raw_lines.append(raw)
     for key in REQUIRED_SECTIONS:
         if key not in sections:
             findings.append(f"missing-section:{key}")
     return sections, findings
 
 
-def link_names(section: Section) -> list[str]:
+def link_names(lines: list[str]) -> list[str]:
     """Interface names from `ip -o link`, in the order the kernel listed them."""
     names: list[str] = []
-    for line in section.lines:
+    for line in lines:
         match = LINK_NAME.match(line.strip())
         if match and match.group(1) not in names:
             names.append(match.group(1))
     return names
 
 
-def default_route_interfaces(section: Section) -> list[str]:
+def default_route_interfaces(lines: list[str]) -> list[str]:
     """Interfaces carrying a default route, in the order the kernel listed them."""
     names: list[str] = []
-    for line in section.lines:
+    for line in lines:
         stripped = line.strip()
         if not stripped.startswith("default"):
             continue
@@ -125,33 +154,101 @@ def default_route_interfaces(section: Section) -> list[str]:
     return names
 
 
-def drop_interfaces(section: Section) -> list[str]:
-    """Inbound interfaces the chain drops.
+def _rule_tokens(line: str) -> list[str] | None:
+    """Tokens of an `-A <chain> …` rule, or None if the line is not one."""
+    tokens = line.split()
+    if len(tokens) < 2 or tokens[0] != "-A":
+        return None
+    return tokens
+
+
+def _is_unconditional_terminal(tokens: list[str]) -> bool:
+    """Whether a rule matches everything and ends traversal of the chain."""
+    if "-j" not in tokens:
+        return False
+    target_index = tokens.index("-j") + 1
+    if target_index >= len(tokens) or tokens[target_index] not in TERMINAL_TARGETS:
+        return False
+    # `-A <chain> -j <target>` and nothing else: no predicate to narrow it.
+    return tokens[2:] == ["-j", tokens[target_index]]
+
+
+def drop_interfaces(lines: list[str]) -> tuple[list[str], list[str]]:
+    """Inbound interfaces the owned chain actually drops, plus any findings.
 
     A `-j DROP` rule with no `-i` drops on every interface and is reported as
     `any`. A negated `! -i X` rule drops everything except X, so it is reported
     as `not:X` and never counts as covering an interface.
+
+    A DROP is only counted when it can actually do what the verdict claims: it
+    must belong to the owned chain, carry no predicate narrower than `-i`, and
+    be reachable. Anything else is reported as a finding rather than counted,
+    because counting it would overstate what the evidence shows.
     """
     names: list[str] = []
-    for line in section.lines:
-        tokens = line.split()
-        if len(tokens) < 2 or tokens[0] != "-A":
+    findings: list[str] = []
+    shadowed = False
+    for line in lines:
+        tokens = _rule_tokens(line)
+        if tokens is None:
+            continue
+        chain = tokens[1]
+        if chain != OWNED_CHAIN:
+            findings.append(f"foreign-chain-rule:{chain}")
             continue
         if "-j" not in tokens:
             continue
         target_index = tokens.index("-j") + 1
-        if target_index >= len(tokens) or tokens[target_index] != "DROP":
+        target = tokens[target_index] if target_index < len(tokens) else ""
+        if target != "DROP":
+            # An earlier rule that matches everything and ends traversal means
+            # nothing after it can run.
+            if not shadowed and _is_unconditional_terminal(tokens):
+                shadowed = True
+            continue
+        if shadowed:
+            findings.append("unreachable-drop-rule")
+            continue
+        narrowing = sorted({token for token in tokens if token in NARROWING_FLAGS})
+        if narrowing:
+            findings.append(f"narrowed-drop-rule:{','.join(narrowing)}")
             continue
         name = ANY_INTERFACE
         for index, token in enumerate(tokens):
-            if token in ("-i", "--in-interface") and index + 1 < len(tokens):
+            if token in INTERFACE_FLAGS and index + 1 < len(tokens):
                 name = tokens[index + 1]
                 if index > 0 and tokens[index - 1] == "!":
                     name = f"not:{name}"
                 break
         if name not in names:
             names.append(name)
-    return names
+        if _is_unconditional_terminal(tokens):
+            shadowed = True
+    return names, findings
+
+
+def drop_interface_names(lines: list[str]) -> list[str]:
+    """The bare interface names a DROP rule refers to, negation prefix removed."""
+    names, _ = drop_interfaces(lines)
+    return [
+        name.removeprefix("not:")
+        for name in names
+        if name != ANY_INTERFACE
+    ]
+
+
+def redaction_would_alter_interfaces(section: Section | None, extract) -> bool:
+    """Whether redaction changes any interface token this section carries.
+
+    An interface name is contract-valid up to `[A-Za-z0-9_.-]{1,15}`, so it can
+    itself be address-shaped. Redacting such a name to `<IP>` would make three
+    different interfaces compare equal and turn a DROP rule aimed at the wrong
+    NIC into a passing verdict. The raw token is never emitted; only the fact
+    that it would be altered.
+    """
+    if section is None or not section.ok:
+        return False
+    return any(redact(name) != name for name in extract(section.raw_lines))
 
 
 def join(names: list[str], empty: str) -> str:
@@ -166,9 +263,22 @@ def render(text: str) -> str:
     links = sections.get(LINKS)
     routes = sections.get(DEFAULT_ROUTE)
     chain = sections.get(INGRESS_CHAIN)
-    hosts = link_names(links) if links and links.ok else []
-    defaults = default_route_interfaces(routes) if routes and routes.ok else []
-    drops = drop_interfaces(chain) if chain and chain.ok else []
+    hosts = link_names(links.lines) if links and links.ok else []
+    defaults = default_route_interfaces(routes.lines) if routes and routes.ok else []
+    drops, drop_findings = drop_interfaces(chain.lines) if chain and chain.ok else ([], [])
+    findings.extend(drop_findings)
+
+    # Redaction runs before these tokens are compared, so an address-shaped
+    # interface name would collapse distinct interfaces into one placeholder and
+    # make a wrong DROP target compare equal to the real NIC. Refuse to judge
+    # such a transcript rather than judge it wrongly.
+    for key, section, extract in (
+        (LINKS, links, link_names),
+        (DEFAULT_ROUTE, routes, default_route_interfaces),
+        (INGRESS_CHAIN, chain, drop_interface_names),
+    ):
+        if redaction_would_alter_interfaces(section, extract):
+            findings.append(f"interface-name-redacted:{key}")
 
     covering = {name for name in drops if not name.startswith("not:")}
     # Existence asks only whether every interface a DROP rule names is real, so a

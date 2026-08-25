@@ -222,3 +222,86 @@ def test_output_before_any_section_is_reported_rather_than_kept() -> None:
 )
 def test_redaction_removes_addresses_and_keeps_structure(captured: str, expected: str) -> None:
     assert EVIDENCE.redact(captured) == expected
+
+
+# --- WP05A18-01: an interface name may itself be address-shaped -------------
+# `INTERFACE_RE` in infra/roles/base/files/validate_contract.py accepts
+# [A-Za-z0-9_.-]{1,15}, so a contract-valid interface name can look like an
+# address. Redacting it would collapse distinct interfaces into one token and
+# turn a DROP aimed at the wrong NIC into a passing verdict.
+
+ADDRESS_SHAPED_LINKS = """1: lo: <LOOPBACK,UP> mtu 65536
+2: 10.0.0.10: <BROADCAST,UP> mtu 1500"""
+
+
+def test_address_shaped_interface_names_cannot_yield_complete_evidence() -> None:
+    document = EVIDENCE.render(
+        transcript(
+            links=ADDRESS_SHAPED_LINKS,
+            route="default via 192.0.2.1 dev 10.0.0.20",
+            chain="-A DHOLBEAT-DOCKER-INGRESS -i 10.0.0.30 -j DROP",
+        )
+    )
+    fields = verdict(document)
+    assert fields["evidence_complete"] == "false"
+    for section in ("links", "default-route", "docker-ingress-chain"):
+        assert f"finding: interface-name-redacted:{section}" in document
+
+
+def test_an_address_shaped_drop_target_alone_is_enough_to_fail() -> None:
+    # The link list and route are ordinary; only the DROP target is ambiguous.
+    document = EVIDENCE.render(transcript(chain="-A DHOLBEAT-DOCKER-INGRESS -i 10.0.0.30 -j DROP"))
+    assert verdict(document)["evidence_complete"] == "false"
+    assert "finding: interface-name-redacted:docker-ingress-chain" in document
+
+
+def test_an_address_shaped_name_is_never_emitted_raw() -> None:
+    document = EVIDENCE.render(
+        transcript(
+            links=ADDRESS_SHAPED_LINKS,
+            route="default via 192.0.2.1 dev 10.0.0.20",
+            chain="-A DHOLBEAT-DOCKER-INGRESS -i 10.0.0.30 -j DROP",
+        )
+    )
+    for literal in ("10.0.0.10", "10.0.0.20", "10.0.0.30", "192.0.2.1"):
+        assert literal not in document
+
+
+# --- WP05A18-02: a counted DROP must be able to do what the verdict claims ---
+
+
+def test_a_drop_behind_an_unconditional_terminal_rule_is_unreachable() -> None:
+    chain = """-A DHOLBEAT-DOCKER-INGRESS -j RETURN
+-A DHOLBEAT-DOCKER-INGRESS -i eth0 -j DROP"""
+    document = EVIDENCE.render(transcript(chain=chain))
+    assert verdict(document)["evidence_complete"] == "false"
+    assert "finding: unreachable-drop-rule" in document
+
+
+@pytest.mark.parametrize(
+    ("rule", "expected"),
+    [
+        ("-A DHOLBEAT-DOCKER-INGRESS -i eth0 -p tcp --dport 22 -j DROP", "--dport,-p"),
+        ("-A DHOLBEAT-DOCKER-INGRESS -i eth0 -s 10.0.0.0/8 -j DROP", "-s"),
+        ("-A DHOLBEAT-DOCKER-INGRESS -i eth0 -m conntrack --ctstate NEW -j DROP", "-m"),
+    ],
+)
+def test_a_drop_narrowed_below_the_interface_is_not_counted(rule: str, expected: str) -> None:
+    document = EVIDENCE.render(transcript(chain=rule))
+    assert verdict(document)["evidence_complete"] == "false"
+    assert f"finding: narrowed-drop-rule:{expected}" in document
+
+
+def test_a_drop_in_another_chain_says_nothing_about_this_policy() -> None:
+    document = EVIDENCE.render(transcript(chain="-A SOME-OTHER-CHAIN -i eth0 -j DROP"))
+    assert verdict(document)["evidence_complete"] == "false"
+    assert "finding: foreign-chain-rule:SOME-OTHER-CHAIN" in document
+
+
+def test_the_rule_set_the_role_actually_converges_still_passes() -> None:
+    # Guards the hardening above against over-tightening: the conntrack ACCEPT
+    # is conditional, so it does not shadow the DROP behind it.
+    fields = verdict(EVIDENCE.render(transcript()))
+    assert fields["evidence_complete"] == "true"
+    assert fields["docker_ingress_drop_interfaces"] == "eth0"
+    assert fields["default_route_interfaces_dropped"] == "true"
