@@ -71,18 +71,27 @@ IMAGE="$(pin --field image)"
 VERSION="$(pin --field version)"
 COMPOSE_FILE="$SCRIPT_DIR/$(pin --field compose)"
 PROFILES="$(pin --variant "$VARIANT" --field profiles)"
+PROFILE_ARGS=""
+for profile in $PROFILES; do
+  case "$profile" in
+    *[!a-z0-9-]*) dholbeat_die "profile id is not a bare slug: $profile" ;;
+  esac
+  PROFILE_ARGS="$PROFILE_ARGS --profile $profile"
+done
 PLATFORM="$(docker version --format '{{.Server.Os}}/{{.Server.Arch}}')"
 PROJECT="dg01-${CANDIDATE}-$$"
 RUN_ROOT="$ARTIFACT_ROOT/$CANDIDATE/$VARIANT"
 
+# Bash 3.2 is the default shell on the operator's macOS, and there
+# `"${empty[@]}"` under `set -u` is an unbound-variable error rather than an
+# empty expansion. Every variant with no Compose profile would abort before
+# Compose ran, so the profile flags are built as a plain string instead of an
+# array. PROFILES holds validated profile ids from candidates.yml, never
+# operator input.
 compose() {
-  local profile_args=()
-  local profile
-  for profile in $PROFILES; do
-    profile_args+=(--profile "$profile")
-  done
+  # shellcheck disable=SC2086
   docker compose --env-file "$TEMP_ROOT/stack.env" -p "$PROJECT" \
-    "${profile_args[@]}" -f "$COMPOSE_FILE" "$@"
+    $PROFILE_ARGS -f "$COMPOSE_FILE" "$@"
 }
 
 container() {
@@ -92,22 +101,34 @@ container() {
 # A harness that promises to destroy its stack must prove it did. Swallowing the
 # teardown error leaves publisher containers and volumes running on the
 # operator's machine while the run reports success.
+# A harness that promises to destroy its stack must prove it did, and must not
+# report success when it could not. A surviving publisher stack keeps
+# containers, volumes and a network on the operator's machine.
 teardown() {
+  local failed=0
   if ! compose down --volumes --remove-orphans >"$TEMP_ROOT/teardown.log" 2>&1; then
     printf 'teardown command failed for project %s:\n' "$PROJECT" >&2
     tail -20 "$TEMP_ROOT/teardown.log" >&2 || true
+    failed=1
   fi
-  local survivors
-  survivors="$(docker ps --all --quiet \
-    --filter "label=com.docker.compose.project=$PROJECT" | wc -l | tr -d ' ')"
-  if [ "$survivors" != "0" ]; then
-    printf 'warning: %s container(s) survived teardown; remove them with:\n  docker compose -p %s down --volumes --remove-orphans\n' \
-      "$survivors" "$PROJECT" >&2
+  local containers volumes networks
+  containers="$(docker ps --all --quiet \
+    --filter "label=com.docker.compose.project=$PROJECT" | grep -c . || true)"
+  volumes="$(docker volume ls --quiet \
+    --filter "label=com.docker.compose.project=$PROJECT" | grep -c . || true)"
+  networks="$(docker network ls --quiet \
+    --filter "label=com.docker.compose.project=$PROJECT" | grep -c . || true)"
+  if [ "$containers" != "0" ] || [ "$volumes" != "0" ] || [ "$networks" != "0" ]; then
+    printf 'teardown left %s container(s), %s volume(s), %s network(s) for project %s; remove them with:\n  docker compose -p %s down --volumes --remove-orphans\n' \
+      "$containers" "$volumes" "$networks" "$PROJECT" "$PROJECT" >&2
+    failed=1
   fi
+  return "$failed"
 }
 
 cleanup() {
   status=$?
+  trap - EXIT INT TERM HUP
   if [ -n "$SAMPLER_PID" ]; then
     kill "$SAMPLER_PID" >/dev/null 2>&1 || true
     wait "$SAMPLER_PID" 2>/dev/null || true
@@ -115,14 +136,21 @@ cleanup() {
   if [ "$status" -ne 0 ] && [ "$KEEP_FAILED" -eq 1 ]; then
     printf 'kept the failed %s stack for inspection: project %s\n' "$CANDIDATE" "$PROJECT" >&2
   elif [ -n "$TEMP_ROOT" ] && [ -f "$TEMP_ROOT/stack.env" ]; then
-    teardown
+    # A teardown that could not finish is a failure of the run, not a note on
+    # it: leaving a publisher stack up is exactly what this harness promises
+    # never to do.
+    if ! teardown && [ "$status" -eq 0 ]; then
+      status=1
+    fi
   fi
+  # The scratch directory holds this run's fixture credentials, so it goes even
+  # when the stack could not be destroyed.
   if [ -n "$TEMP_ROOT" ] && [ -d "$TEMP_ROOT" ]; then
     rm -rf -- "$TEMP_ROOT"
   fi
   exit "$status"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT INT TERM HUP
 
 TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/dholbeat-dg01.XXXXXX")"
 # Throwaway fixture credentials are generated per run and must never be written
@@ -289,48 +317,102 @@ PY
 
 case "$CANDIDATE" in
   postiz)
+    # Restore after rebuild, not in place. The dump is taken, the database
+    # volume is destroyed, PostgreSQL comes back empty, the dump is reloaded and
+    # the application is restarted against it. A row count would only show the
+    # rows returned; the probe then proves the restored instance still
+    # authenticates a project, mints its credential, serves its own channel and
+    # refuses another project's.
     POSTGRES="$(container postiz-postgres)"
     docker exec "$POSTGRES" pg_dump -U postiz -d postiz --clean --if-exists >"$TEMP_ROOT/postiz.sql"
     BEFORE="$(docker exec "$POSTGRES" psql -U postiz -d postiz -tAc 'select count(*) from "Organization";')"
-    docker exec "$POSTGRES" psql -U postiz -d postiz -c 'drop schema public cascade; create schema public;' >/dev/null
-    docker exec -i "$POSTGRES" psql -U postiz -d postiz >/dev/null 2>&1 <"$TEMP_ROOT/postiz.sql"
+
+    compose stop postiz >/dev/null
+    compose rm --force --stop --volumes postiz-postgres >/dev/null
+    docker volume rm "${PROJECT}_postiz-postgres-data" >/dev/null 2>&1 || true
+    compose up --detach --no-deps --wait --wait-timeout 300 postiz-postgres >/dev/null
+    POSTGRES="$(container postiz-postgres)"
+    REBUILT="$(docker exec "$POSTGRES" psql -U postiz -d postiz -tAc \
+      "select count(*) from information_schema.tables where table_schema='public';")"
+    docker exec -i "$POSTGRES" psql -U postiz -d postiz \
+      >"$TEMP_ROOT/postiz-restore.log" 2>&1 <"$TEMP_ROOT/postiz.sql" || true
     AFTER="$(docker exec "$POSTGRES" psql -U postiz -d postiz -tAc 'select count(*) from "Organization";')"
-    if [ "$BEFORE" = "$AFTER" ] && [ "$AFTER" != "0" ]; then
-      drill backup.dump-restore pass "pg_dump then a schema drop and reload preserved $AFTER organizations."
-    else
-      drill backup.dump-restore fail "organizations before=$BEFORE after=$AFTER."
-    fi
+    compose start postiz >/dev/null
+
+    python3 "$SCRIPT_DIR/probe.py" \
+      --candidate postiz --mode restore-verify \
+      --base-url "http://localhost:$HOST_PORT" \
+      --image "$IMAGE" --variant "$VARIANT" --platform "$PLATFORM" \
+      --fixture-password-prefix "$FIXTURE_PASSWORD_PREFIX" \
+      --output "$TEMP_ROOT/restore-verify.json" 2>/dev/null || true
+
+    RESTORE_VERDICT="$(python3 "$SCRIPT_DIR/restore_verdict.py" \
+      --results "$TEMP_ROOT/restore-verify.json" \
+      --rebuilt-tables "$REBUILT" --organizations-before "$BEFORE" --organizations-after "$AFTER")"
+    drill backup.dump-restore "${RESTORE_VERDICT%%|*}" "${RESTORE_VERDICT#*|}"
 
     sed -i.bak 's/^POSTIZ_DISABLE_REGISTRATION=.*/POSTIZ_DISABLE_REGISTRATION=true/' "$TEMP_ROOT/stack.env"
     rm -f "$TEMP_ROOT/stack.env.bak"
     compose up --detach --no-deps postiz >/dev/null
-    LOCK_STATUS=""
-    for _ in $(seq 1 90); do
-      LOCK_STATUS="$(curl -s -o /dev/null -w '%{http_code}' -X POST \
-        -H 'Content-Type: application/json' \
-        -d '{"email":"locked@dg01.invalid","password":"dg01-locked-fixture","company":"Locked","provider":"LOCAL"}' \
-        "http://localhost:$HOST_PORT/api/auth/register" || true)"
-      case "$LOCK_STATUS" in 200|400|401|403|404|429) break ;; esac
-      sleep 4
-    done
-    if [ "$LOCK_STATUS" = "200" ]; then
-      drill registration.lock fail "DISABLE_REGISTRATION=true still accepted a new registration (HTTP $LOCK_STATUS)."
-    else
-      drill registration.lock pass "DISABLE_REGISTRATION=true rejected a new registration with HTTP $LOCK_STATUS."
-    fi
+    # Wait for the recreated backend to actually be serving before asking it to
+    # reject a registration. A restarting or rate-limiting instance refuses
+    # everything, and counting that as a locked registration surface would let
+    # an outage masquerade as a working control.
+    READY_CODE="$(wait_for_http "http://localhost:$HOST_PORT/api/user/self" 240)" ||
+      dholbeat_die "the Postiz backend never came back after the registration-lock restart"
+    LOCK_STATUS="$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+      -H 'Content-Type: application/json' \
+      -d '{"email":"locked@dg01.invalid","password":"dg01-locked-fixture","company":"Locked","provider":"LOCAL"}' \
+      "http://localhost:$HOST_PORT/api/auth/register" || true)"
+    case "$LOCK_STATUS" in
+      200)
+        drill registration.lock fail \
+          "DISABLE_REGISTRATION=true still accepted a new registration (HTTP $LOCK_STATUS)."
+        ;;
+      400|401|403)
+        drill registration.lock pass \
+          "the backend answered HTTP $READY_CODE when serving, then rejected a new registration with HTTP $LOCK_STATUS."
+        ;;
+      *)
+        # 404 would mean the route is absent rather than closed, and 429 is rate
+        # limiting. Neither shows the toggle working.
+        drill registration.lock fail \
+          "registration returned HTTP $LOCK_STATUS, which shows neither an open nor a deliberately closed registration surface."
+        ;;
+    esac
     ;;
   mixpost-lite)
+    # Same shape as the Postiz drill: rebuild the data volume from empty rather
+    # than reloading over the live database, then prove the restored instance
+    # still authenticates and serves its data.
     MYSQL="$(container mixpost-mysql)"
     docker exec "$MYSQL" sh -c 'exec mysqldump --no-tablespaces -umixpost -p"$MYSQL_PASSWORD" mixpost' >"$TEMP_ROOT/mixpost.sql"
     BEFORE="$(docker exec "$MYSQL" sh -c 'exec mysql -umixpost -p"$MYSQL_PASSWORD" -N -B -e "select count(*) from users" mixpost')"
-    docker exec "$MYSQL" sh -c 'exec mysql -umixpost -p"$MYSQL_PASSWORD" -e "drop database mixpost; create database mixpost"'
-    docker exec -i "$MYSQL" sh -c 'exec mysql -umixpost -p"$MYSQL_PASSWORD" mixpost' <"$TEMP_ROOT/mixpost.sql"
+
+    compose stop mixpost >/dev/null
+    compose rm --force --stop --volumes mixpost-mysql >/dev/null
+    docker volume rm "${PROJECT}_mixpost-mysql-data" >/dev/null 2>&1 || true
+    compose up --detach --no-deps --wait --wait-timeout 300 mixpost-mysql >/dev/null
+    MYSQL="$(container mixpost-mysql)"
+    REBUILT="$(docker exec "$MYSQL" sh -c 'exec mysql -umixpost -p"$MYSQL_PASSWORD" -N -B -e "select count(*) from information_schema.tables where table_schema=\"mixpost\"" mixpost')"
+    docker exec -i "$MYSQL" sh -c 'exec mysql -umixpost -p"$MYSQL_PASSWORD" mixpost' \
+      >"$TEMP_ROOT/mixpost-restore.log" 2>&1 <"$TEMP_ROOT/mixpost.sql" || true
     AFTER="$(docker exec "$MYSQL" sh -c 'exec mysql -umixpost -p"$MYSQL_PASSWORD" -N -B -e "select count(*) from users" mixpost')"
-    if [ "$BEFORE" = "$AFTER" ] && [ "$AFTER" != "0" ]; then
-      drill backup.dump-restore pass "mysqldump then a database drop and reload preserved $AFTER logins."
-    else
-      drill backup.dump-restore fail "logins before=$BEFORE after=$AFTER."
-    fi
+    compose start mixpost >/dev/null
+
+    python3 "$SCRIPT_DIR/probe.py" \
+      --candidate mixpost-lite --mode restore-verify \
+      --base-url "http://localhost:$HOST_PORT" \
+      --image "$IMAGE" --variant "$VARIANT" --platform "$PLATFORM" \
+      --mixpost-container "$MIXPOST_CONTAINER" \
+      --mixpost-password-a "${FIXTURE_PASSWORD_PREFIX}-project-a" \
+      --mixpost-password-b "${FIXTURE_PASSWORD_PREFIX}-project-b" \
+      --output "$TEMP_ROOT/restore-verify.json" 2>/dev/null || true
+
+    RESTORE_VERDICT="$(python3 "$SCRIPT_DIR/restore_verdict.py" \
+      --results "$TEMP_ROOT/restore-verify.json" --candidate mixpost-lite \
+      --rebuilt-tables "$REBUILT" --organizations-before "$BEFORE" --organizations-after "$AFTER")"
+    drill backup.dump-restore "${RESTORE_VERDICT%%|*}" "${RESTORE_VERDICT#*|}"
     drill registration.lock pass "Mixpost Lite registers no self-signup route, so there is nothing to lock."
     ;;
 esac

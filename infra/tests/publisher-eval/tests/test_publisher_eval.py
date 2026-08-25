@@ -20,6 +20,7 @@ sys.path.insert(0, str(HARNESS))
 
 import probe  # noqa: E402
 import resources  # noqa: E402
+import restore_verdict  # noqa: E402
 import verdict  # noqa: E402
 
 IMAGE_DIGEST = "@sha256:"
@@ -106,7 +107,7 @@ def test_capacity_summary_flags_a_ram_breach() -> None:
     samples = resources.parse_samples(["app|5GiB / 6GiB", ""])
     summary = resources.summarise(samples, disk_mib=100.0, image_mib=100.0)
     assert summary["peak_ram_within_budget"] is False
-    assert summary["steady_disk_within_budget"] is True
+    assert summary["topology_within_steady_budget"] is True
 
 
 def test_the_lowest_sample_is_reported_as_a_minimum_not_an_idle_figure() -> None:
@@ -120,8 +121,27 @@ def test_the_lowest_sample_is_reported_as_a_minimum_not_an_idle_figure() -> None
 def test_capacity_summary_flags_a_disk_breach() -> None:
     samples = resources.parse_samples(["app|1GiB / 6GiB", ""])
     summary = resources.summarise(samples, disk_mib=24 * 1024.0, image_mib=1024.0)
-    assert summary["steady_disk_within_budget"] is False
-    assert summary["update_headroom_within_budget"] is False
+    assert summary["topology_within_steady_budget"] is False
+
+
+def test_update_headroom_is_reported_unmeasured_not_passing() -> None:
+    # WP-13's 8 GB update headroom is a property of a real 30 GB host while two
+    # image sets coexist. Subtracting this topology's footprint from 30 GiB is
+    # arithmetic, not a measurement, and must never read as a passing gate.
+    summary = resources.summarise(resources.parse_samples(["app|1GiB / 6GiB", ""]), 100.0, 100.0)
+    assert isinstance(summary["update_headroom"], str)
+    assert summary["update_headroom"].startswith("unmeasured")
+    assert "update_headroom_within_budget" not in summary
+    assert "update_headroom_mib" not in summary
+
+
+def test_the_verdict_never_gates_on_an_unmeasured_budget() -> None:
+    document = verdict.build(
+        _checks(_all_passing()), {"drills": []}, _healthy_resources(), "v1.0.0"
+    )
+    assert "update_headroom_within_budget" not in document["capacity_breaches"]
+    assert document["unmeasured_capacity"]["update_headroom"].startswith("unmeasured")
+    assert document["verdict"] == "viable"
 
 
 def _checks(results: dict[str, str]) -> dict:
@@ -260,3 +280,85 @@ def test_every_compose_image_is_digest_pinned() -> None:
         for service, definition in document["services"].items():
             image = definition["image"]
             assert IMAGE_DIGEST in image, f"{name}: {service} image is not digest-pinned"
+
+
+# --- DG01-01: the harness must work on the operator's default shell ----------
+
+
+def test_the_runner_parses_under_bash_3_2() -> None:
+    """macOS ships Bash 3.2 as /bin/bash, and the runbook documents a plain
+    `run.sh` invocation. Empty-array expansion under `set -u` aborts there, so a
+    variant with no Compose profile would die before Compose ran."""
+    bash = Path("/bin/bash")
+    if not bash.exists():  # pragma: no cover - non-macOS CI
+        pytest.skip("no /bin/bash on this platform")
+    completed = subprocess.run(
+        [str(bash), "-n", str(HARNESS / "run.sh")], capture_output=True, text=True, check=False
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_an_empty_profile_list_survives_nounset() -> None:
+    bash = Path("/bin/bash")
+    if not bash.exists():  # pragma: no cover - non-macOS CI
+        pytest.skip("no /bin/bash on this platform")
+    script = (
+        'set -euo pipefail\n'
+        'PROFILES=""\n'
+        'PROFILE_ARGS=""\n'
+        'for p in $PROFILES; do PROFILE_ARGS="$PROFILE_ARGS --profile $p"; done\n'
+        'printf "[%s]" "$PROFILE_ARGS"\n'
+    )
+    completed = subprocess.run([str(bash), "-c", script], capture_output=True, text=True, check=False)
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == "[]"
+
+
+# --- DG01-03: the restore drill must judge behaviour, not row counts ---------
+
+RESTORED_OK = {
+    "session_restored": True,
+    "api_credential_restored": True,
+    "own_channel_restored": True,
+    "tenant_boundary_restored": True,
+}
+
+
+def test_a_clean_rebuild_and_restore_passes() -> None:
+    result, _ = restore_verdict.judge(RESTORED_OK, "0", "3", "3", "postiz")
+    assert result == "pass"
+
+
+def test_a_database_that_was_not_rebuilt_empty_fails() -> None:
+    result, detail = restore_verdict.judge(RESTORED_OK, "42", "3", "3", "postiz")
+    assert result == "fail"
+    assert "not empty" in detail
+
+
+@pytest.mark.parametrize("missing", sorted(RESTORED_OK))
+def test_rows_returning_without_working_behaviour_fails(missing: str) -> None:
+    # The exact false pass a count-only drill would report: every row is back,
+    # but the application cannot use the restored state.
+    results = dict(RESTORED_OK, **{missing: False})
+    result, detail = restore_verdict.judge(results, "0", "3", "3", "postiz")
+    assert result == "fail"
+    assert missing in detail
+
+
+def test_a_restore_that_exposes_another_project_fails() -> None:
+    results = dict(RESTORED_OK, foreign_channel_visible=True)
+    result, detail = restore_verdict.judge(results, "0", "3", "3", "postiz")
+    assert result == "fail"
+    assert "another project" in detail
+
+
+def test_a_missing_restore_probe_result_fails_closed() -> None:
+    result, _ = restore_verdict.judge(None, "0", "3", "3", "postiz")
+    assert result == "fail"
+
+
+def test_mixpost_is_not_required_to_restore_a_boundary_it_lacks() -> None:
+    result, _ = restore_verdict.judge(
+        {"login_restored": True, "label_restored": True}, "0", "3", "3", "mixpost-lite"
+    )
+    assert result == "pass"

@@ -15,8 +15,14 @@ from typing import Iterable
 # docs/plans/two-vps-reproducible-implementation-plan.md WP-13 verify clause.
 PEAK_RAM_BUDGET_MIB = 4.5 * 1024
 STEADY_DISK_BUDGET_MIB = 18 * 1024
+# WP-13 also asks for >=8 GB of update headroom. That is a property of a real
+# 30 GB host mid-upgrade — free filesystem space while two image sets coexist —
+# and nothing here measures it. Subtracting this topology's footprint from
+# 30 GiB ignores the host OS, container writable layers, Docker metadata and
+# logs, monitoring and restic, and the second image set an update pulls. It is
+# reported as unmeasured rather than dressed up as a passing gate.
 UPDATE_HEADROOM_BUDGET_MIB = 8 * 1024
-HOST_DISK_MIB = 30 * 1024
+UPDATE_HEADROOM_STATUS = "unmeasured: needs a bounded 30 GB host mid-upgrade (WP-13)"
 
 UNIT_MIB = {
     "B": 1 / (1024 * 1024),
@@ -84,8 +90,7 @@ def summarise(
     # so it is reported as the observed minimum and never as a steady idle
     # figure the founder could mistake for a seven-day canary result.
     minimum = min(totals) if totals else 0.0
-    steady_disk = disk_mib + image_mib
-    headroom = HOST_DISK_MIB - steady_disk
+    topology_disk = disk_mib + image_mib
     return {
         "samples": len(samples),
         "startup_seconds": None if startup_seconds is None else round(startup_seconds, 1),
@@ -95,12 +100,16 @@ def summarise(
         "peak_ram_within_budget": peak <= PEAK_RAM_BUDGET_MIB,
         "volume_disk_mib": round(disk_mib, 1),
         "image_disk_mib": round(image_mib, 1),
-        "steady_disk_mib": round(steady_disk, 1),
+        # This topology's own images plus named volumes. It is a lower bound on
+        # what the publisher costs a 30 GB host, not the host's steady usage:
+        # the host OS, writable layers, Docker metadata and logs, monitoring and
+        # restic are all outside it.
+        "topology_disk_mib": round(topology_disk, 1),
+        "topology_disk_is_lower_bound": True,
         "steady_disk_budget_mib": STEADY_DISK_BUDGET_MIB,
-        "steady_disk_within_budget": steady_disk <= STEADY_DISK_BUDGET_MIB,
-        "update_headroom_mib": round(headroom, 1),
+        "topology_within_steady_budget": topology_disk <= STEADY_DISK_BUDGET_MIB,
         "update_headroom_budget_mib": UPDATE_HEADROOM_BUDGET_MIB,
-        "update_headroom_within_budget": headroom >= UPDATE_HEADROOM_BUDGET_MIB,
+        "update_headroom": UPDATE_HEADROOM_STATUS,
     }
 
 

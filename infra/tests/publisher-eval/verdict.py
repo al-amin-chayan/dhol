@@ -37,9 +37,12 @@ def build(checks: dict, drills: dict, resources: dict, version: str) -> dict:
     failed = sorted(check["id"] for check in checks["checks"] if check["result"] == "fail")
     unsupported = sorted(check["id"] for check in checks["checks"] if check["result"] == "unsupported")
     failed_drills = sorted(drill["id"] for drill in drills["drills"] if drill["result"] != "pass")
+    # Only budgets this harness actually measured may gate the verdict. Update
+    # headroom needs a real 30 GB host mid-upgrade, so it is carried as
+    # unmeasured rather than counted as passing.
     capacity = [
         key
-        for key in ("peak_ram_within_budget", "steady_disk_within_budget", "update_headroom_within_budget")
+        for key in ("peak_ram_within_budget", "topology_within_steady_budget")
         if not resources.get(key, False)
     ]
 
@@ -65,6 +68,7 @@ def build(checks: dict, drills: dict, resources: dict, version: str) -> dict:
         "unsupported_checks": unsupported,
         "failed_drills": failed_drills,
         "capacity_breaches": capacity,
+        "unmeasured_capacity": {"update_headroom": resources.get("update_headroom")},
         "capabilities": checks["capabilities"],
         "checks": checks["checks"],
         "drills": drills["drills"],

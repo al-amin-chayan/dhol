@@ -297,16 +297,32 @@ def probe_postiz(args: argparse.Namespace, recorder: Recorder) -> dict[str, Any]
     leak = own_ids & {channels["project-b"]}
     # Absence from a listing is weak evidence on its own, so tenant B's channel
     # is also addressed directly by id with tenant A's credential.
+    # A rejection on this endpoint means nothing unless the same endpoint answers
+    # for the tenant's own channel: an unsupported route would refuse both.
+    own_direct_status, _, _ = public("project-a", "GET", f"/integration-settings/{channels['project-a']}")
     direct_status, _, _ = public("project-a", "GET", f"/integration-settings/{channels['project-b']}")
+    control_holds = own_direct_status == 200
     direct_rejected = direct_status >= 400
-    recorder.record(
-        "authz.cross-tenant-read-rejected",
-        PASS if not leak and direct_rejected else FAIL,
-        f"project-a's channel listing {'excludes' if not leak else 'contains'} project-b's channel, and "
-        f"addressing project-b's channel by id with project-a's key returned {direct_status}.",
-        leaked_ids=sorted(leak),
-        direct_read_status=direct_status,
-    )
+    if not control_holds:
+        recorder.record(
+            "authz.cross-tenant-read-rejected",
+            UNSUPPORTED,
+            "The direct-read endpoint did not answer for project-a's own channel "
+            f"({own_direct_status}), so a rejection for project-b's ({direct_status}) proves nothing.",
+            own_direct_status=own_direct_status,
+            direct_read_status=direct_status,
+        )
+    else:
+        recorder.record(
+            "authz.cross-tenant-read-rejected",
+            PASS if not leak and direct_rejected else FAIL,
+            f"project-a's channel listing {'excludes' if not leak else 'contains'} project-b's channel; "
+            f"the same endpoint returned {own_direct_status} for its own channel and "
+            f"{direct_status} for project-b's.",
+            leaked_ids=sorted(leak),
+            own_direct_status=own_direct_status,
+            direct_read_status=direct_status,
+        )
 
     status, body, _ = public(None, "GET", "/integrations")
     recorder.record(
@@ -403,13 +419,27 @@ def probe_postiz(args: argparse.Namespace, recorder: Recorder) -> dict[str, Any]
     )
     ids_a = {str(post.get("id")) for post in posts_a}
     ids_b = {str(post.get("id")) for post in posts_b}
-    recorder.record(
-        "authz.cross-tenant-post-read-rejected",
-        PASS if not (ids_a & ids_b) else FAIL,
-        f"project-b's post window returned {len(posts_b)} post(s) and shares "
-        f"{len(ids_a & ids_b)} id(s) with project-a.",
-        shared_ids=sorted(ids_a & ids_b),
-    )
+    if status_a != 200 or status_b != 200:
+        # A failed listing yields an empty set, which would silently look like
+        # perfect isolation. Both sides must actually have answered.
+        recorder.record(
+            "authz.cross-tenant-post-read-rejected",
+            UNSUPPORTED,
+            f"project-a's listing returned {status_a} and project-b's returned {status_b}; "
+            "an unanswered listing cannot demonstrate isolation.",
+            status_a=status_a,
+            status_b=status_b,
+        )
+    else:
+        recorder.record(
+            "authz.cross-tenant-post-read-rejected",
+            PASS if not (ids_a & ids_b) else FAIL,
+            f"both tenants' post windows returned 200; project-b's holds {len(posts_b)} post(s) "
+            f"and shares {len(ids_a & ids_b)} id(s) with project-a's {len(posts_a)}.",
+            shared_ids=sorted(ids_a & ids_b),
+            status_a=status_a,
+            status_b=status_b,
+        )
 
     if own_post_id:
         status, body, _ = public("project-b", "DELETE", f"/posts/{own_post_id}")
@@ -425,12 +455,34 @@ def probe_postiz(args: argparse.Namespace, recorder: Recorder) -> dict[str, Any]
             survived=still_there,
         )
         status, _, _ = public("project-a", "DELETE", f"/posts/{own_post_id}")
-        recorder.record(
-            "posts.cancel",
-            PASS if status in (200, 204) else FAIL,
-            f"DELETE /public/v1/posts/<id> by the owning tenant returned {status}.",
-            status=status,
+        # A 200 from DELETE is a claim, not an outcome. Re-read the window and
+        # require the scheduled job to actually be gone.
+        after_status, after_body, _ = public("project-a", "GET", query)
+        remaining = (
+            {str(post.get("id")) for post in json.loads(after_body).get("posts", [])}
+            if after_status == 200
+            else None
         )
+        if remaining is None:
+            recorder.record(
+                "posts.cancel",
+                UNSUPPORTED,
+                f"DELETE returned {status} but the post window then returned {after_status}, "
+                "so the cancellation could not be confirmed.",
+                status=status,
+                recheck_status=after_status,
+            )
+        else:
+            gone = str(own_post_id) not in remaining
+            recorder.record(
+                "posts.cancel",
+                PASS if status in (200, 204) and gone else FAIL,
+                f"DELETE /public/v1/posts/<id> by the owning tenant returned {status}; "
+                f"re-reading the window shows the post {'gone' if gone else 'still scheduled'}.",
+                status=status,
+                recheck_status=after_status,
+                removed=gone,
+            )
     else:
         recorder.record(
             "authz.cross-tenant-delete-rejected",
@@ -444,19 +496,37 @@ def probe_postiz(args: argparse.Namespace, recorder: Recorder) -> dict[str, Any]
         )
 
     stale = keys["project-a"]
-    status, _, _ = api.request(
-        "POST",
-        "/user/api-key/rotate",
-        headers={"Cookie": f"auth={tenants['project-a']['session']}"},
-    )
-    rotate_status, _, _ = public(None, "GET", "/integrations", key=stale)
-    recorder.record(
-        "authz.rotated-credential-rejected",
-        PASS if rotate_status == 401 else FAIL,
-        f"POST /api/user/api-key/rotate returned {status}; the previous key then returned {rotate_status}.",
-        rotate_status=status,
-        stale_key_status=rotate_status,
-    )
+    session = {"Cookie": f"auth={tenants['project-a']['session']}"}
+    rotate_status, _, _ = api.request("POST", "/user/api-key/rotate", headers=session)
+    # A stale key returning 401 proves nothing on its own — a broken rotate
+    # endpoint, or an instance refusing every key, produces the same 401. The
+    # rotate must succeed and the newly issued key must work.
+    fresh_status, fresh_body, _ = api.request("GET", "/user/self", headers=session)
+    fresh_key = json.loads(fresh_body)["publicApi"] if fresh_status == 200 else ""
+    fresh_works = public(None, "GET", "/integrations", key=fresh_key)[0] if fresh_key else 0
+    stale_status, _, _ = public(None, "GET", "/integrations", key=stale)
+    rotated = bool(fresh_key) and fresh_key != stale
+    if rotate_status not in (200, 201) or not rotated or fresh_works != 200:
+        recorder.record(
+            "authz.rotated-credential-rejected",
+            UNSUPPORTED,
+            f"rotate returned {rotate_status}, a {'new' if rotated else 'unchanged'} key was issued, and "
+            f"that key returned {fresh_works} — without a working replacement, the stale key's "
+            f"{stale_status} is not evidence of revocation.",
+            rotate_status=rotate_status,
+            new_key_status=fresh_works,
+            stale_key_status=stale_status,
+        )
+    else:
+        recorder.record(
+            "authz.rotated-credential-rejected",
+            PASS if stale_status == 401 else FAIL,
+            f"rotate returned {rotate_status}, the replacement key returned {fresh_works}, and the "
+            f"previous key returned {stale_status}.",
+            rotate_status=rotate_status,
+            new_key_status=fresh_works,
+            stale_key_status=stale_status,
+        )
 
     recorder.record(
         "bootstrap.registration-lockable",
@@ -621,9 +691,101 @@ class MixpostSession:
         return [tag.get("name") for tag in props.get("tags", []) or []]
 
 
+def verify_postiz_restore(args: argparse.Namespace) -> dict[str, Any]:
+    """Prove a restored Postiz still serves the state n8n depends on.
+
+    A row count says the rows came back; it does not say the application can
+    still authenticate a project, mint its credential, see its own channel, or
+    refuse another project's. This runs after the database has been rebuilt from
+    empty and reloaded, so it exercises the restore rather than the live
+    instance that produced the dump.
+    """
+    api = Http(args.base_url.rstrip("/") + "/api")
+    api.wait_until(
+        lambda: api.request("GET", "/user/self")[0] == 401,
+        attempts=args.ready_attempts,
+        delay=args.ready_delay,
+        what="the Postiz backend to answer after restore",
+    )
+    results: dict[str, Any] = {}
+
+    email = f"project-a@{args.fixture_domain}"
+    password = f"{args.fixture_password_prefix}-project-a"
+    status, _, headers = api.request(
+        "POST", "/auth/login", json_body={"email": email, "password": password, "provider": "LOCAL"}
+    )
+    token = None
+    for cookie in headers.get("set-cookie", []):
+        match = re.match(r"auth=([^;]+)", cookie)
+        if match:
+            token = match.group(1)
+    results["login_status"] = status
+    results["session_restored"] = bool(token)
+    if not token:
+        return results
+
+    auth = {"Cookie": f"auth={token}"}
+    status, body, _ = api.request("GET", "/user/self", headers=auth)
+    record = json.loads(body) if status == 200 else {}
+    api_key = record.get("publicApi") or ""
+    results["self_status"] = status
+    results["api_credential_restored"] = bool(api_key)
+    if not api_key:
+        return results
+
+    def public(path: str, key: str = api_key):
+        return api.request("GET", "/public/v1" + path, headers={"Authorization": key})
+
+    status, body, _ = public("/integrations")
+    own = {item.get("id") for item in (json.loads(body) if status == 200 else [])}
+    results["integrations_status"] = status
+    results["own_channel_restored"] = args.restored_own_channel in own
+    results["foreign_channel_visible"] = args.restored_foreign_channel in own
+
+    direct_own, _, _ = public(f"/integration-settings/{args.restored_own_channel}")
+    direct_foreign, _, _ = public(f"/integration-settings/{args.restored_foreign_channel}")
+    results["own_direct_status"] = direct_own
+    results["foreign_direct_status"] = direct_foreign
+    results["tenant_boundary_restored"] = direct_own == 200 and direct_foreign >= 400
+    return results
+
+
+def verify_mixpost_restore(args: argparse.Namespace) -> dict[str, Any]:
+    """Prove a restored Mixpost Lite still authenticates and serves its data."""
+    base = args.base_url.rstrip("/") + "/" + args.mixpost_core_path.strip("/")
+    app = Http(base)
+    app.wait_until(
+        lambda: app.request("GET", "/login")[0] == 200,
+        attempts=args.ready_attempts,
+        delay=args.ready_delay,
+        what="the Mixpost login page after restore",
+    )
+    results: dict[str, Any] = {}
+    session = MixpostSession(app, args.mixpost_users[0], args.mixpost_password_a)
+    try:
+        session.login()
+    except RuntimeError as error:
+        results["login_restored"] = False
+        results["detail"] = str(error)[:120]
+        return results
+    results["login_restored"] = True
+    names = session.tag_names()
+    results["label_restored"] = args.restored_marker in names
+    return results
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--candidate", required=True, choices=["postiz", "mixpost-lite"])
+    parser.add_argument(
+        "--mode",
+        default="matrix",
+        choices=["matrix", "restore-verify"],
+        help="matrix runs the full fixture matrix; restore-verify re-checks a rebuilt instance",
+    )
+    parser.add_argument("--restored-own-channel", default="dg01-project-a")
+    parser.add_argument("--restored-foreign-channel", default="dg01-project-b")
+    parser.add_argument("--restored-marker", default="dg01-project-a-private")
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--image", required=True, help="the digest-pinned image under test")
@@ -651,6 +813,15 @@ def main() -> int:
     parser.add_argument("--mixpost-password-a", default="")
     parser.add_argument("--mixpost-password-b", default="")
     args = parser.parse_args()
+
+    if args.mode == "restore-verify":
+        verify = verify_postiz_restore if args.candidate == "postiz" else verify_mixpost_restore
+        results = verify(args)
+        with open(args.output, "w", encoding="utf-8") as handle:
+            json.dump(results, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+        print(json.dumps(results, sort_keys=True), file=sys.stderr)
+        return 0
 
     recorder = Recorder()
     if args.candidate == "postiz":

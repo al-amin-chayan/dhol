@@ -13,8 +13,11 @@ candidates:
     product: Postiz
     edition: self-hosted (single edition)
     version: v2.23.0
-    license: AGPL-3.0-only
-    license_source: https://github.com/gitroomhq/postiz-app/blob/main/LICENSE
+    # The LICENSE at the pinned tag grants the AGPL "either version 3 of the
+    # License, or (at your option) any later version", so the SPDX identifier is
+    # -or-later. The source is the immutable tag, never a mutable branch.
+    license: AGPL-3.0-or-later
+    license_source: https://github.com/gitroomhq/postiz-app/blob/v2.23.0/LICENSE
     purchase_required: false
     evaluable: true
     image: ghcr.io/gitroomhq/postiz-app:v2.23.0@sha256:785f97312f66a347fb96cdccc4ded5a33ced69a672c89a9adc8054e7d6a21dc5
@@ -36,7 +39,9 @@ candidates:
     edition: Lite
     version: v2.6.0
     license: MIT
-    license_source: https://github.com/inovector/mixpost/blob/main/LICENSE.md
+    # Upstream tags the package `2.6.0` while the image tag is `v2.6.0`; this
+    # is the immutable tag for the evaluated version, not a mutable branch.
+    license_source: https://github.com/inovector/mixpost/blob/2.6.0/LICENSE.md
     purchase_required: false
     evaluable: true
     image: inovector/mixpost:v2.6.0@sha256:90cf94cec73dcaf87989d30b0de7a84b0625ff06797ba61c8ecb54e8fe1e10c4
@@ -64,9 +69,13 @@ candidates:
       The image inovector/mixpost-pro-team requires a LICENSE_KEY at runtime.
       DG-01 authorises no purchase, so every Pro capability below is an
       unverified vendor claim.
+    # https://mixpost.app/pricing as read 2026-08-25. These are advertised
+    # capabilities, never measured ones: no Pro instance was run.
     vendor_claims:
-      - multi-tenant workspaces
-      - REST API and webhooks
+      - "Multi-tenant support"
+      - "API"
+      - "Webhooks"
+      - unlimited workspaces (stated in the pricing page FAQ, not as a Pro bullet)
 
   - id: mixpost-enterprise
     product: Mixpost
@@ -83,4 +92,10 @@ candidates:
       DG-01 authorises no purchase.
     vendor_claims:
       - everything in Pro
-      - one user may own several workspaces when the Enterprise console enables it
+      # https://docs.mixpost.app/enterprise/configuration/multiple-workspaces:
+      # "By default, each user is permitted to own only one workspace." This
+      # gates one human login owning several workspaces — an administration
+      # ergonomics setting, not the DG-01 tenant-and-machine-credential
+      # requirement, which Pro already claims to meet.
+      - one human login may own several workspaces when the Enterprise console
+        enables it
