@@ -223,6 +223,11 @@ requires a fresh founder cost decision. See the linked IaC plan for thresholds.
       within budget. Mixpost documents multiple workspaces under Enterprise;
       surface an exact-edition test and monthly-cost table rather than silently
       choosing Postiz or a paid Mixpost tier.
+      **Evidence packet ready 2026-08-25:**
+      [`docs/decisions/publisher-selection.md`](docs/decisions/publisher-selection.md)
+      measures Postiz `v2.23.0` and Mixpost Lite `v2.6.0` against the same
+      fixture matrix and recommends Postiz. The founder still records the
+      choice; `WP-13` stays blocked until then.
 - [ ] Approval bot: custom Telegram bot vs Hermes gateway
 - [ ] Per-brand X usage (worth $2–3/mo per brand?)
 - [ ] Media archival: purge-only vs B2 push
@@ -253,3 +258,4 @@ requires a fresh founder cost decision. See the linked IaC plan for thresholds.
 | 2026-08-23 | Founder directed that `publish-1` administration must not be bound to a specific source IP and should use WireGuard as w3exam and PoriPati do, with `publish-1` running its own WireGuard server so the two hosts stay independently operable; `core-1` may join later as a separate decision. Split into its own issue: issue #13 bootstraps with an interim IP-bound SSH allowlist and the follow-up converts `publish-1` to VPN-only administration. |
 | 2026-08-23 | Issue #42: implemented tunnel-only `publish-1` administration as a two-release cutover — `vpn.administration: public` brings WireGuard up beside the existing path, then `tunnel` closes the public one after the replacement is proven. The firewall now reconciles the rules it owns instead of only adding them, so the interim allowlist is actually removed. The server key is generated on the host once; escrow to the password manager is a documented step with a machine-verifiable postcondition, and is **not yet done** because no host has been converged. Monthly cost unchanged at `$0`. |
 | 2026-08-25 | PR #41 follow-up (WP05A-18): the disposable-host harness now captures `ip -o link`, the default route, and `iptables -S DHOLBEAT-DOCKER-INGRESS`, and the runbook requires those fields plus a rerun with no hand-added `dholbeat-temporary-ssh` rule. Until now nothing proved the Docker ingress `-i <iface> -j DROP` rule named a real NIC. The live VM/VPS rerun remains outstanding and needs a host plus founder action. Monthly cost unchanged at `$0`. |
+| 2026-08-25 | Issue #16 (`DG-01`): added a disposable publisher-evaluation harness (`infra/tests/publisher-eval/`) and the decision packet [`docs/decisions/publisher-selection.md`](docs/decisions/publisher-selection.md). Postiz `v2.23.0` passed all seventeen isolation, credential and lifecycle checks; Mixpost Lite `v2.6.0` is disqualified — it has no workspace routes and no machine API, and one login's data is visible to another. Paid Mixpost editions stay unevaluated because their images require a licence key. $0/month software cost either way. The founder decision itself remains open in §9. |
