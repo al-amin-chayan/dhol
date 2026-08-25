@@ -217,17 +217,15 @@ requires a fresh founder cost decision. See the linked IaC plan for thresholds.
       later registered founder-owned projects such as w3exam; no project gets a
       duplicate stack by default, and admission remains subject to the IaC
       plan's access, data, isolation and measured-capacity gates
-- [ ] Postiz vs Mixpost final call. The founder-approved multi-project
-      requirement is now a selection constraint: the exact deployed edition
-      must demonstrate project-scoped organization/workspace authorization
-      within budget. Mixpost documents multiple workspaces under Enterprise;
-      surface an exact-edition test and monthly-cost table rather than silently
-      choosing Postiz or a paid Mixpost tier.
-      **Evidence packet ready 2026-08-25:**
-      [`docs/decisions/publisher-selection.md`](docs/decisions/publisher-selection.md)
-      measures Postiz `v2.23.0` and Mixpost Lite `v2.6.0` against the same
-      fixture matrix and recommends Postiz. The founder still records the
-      choice; `WP-13` stays blocked until then.
+- [x] ~~Postiz vs Mixpost final call~~ → **Postiz**, self-hosted AGPL-3.0
+      edition pinned at `v2.23.0`, founder-approved 2026-08-25 on the measured
+      evidence in
+      [`docs/decisions/publisher-selection.md`](docs/decisions/publisher-selection.md).
+      Mixpost Lite `v2.6.0` was disqualified on capability, not cost: no
+      workspace routes and no machine API, with one login's data visible to
+      another. Paid Mixpost editions stay unevaluated because their images
+      require a licence key. Software cost is `$0` either way. `WP-13` is
+      unblocked and inherits the seven conditions in that record.
 - [ ] Approval bot: custom Telegram bot vs Hermes gateway
 - [ ] Per-brand X usage (worth $2–3/mo per brand?)
 - [ ] Media archival: purge-only vs B2 push
@@ -259,3 +257,4 @@ requires a fresh founder cost decision. See the linked IaC plan for thresholds.
 | 2026-08-23 | Issue #42: implemented tunnel-only `publish-1` administration as a two-release cutover — `vpn.administration: public` brings WireGuard up beside the existing path, then `tunnel` closes the public one after the replacement is proven. The firewall now reconciles the rules it owns instead of only adding them, so the interim allowlist is actually removed. The server key is generated on the host once; escrow to the password manager is a documented step with a machine-verifiable postcondition, and is **not yet done** because no host has been converged. Monthly cost unchanged at `$0`. |
 | 2026-08-25 | PR #41 follow-up (WP05A-18): the disposable-host harness now captures `ip -o link`, the default route, and `iptables -S DHOLBEAT-DOCKER-INGRESS`, and the runbook requires those fields plus a rerun with no hand-added `dholbeat-temporary-ssh` rule. Until now nothing proved the Docker ingress `-i <iface> -j DROP` rule named a real NIC. The live VM/VPS rerun remains outstanding and needs a host plus founder action. Monthly cost unchanged at `$0`. |
 | 2026-08-25 | Issue #16 (`DG-01`): added a disposable publisher-evaluation harness (`infra/tests/publisher-eval/`) and the decision packet [`docs/decisions/publisher-selection.md`](docs/decisions/publisher-selection.md). Postiz `v2.23.0` passed all seventeen isolation, credential and lifecycle checks; Mixpost Lite `v2.6.0` is disqualified — it has no workspace routes and no machine API, and one login's data is visible to another. Paid Mixpost editions stay unevaluated because their images require a licence key. $0/month software cost either way. The founder decision itself remains open in §9. |
+| 2026-08-25 | Founder closed `DG-01`: **Postiz**, self-hosted AGPL-3.0 edition pinned at `v2.23.0`, chosen on the measured evidence in [`docs/decisions/publisher-selection.md`](docs/decisions/publisher-selection.md). Postiz passed all seventeen isolation, credential and lifecycle checks; Mixpost Lite `v2.6.0` was disqualified for having no workspace routes and no machine API. Elasticsearch is not optional for Postiz `v2.23.0`, so `publish-1` runs a six-container topology — `WP-13` inherits that and the other conditions in the record. Monthly software cost unchanged at `$0`. |

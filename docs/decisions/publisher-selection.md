@@ -3,11 +3,11 @@
 | Field | Value |
 | --- | --- |
 | Gate | `DG-01 publisher` (`docs/plans/two-vps-reproducible-implementation-plan.md` §7) |
-| Status | **awaiting founder decision** |
+| Status | **decided — Postiz** |
 | Evidence run | `infra/tests/publisher-eval/run.sh`, 2026-08-25 |
-| Blocks | `WP-13` (`publish-1` and the selected publisher adapter), `WP-17` |
-| Decision date | _not yet recorded_ |
-| Deciding human | _not yet recorded_ |
+| Unblocks | `WP-13` (`publish-1` and the selected publisher adapter), then `WP-17` |
+| Decision date | 2026-08-25 |
+| Deciding human | Al Amin Chayan (founder) |
 
 ## Question
 
@@ -234,14 +234,23 @@ If the founder selects Postiz, `WP-13` inherits these conditions:
 
 ## Founder decision
 
-> _An agent must not fill this in._
+> Recorded from the founder's explicit instruction on 2026-08-25, after reading
+> this document: "my decision is go with Postiz." No agent selected or inferred
+> the publisher; this section is a transcription of that decision.
 
-- Selected publisher and exact edition: _pending_
-- Date: _pending_
-- Notes and any condition the founder attaches: _pending_
+- **Selected publisher and exact edition:** Postiz, the single self-hosted
+  edition, AGPL-3.0, pinned at `v2.23.0`
+  (`ghcr.io/gitroomhq/postiz-app:v2.23.0@sha256:785f97312f66a347fb96cdccc4ded5a33ced69a672c89a9adc8054e7d6a21dc5`)
+- **Date:** 2026-08-25
+- **Notes and conditions:** none added beyond this document. Selecting Postiz
+  carries the seven `WP-13` conditions listed under Recommendation above, which
+  are part of the decision rather than advice attached to it.
 
-Recording a selection here closes `DG-01` and unblocks `WP-13`. Until then no
-publisher role, Compose project, or adapter may be committed.
+`DG-01` is closed. `WP-13` may start, and the publisher role, Compose project
+and dump/restore adapter may now be committed under its own review.
+
+Changing this decision means a new dated row in the status table and a
+`README.md` §10 change-log line, never a silent edit.
 
 ## Limitations
 
