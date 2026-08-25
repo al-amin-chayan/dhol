@@ -5,8 +5,9 @@ Agent: claude
 Head: recorded in the PR's review-request comment
 
 Issue: #16 — `[10/27][DG-01] Select the self-hosted publisher and record the
-founder decision`. **This PR deliberately does not close it**: the gate closes
-when the founder records a selection, not when the evidence lands.
+founder decision`. The founder selected **Postiz** on 2026-08-25 after reading
+the packet, so the selection is now recorded in this branch and the PR closes
+the issue.
 
 ## What changed
 
@@ -49,8 +50,11 @@ Both candidates ran the same matrix on `linux/arm64` through
 
 ## Assumed / left out
 
-- **No founder decision is recorded.** The packet's "Founder decision" section
-  is deliberately empty; the harness never emits a `selected` verdict.
+- **The founder decision was recorded, not inferred.** The founder read the
+  packet and stated the selection on 2026-08-25; that section is a
+  transcription. The harness still cannot emit a `selected` verdict, and it
+  was not re-run after the decision because the decision changes no measured
+  result.
 - Measured on `linux/arm64` under a shared local container runtime, not on an
   x86-64 VPSDime host, and for about a minute per candidate rather than the
   seven-day `WP-13` canary. Both limits are stated in the packet.
@@ -82,5 +86,6 @@ Both candidates ran the same matrix on `linux/arm64` through
 5. **The cost table.** It is a complete wallet, not a delta, and it is larger
    than `README.md` §6's marginal figure by design. Check the amortisation of
    the one-time Mixpost prices is presented fairly.
-6. **Scope.** Confirm nothing here pre-commits `WP-13` or reads as the founder
-   having chosen.
+6. **Scope.** The founder's selection is recorded, so confirm the wording
+   attributes it to the founder rather than to the evidence, and that nothing
+   here pre-commits `WP-13`'s implementation — only unblocks it.
