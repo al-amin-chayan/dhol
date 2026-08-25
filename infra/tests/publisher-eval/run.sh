@@ -201,8 +201,15 @@ wait_for_http() {
 diagnose_stalled_application() {
   printf 'the application never answered; last container state and logs follow\n'
   compose ps || true
-  docker stats --no-stream --format '{{.Name}}|{{.MemUsage}}|{{.CPUPerc}}' \
-    $(compose ps --format '{{.Name}}' | tr '\n' ' ') || true
+  local names=()
+  local name
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    names+=("$name")
+  done < <(compose ps --format '{{.Name}}')
+  if [ "${#names[@]}" -gt 0 ]; then
+    docker stats --no-stream --format '{{.Name}}|{{.MemUsage}}|{{.CPUPerc}}' "${names[@]}" || true
+  fi
   case "$CANDIDATE" in
     postiz)
       docker exec "$(container postiz)" sh -c 'tail -25 /root/.pm2/logs/backend-error.log' || true
@@ -375,11 +382,10 @@ python3 "$SCRIPT_DIR/verdict.py" \
   --version "$VERSION" \
   --output "$RUN_ROOT/evidence.json"
 
-for file in "$RUN_ROOT/evidence.json"; do
-  size="$(wc -c <"$file" | tr -d ' ')"
-  [ "$size" -le "$ARTIFACT_FILE_LIMIT_BYTES" ] ||
-    dholbeat_die "evidence exceeded ${ARTIFACT_FILE_LIMIT_BYTES} bytes: $file"
-done
+EVIDENCE_FILE="$RUN_ROOT/evidence.json"
+EVIDENCE_BYTES="$(wc -c <"$EVIDENCE_FILE" | tr -d ' ')"
+[ "$EVIDENCE_BYTES" -le "$ARTIFACT_FILE_LIMIT_BYTES" ] ||
+  dholbeat_die "evidence exceeded ${ARTIFACT_FILE_LIMIT_BYTES} bytes: $EVIDENCE_FILE"
 dholbeat_assert_absent_from_evidence "$RUN_ROOT" "$FIXTURE_PASSWORD_PREFIX"
 
 printf 'evidence: %s\n' "$RUN_ROOT/evidence.json"
