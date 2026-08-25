@@ -67,8 +67,14 @@ docker compose -p <project-printed-by-the-run> down --volumes --remove-orphans
 | --- | --- |
 | `disqualified` | A check encoding the founder-approved multi-project requirement failed or is unsupported |
 | `viable-with-findings` | The requirement holds but some check or drill failed |
-| `viable-over-budget` | Everything passed but a measured capacity budget was breached |
-| `viable` | Every check, drill, and capacity budget passed |
+| `viable-over-budget` | Everything passed but a **measured** capacity budget was breached |
+| `viable` | Every check, drill, and measured capacity budget passed |
+
+`viable` speaks only for what the harness measured. `unmeasured_capacity`
+carries the budgets it cannot judge — update headroom needs a real 30 GB host
+mid-upgrade — and the verdict never gates on those. `topology_disk_mib` is this
+topology's images and volumes, a lower bound on host usage rather than the
+host's steady disk.
 
 The harness never emits `selected`. Only the founder records a selection, in
 the decision record.
@@ -110,5 +116,10 @@ attribute of type Text.` Then destroy the kept stack as shown above.
   recorded in `candidates.yml` with its price and its unverified vendor claims.
 - It does not run for seven days. The measured figures are a short-run bound,
   not the `WP-13` canary.
+- It does not upgrade or roll back a pinned version, and it does not measure
+  free space on a real 30 GB host. Update rollback and update headroom are
+  `WP-13` obligations; see the decision record's disposition table.
+- The restore drill destroys the database volume, rebuilds it empty, reloads the
+  dump and re-verifies the application. It does not rebuild the whole host.
 - It does not run on the production architecture. See the limitations section
   of the decision record.

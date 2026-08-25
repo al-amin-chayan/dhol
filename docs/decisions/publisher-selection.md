@@ -25,7 +25,7 @@ Pinned in `infra/tests/publisher-eval/candidates.yml`.
 
 | Candidate | Edition | Version | Licence | Price | Evaluated? |
 | --- | --- | --- | --- | --- | --- |
-| Postiz | single self-hosted edition | `v2.23.0` | AGPL-3.0-only | $0 | yes |
+| Postiz | single self-hosted edition | `v2.23.0` | AGPL-3.0-or-later | $0 | yes |
 | Mixpost | Lite | `v2.6.0` | MIT | $0 | yes |
 | Mixpost | Pro | — | proprietary, internal use only | $299 one-time | **no** |
 | Mixpost | Enterprise | — | proprietary, resale permitted | $1,199 one-time | **no** |
@@ -70,7 +70,18 @@ request body cannot be mistaken for an authorization boundary.
 | Machine API | `/public/v1`, `Authorization: <key>` | none |
 | Cold start to first API answer | 59 s | 329 s |
 | Peak RAM (whole topology) | 2,616 MiB | 755 MiB |
-| Steady disk (images + volumes) | 5,474 MiB | 1,887 MiB |
+| Topology disk, images plus volumes | 5,474 MiB | 1,887 MiB |
+| Update headroom | not measured | not measured |
+
+**Topology disk is a lower bound, not host usage.** It counts this topology's
+images and named volumes only; the host OS, container writable layers, Docker
+metadata and logs, monitoring and restic all sit outside it. **Update headroom
+is not measured at all.** `WP-13` wants at least 8 GB free on a 30 GB host while
+two image sets coexist during an upgrade, and nothing here observes a real
+filesystem or performs an upgrade. Subtracting this footprint from 30 GiB would
+be arithmetic wearing a measurement's clothes, so the harness reports it
+`unmeasured` and the verdict does not gate on it. `WP-13` must produce that
+figure on the real host.
 
 Read the cold-start row as evidence that convergence is slow and
 contention-sensitive on a small host, not as a comparison between the two
@@ -91,8 +102,14 @@ Two independent grounds, both measured:
    browser route. n8n has nothing supported to call.
 
 A third finding, not disqualifying but relevant to any deployment: the Lite
-image ships a pre-created `admin@example.com` account whose documented default
-password authenticates on first boot, and nothing forces a change.
+image ships a pre-created `admin@example.com` account and nothing forces a
+password change. Keep the two claims apart by their evidence.
+The harness measures only that the account exists — it records
+`ships_default_admin_account: true` and never attempts a login. That the
+documented default password actually authenticates on a fresh instance is a
+**manual observation made during exploration, not harness evidence**; no check
+in the fixture matrix reproduces it. Treat it as a caution to re-verify by hand
+before any Lite deployment, not as a measured result.
 
 Mixpost Lite is the lightest option by a wide margin and its dump/restore drill
 passed. Neither fact reaches the requirement.
@@ -154,10 +171,63 @@ passed. Neither fact reaches the requirement.
    health-check grace periods, and any update-rollback drill must budget
    minutes and tolerate a much worse tail. This is the single most likely
    surprise during `WP-13`.
-7. **AGPL-3.0.** Self-hosting for the founder's own brands is unrestricted.
-   If a modified Postiz were ever exposed over a network to third parties,
-   §13 would require offering the corresponding source. Running it unmodified
-   for our own brands does not trigger that.
+7. **AGPL-3.0-or-later.** The `LICENSE` file at the pinned tag
+   ([`v2.23.0`](https://github.com/gitroomhq/postiz-app/blob/v2.23.0/LICENSE))
+   grants the GNU Affero General Public License "either version 3 of the
+   License, or (at your option) any later version". The exact identifier is
+   therefore `AGPL-3.0-or-later`, not `AGPL-3.0-only`, and the licence of
+   record is read from the immutable tag rather than from `main`. Self-hosting
+   for the founder's own brands is unrestricted. If a modified Postiz were ever
+   exposed over a network to third parties, §13 of AGPL-3.0 would require
+   offering the corresponding source. Running it unmodified for our own brands
+   does not trigger that.
+
+## Acceptance-criteria disposition
+
+Issue #16 lists more than this evaluation measured. Closing a gate while some of
+its criteria are simply absent from the packet would make the gate mean less
+than it claims, so every criterion is dispositioned here. `deferred` items are
+bound to a named later gate, not quietly dropped.
+
+| Criterion from #16 | Disposition | Where it stands |
+| --- | --- | --- |
+| Exact editions, versions, licences pinned | **met** | `candidates.yml`, digest-pinned; licence read from the immutable `v2.23.0` tag |
+| Project/workspace authorization, API ownership | **met** | seventeen-check matrix, both candidates |
+| Immediate/scheduled create, list, cancel/delete | **met** | `posts.schedule`, `posts.list`, `posts.cancel`; cancellation re-reads the window |
+| Token refresh behaviour | **deferred to `WP-13` pre-account gate** | needs a real provider connection, which DG-01 forbids. No synthetic substitute is honest: refresh is provider behaviour, not publisher behaviour |
+| Application-aware backup/restore | **met** | restore-after-rebuild drill: volume destroyed, database rebuilt empty, dump reloaded, then login, credential, own-channel and tenant-boundary re-verified |
+| 6 GB / 30 GB footprint | **partly met** | peak RAM and topology disk measured; host steady usage is a lower bound only |
+| Update headroom | **not met — unmeasured** | needs a real 30 GB host mid-upgrade; the harness reports `unmeasured` rather than a computed pass |
+| Update rollback | **deferred to `WP-13`** | no pinned upgrade/rollback drill was run; the evaluation converges one version |
+| Duplicate-post controls | **deferred to `WP-13` pre-account gate** | Postiz `v2.23.0` advertises duplicate-post protection, but demonstrating it needs a connected account |
+| Registration control | **met** | `registration.lock` drill, gated on the backend being ready first |
+| Access / service-token integration fit | **met, by inspection not measurement** | see below |
+| Maintenance burden | **met, by inspection not measurement** | see below |
+| Full monthly wallet | **met** | Cost section |
+
+### Access and service-token fit, and maintenance burden
+
+Neither is measurable on a disposable local instance, and both are decided by
+architecture rather than behaviour, so they are compared by inspection and
+labelled as such.
+
+**Access and service-token fit.** Both candidates present a single HTTP origin
+that binds to loopback and publishes through the host's own Cloudflare tunnel,
+so both sit behind founder-only Access identically. The difference is what n8n
+can then use. Postiz accepts a per-organization API key in an `Authorization`
+header, so an Access service token plus that scoped credential is exactly the
+two-factor machine route `WP-13` specifies. Mixpost Lite exposes no machine
+API, so an Access service token would front a surface n8n cannot call — the
+service-token design has nothing to authenticate against. This follows from the
+measured route table rather than adding a new claim.
+
+**Maintenance burden.** Postiz is six containers including a JVM and a workflow
+engine, three of which are state that must be backed up or deliberately
+classified rebuildable, and its cold start is slow and contention-sensitive.
+Mixpost Lite is three containers with one database. On maintenance alone
+Mixpost Lite is the lighter system by a clear margin; it simply cannot do the
+job. This is recorded so the founder sees what the capability is costing, not
+to reopen the comparison.
 
 ## Cost
 
@@ -205,11 +275,44 @@ generated content. Both candidates are equally reversible in this sense.
 It is the only $0 edition that meets the founder-approved multi-project
 requirement, it met it on every negative test rather than by documentation, and
 it fits the measured `publish-1` budget. Mixpost Lite is disqualified on
-capability, not on cost or weight. Buying into Mixpost Pro or Enterprise would
-spend one to four years of the platform's entire marginal budget to obtain a
-capability Postiz already provides for free — and the Mixpost documentation
-places "one user owning several workspaces" under the **Enterprise** console,
-so $299 is not established as sufficient.
+capability, not on cost or weight.
+
+**Mixpost Pro: claimed sufficient, untested.** As read on 2026-08-25, the
+vendor page <https://mixpost.app/pricing> advertises "Multi-tenant support",
+"API" and "Webhooks" for the $299 Pro edition, and its FAQ describes workspaces
+as isolated environments of which an instance may hold an unlimited number. On
+those claims Pro *appears to meet* the requirement stated at the top of this
+document — one tenant and one machine credential per project. Whether it also
+refuses a credential belonging to another project, the third clause of that
+requirement, is something no vendor page can establish. It was **not
+evaluable**: the image requires a `LICENSE_KEY`, and DG-01 authorises no
+purchase. So Pro is a vendor claim that has never been run, tested or measured
+here, and it must never be read as a measured result — but neither is it
+established as insufficient.
+
+**Correction to an earlier rationale.** An earlier draft set $299 aside on the
+grounds that the Mixpost documentation places "one user owning several
+workspaces" under the **Enterprise** console
+(<https://docs.mixpost.app/enterprise/configuration/multiple-workspaces>: "By
+default, each user is permitted to own only one workspace"). That is true, and
+it is an administrator-ergonomics property — how many workspaces a single human
+login may own — not the stated tenant-and-machine-credential requirement. It is
+also not a bar DG-01 applies to Postiz, where **each tenant likewise costs its
+own login** (finding 2 above, "A project tenant costs a login"). Holding
+Mixpost to a criterion Postiz does not meet either was not even-handed, so that
+argument is withdrawn and carries no weight in this decision.
+
+**What is decisive is cost, on its own terms.** $299 one-time is roughly one
+year of the platform's entire approved marginal budget and $1,199 is roughly
+four years of it. Postiz meets the requirement *as measured* at $0. Spending a
+year of the marginal budget to acquire, on a vendor's word and without the
+ability to test it first, a capability an evaluated $0 edition already
+demonstrates is not a trade the founder's constraints support. That holds
+whether or not Pro would in fact deliver what it advertises.
+
+The recommendation was re-confirmed after this rationale was corrected: Postiz
+`v2.23.0` remains the recommendation. The correction changes why the paid
+editions are set aside, not whether they are.
 
 If the founder selects Postiz, `WP-13` inherits these conditions:
 
@@ -239,7 +342,7 @@ If the founder selects Postiz, `WP-13` inherits these conditions:
 > the publisher; this section is a transcription of that decision.
 
 - **Selected publisher and exact edition:** Postiz, the single self-hosted
-  edition, AGPL-3.0, pinned at `v2.23.0`
+  edition, AGPL-3.0-or-later, pinned at `v2.23.0`
   (`ghcr.io/gitroomhq/postiz-app:v2.23.0@sha256:785f97312f66a347fb96cdccc4ded5a33ced69a672c89a9adc8054e7d6a21dc5`)
 - **Date:** 2026-08-25
 - **Notes and conditions:** none added beyond this document. Selecting Postiz
@@ -248,6 +351,11 @@ If the founder selects Postiz, `WP-13` inherits these conditions:
 
 `DG-01` is closed. `WP-13` may start, and the publisher role, Compose project
 and dump/restore adapter may now be committed under its own review.
+
+Closing this gate does not close the criteria dispositioned `deferred` above.
+Update rollback, update headroom on a real 30 GB host, token refresh and
+duplicate-post protection are `WP-13` obligations, and the last two are
+pre-conditions on connecting any real account.
 
 Changing this decision means a new dated row in the status table and a
 `README.md` §10 change-log line, never a silent edit.
@@ -269,12 +377,18 @@ Everything this evidence does **not** cover:
 4. **Paid Mixpost editions are entirely untested.** Their workspace isolation,
    API authorization, footprint and restore behaviour are vendor claims.
 5. **Postiz upgrade rollback is untested.** The evaluation converges one
-   version; it does not upgrade `v2.22.1` to `v2.23.0` and roll back.
+   version; it does not upgrade `v2.22.1` to `v2.23.0` and roll back. With
+   update headroom also unmeasured, the whole update story is `WP-13`'s to
+   prove on the real host — see the disposition table.
 6. **`DISABLE_REGISTRATION` was exercised once**, on a running instance after
    bootstrap. Its interaction with OIDC sign-in, which upstream reports it also
    disables, was not tested because no OIDC provider is configured.
-7. **Mixpost Lite's default admin account** was confirmed to authenticate on a
-   fresh instance. Whether a later Lite release changes this was not tested.
+7. **Mixpost Lite's default admin account.** The harness records only that the
+   account exists (`ships_default_admin_account`); it never attempts the login.
+   That the documented default password authenticates on a fresh instance is a
+   manual observation made during exploration, not harness evidence, and it
+   should be re-verified by hand before being relied on. Whether a later Lite
+   release changes this was not tested.
 8. **Cold-start timing is one sample per candidate.** Both figures come from a
    laptop container runtime that was also running unrelated stacks, and both
    candidates varied widely between runs — Mixpost Lite answered in about a
