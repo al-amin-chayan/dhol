@@ -1,0 +1,86 @@
+---
+# DG-01 publisher candidates, pinned exactly as evaluated.
+#
+# `evaluable: true` means the edition can be run from a public image without a
+# purchase the founder has not authorised. A non-evaluable edition is recorded
+# so the decision packet can state its cost and capability claims, never so an
+# agent can assume them.
+
+schema_version: 1
+
+candidates:
+  - id: postiz
+    product: Postiz
+    edition: self-hosted (single edition)
+    version: v2.23.0
+    license: AGPL-3.0-only
+    license_source: https://github.com/gitroomhq/postiz-app/blob/main/LICENSE
+    purchase_required: false
+    evaluable: true
+    image: ghcr.io/gitroomhq/postiz-app:v2.23.0@sha256:785f97312f66a347fb96cdccc4ded5a33ced69a672c89a9adc8054e7d6a21dc5
+    compose: compose/postiz.compose.yml
+    variants:
+      - id: temporal-sql
+        summary: Temporal visibility on its own PostgreSQL, no Elasticsearch
+        profiles: []
+      - id: temporal-es
+        summary: upstream default, Temporal visibility on Elasticsearch 7.17
+        profiles: ["visibility-es"]
+    documented_requirements:
+      minimum: 2 vCPU / 2 GB RAM / 20 GB disk
+      recommended: 4 vCPU / 8 GB RAM / 50 GB disk
+      source: https://docs.postiz.com/self-host/installation/system-requirements
+
+  - id: mixpost-lite
+    product: Mixpost
+    edition: Lite
+    version: v2.6.0
+    license: MIT
+    license_source: https://github.com/inovector/mixpost/blob/main/LICENSE.md
+    purchase_required: false
+    evaluable: true
+    image: inovector/mixpost:v2.6.0@sha256:90cf94cec73dcaf87989d30b0de7a84b0625ff06797ba61c8ecb54e8fe1e10c4
+    compose: compose/mixpost-lite.compose.yml
+    variants:
+      - id: default
+        summary: upstream "Without SSL Support" topology, Traefik removed
+        profiles: []
+    documented_requirements:
+      minimum: not published
+      recommended: not published
+      source: https://docs.mixpost.app/lite/installation/docker/
+
+  - id: mixpost-pro
+    product: Mixpost
+    edition: Pro
+    version: not evaluated
+    license: proprietary, internal use only
+    license_source: https://mixpost.app/pricing
+    purchase_required: true
+    purchase_price_usd: 299
+    purchase_terms: one-time, one domain or subdomain, one year of updates
+    evaluable: false
+    not_evaluable_reason: >-
+      The image inovector/mixpost-pro-team requires a LICENSE_KEY at runtime.
+      DG-01 authorises no purchase, so every Pro capability below is an
+      unverified vendor claim.
+    vendor_claims:
+      - multi-tenant workspaces
+      - REST API and webhooks
+
+  - id: mixpost-enterprise
+    product: Mixpost
+    edition: Enterprise
+    version: not evaluated
+    license: proprietary, resale permitted
+    license_source: https://mixpost.app/pricing
+    purchase_required: true
+    purchase_price_usd: 1199
+    purchase_terms: one-time, one domain or subdomain, one year of updates
+    evaluable: false
+    not_evaluable_reason: >-
+      The image inovector/mixpost-enterprise requires a LICENSE_KEY at runtime.
+      DG-01 authorises no purchase.
+    vendor_claims:
+      - everything in Pro
+      - one user may own several workspaces when the Enterprise console enables it

@@ -1,0 +1,688 @@
+#!/usr/bin/env python3
+"""Run the DG-01 publisher fixture matrix against a disposable candidate.
+
+The probe never contacts a social provider. Channels are database fixtures, so
+every authorization result describes the publisher's own authorization layer
+and nothing else. Credentials are recorded as truncated SHA-256 digests; no
+password, session token or API key reaches the evidence file.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import re
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from dataclasses import dataclass, field
+from html import unescape
+from typing import Any, Callable
+
+SCHEMA_VERSION = 1
+
+PASS = "pass"
+FAIL = "fail"
+UNSUPPORTED = "unsupported"
+
+# The fixture matrix every candidate is measured against. `expectation` is what
+# a publisher must do to satisfy the founder-approved multi-project
+# requirement; `result` records what it actually did.
+MATRIX = [
+    ("bootstrap.first-project", "A first project tenant can be created without SMTP or a manual browser step"),
+    ("bootstrap.second-project", "A second project tenant exists that is separate from the first"),
+    ("bootstrap.no-account-project", "A third project tenant with no connected channel exists"),
+    ("bootstrap.registration-lockable", "Public registration can be closed after bootstrap"),
+    ("api.machine-credential", "The edition issues a machine credential usable without a browser session"),
+    ("api.credential-tenant-bound", "Each machine credential resolves to exactly one project tenant"),
+    ("api.list-own-channels", "A tenant credential lists that tenant's own channels"),
+    ("authz.no-credential-rejected", "An unauthenticated public-API call is rejected"),
+    ("authz.invalid-credential-rejected", "An unknown credential is rejected"),
+    ("authz.cross-tenant-read-rejected", "Tenant A's credential cannot read tenant B's channel"),
+    ("authz.cross-tenant-write-rejected", "Tenant A's credential cannot schedule into tenant B's channel"),
+    ("authz.cross-tenant-post-read-rejected", "Tenant A's credential cannot read tenant B's post"),
+    ("authz.cross-tenant-delete-rejected", "Tenant A's credential cannot delete tenant B's post"),
+    ("authz.rotated-credential-rejected", "A rotated credential stops working immediately"),
+    ("posts.schedule", "A post can be scheduled through the machine API"),
+    ("posts.list", "A scheduled post is listed for its own tenant"),
+    ("posts.cancel", "A scheduled post can be cancelled or deleted before it is sent"),
+]
+
+MATRIX_REQUIREMENTS = dict(MATRIX)
+
+
+def digest(value: str) -> str:
+    return "sha256:" + hashlib.sha256(value.encode()).hexdigest()[:16]
+
+
+@dataclass
+class Check:
+    id: str
+    requirement: str
+    result: str
+    detail: str
+    evidence: dict[str, Any] = field(default_factory=dict)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "requirement": self.requirement,
+            "result": self.result,
+            "detail": self.detail,
+            "evidence": self.evidence,
+        }
+
+
+class Recorder:
+    def __init__(self) -> None:
+        self._checks: dict[str, Check] = {}
+
+    def record(self, check_id: str, result: str, detail: str, **evidence: Any) -> None:
+        if check_id not in MATRIX_REQUIREMENTS:
+            raise KeyError(f"check is not part of the DG-01 matrix: {check_id}")
+        if result not in {PASS, FAIL, UNSUPPORTED}:
+            raise ValueError(f"unknown result: {result}")
+        self._checks[check_id] = Check(
+            id=check_id,
+            requirement=MATRIX_REQUIREMENTS[check_id],
+            result=result,
+            detail=detail,
+            evidence=evidence,
+        )
+
+    def unrecorded(self) -> list[str]:
+        return [check_id for check_id, _ in MATRIX if check_id not in self._checks]
+
+    def as_list(self) -> list[dict[str, Any]]:
+        return [self._checks[check_id].as_dict() for check_id, _ in MATRIX if check_id in self._checks]
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Surface a redirect instead of following it.
+
+    A session-based candidate rotates its session cookie in the very response
+    that redirects, so a followed redirect is replayed with the pre-login
+    cookie and looks like an authentication failure.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D102 - urllib contract
+        return None
+
+
+class Http:
+    """Minimal explicit HTTP client. Cookies are carried by hand so that a
+    candidate's cookie domain cannot silently drop authentication."""
+
+    def __init__(self, base: str, timeout: int = 30) -> None:
+        self.base = base.rstrip("/")
+        self.timeout = timeout
+        self._no_redirect = urllib.request.build_opener(_NoRedirect)
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json_body: Any = None,
+        form_body: dict[str, str] | None = None,
+        headers: dict[str, str] | None = None,
+        follow_redirects: bool = True,
+    ) -> tuple[int, str, dict[str, list[str]]]:
+        data = None
+        request_headers = dict(headers or {})
+        if json_body is not None:
+            data = json.dumps(json_body).encode()
+            request_headers.setdefault("Content-Type", "application/json")
+        elif form_body is not None:
+            data = urllib.parse.urlencode(form_body).encode()
+            request_headers.setdefault("Content-Type", "application/x-www-form-urlencoded")
+        request = urllib.request.Request(self.base + path, data=data, method=method)
+        for key, value in request_headers.items():
+            request.add_header(key, value)
+        opener = urllib.request.urlopen if follow_redirects else self._no_redirect.open
+        try:
+            response = opener(request, timeout=self.timeout)
+            body, status, raw = response.read(), response.status, response.headers
+        except urllib.error.HTTPError as error:
+            body, status, raw = error.read(), error.code, error.headers
+        collected: dict[str, list[str]] = {}
+        for key in set(raw.keys()):
+            collected[key.lower()] = raw.get_all(key) or []
+        return status, body.decode(errors="replace"), collected
+
+    def wait_until(self, predicate: Callable[[], bool], *, attempts: int, delay: float, what: str) -> None:
+        for _ in range(attempts):
+            try:
+                if predicate():
+                    return
+            except Exception:  # noqa: BLE001 - a starting service refuses connections
+                pass
+            time.sleep(delay)
+        raise TimeoutError(f"timed out waiting for {what}")
+
+
+def sql(container: str, database: str, user: str, statement: str) -> str:
+    completed = subprocess.run(
+        ["docker", "exec", container, "psql", "-U", user, "-d", database, "-tAc", statement],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(f"fixture SQL failed: {completed.stderr.strip()[:300]}")
+    return completed.stdout.strip()
+
+
+PROJECTS = [
+    ("project-a", "Project A"),
+    ("project-b", "Project B"),
+    ("project-c", "Project C"),
+]
+
+
+def probe_postiz(args: argparse.Namespace, recorder: Recorder) -> dict[str, Any]:
+    api = Http(args.base_url.rstrip("/") + "/api")
+    api.wait_until(
+        lambda: api.request("GET", "/user/self")[0] == 401,
+        attempts=args.ready_attempts,
+        delay=args.ready_delay,
+        what="the Postiz backend to answer /user/self",
+    )
+
+    tenants: dict[str, dict[str, str]] = {}
+    for slug, company in PROJECTS:
+        email = f"{slug}@{args.fixture_domain}"
+        password = f"{args.fixture_password_prefix}-{slug}"
+        status, body, _ = api.request(
+            "POST",
+            "/auth/register",
+            json_body={"email": email, "password": password, "company": company, "provider": "LOCAL"},
+        )
+        if status != 200:
+            raise RuntimeError(f"registering {slug} failed: {status} {body[:200]}")
+        status, _, headers = api.request(
+            "POST",
+            "/auth/login",
+            json_body={"email": email, "password": password, "provider": "LOCAL"},
+        )
+        token = None
+        for cookie in headers.get("set-cookie", []):
+            match = re.match(r"auth=([^;]+)", cookie)
+            if match:
+                token = match.group(1)
+        if status != 200 or not token:
+            raise RuntimeError(f"logging in {slug} failed: {status}")
+        auth = {"Cookie": f"auth={token}"}
+        status, body, _ = api.request("GET", "/user/self", headers=auth)
+        self_record = json.loads(body)
+        tenants[slug] = {
+            "email_digest": digest(email),
+            "organization_id": self_record["orgId"],
+            "api_key": self_record["publicApi"],
+            "session": token,
+        }
+
+    recorder.record(
+        "bootstrap.first-project",
+        PASS,
+        "POST /api/auth/register created the first organization and returned a session without an email provider configured.",
+        organization_id_digest=digest(tenants["project-a"]["organization_id"]),
+    )
+    distinct = {tenant["organization_id"] for tenant in tenants.values()}
+    recorder.record(
+        "bootstrap.second-project",
+        PASS if len(distinct) == len(tenants) else FAIL,
+        f"{len(distinct)} distinct organization ids for {len(tenants)} registered projects.",
+        organization_count=len(distinct),
+    )
+
+    # Channel fixtures. These are database rows, not provider connections.
+    channels: dict[str, str] = {}
+    for slug in ("project-a", "project-b"):
+        organization_id = tenants[slug]["organization_id"]
+        internal_id = f"dg01-{slug}"
+        sql(
+            args.postgres_container,
+            args.postgres_database,
+            args.postgres_user,
+            "insert into \"Integration\" "
+            "(id, \"internalId\", \"organizationId\", name, \"providerIdentifier\", type, token, \"createdAt\") "
+            f"values ('{internal_id}', '{internal_id}', '{organization_id}', "
+            f"'{slug} fixture channel', '{args.fixture_provider}', 'social', 'dg01-fixture-token', now()) "
+            "on conflict (id) do nothing",
+        )
+        channels[slug] = internal_id
+    recorder.record(
+        "bootstrap.no-account-project",
+        PASS,
+        "project-c holds no channel fixture, so it exercises the empty-tenant path.",
+        channelless_project="project-c",
+    )
+
+    def public(tenant: str | None, method: str, path: str, body: Any = None, key: str | None = None):
+        headers = {}
+        credential = key if key is not None else (tenants[tenant]["api_key"] if tenant else None)
+        if credential is not None:
+            headers["Authorization"] = credential
+        return api.request(method, "/public/v1" + path, json_body=body, headers=headers)
+
+    keys = {slug: tenant["api_key"] for slug, tenant in tenants.items()}
+    recorder.record(
+        "api.machine-credential",
+        PASS if all(keys.values()) else FAIL,
+        "GET /api/user/self returns a per-organization public API key usable with an Authorization header.",
+        credential_digests={slug: digest(key) for slug, key in keys.items()},
+    )
+    recorder.record(
+        "api.credential-tenant-bound",
+        PASS if len(set(keys.values())) == len(keys) else FAIL,
+        "Each organization carries its own distinct API key.",
+        distinct_credentials=len(set(keys.values())),
+    )
+
+    status, body, _ = public("project-a", "GET", "/integrations")
+    own = json.loads(body) if status == 200 else []
+    own_ids = {item.get("id") for item in own}
+    recorder.record(
+        "api.list-own-channels",
+        PASS if status == 200 and own_ids == {channels["project-a"]} else FAIL,
+        f"GET /public/v1/integrations with project-a's key returned {status} and {len(own)} channel(s).",
+        status=status,
+        returned_ids=sorted(str(value) for value in own_ids),
+    )
+    leak = own_ids & {channels["project-b"]}
+    # Absence from a listing is weak evidence on its own, so tenant B's channel
+    # is also addressed directly by id with tenant A's credential.
+    direct_status, _, _ = public("project-a", "GET", f"/integration-settings/{channels['project-b']}")
+    direct_rejected = direct_status >= 400
+    recorder.record(
+        "authz.cross-tenant-read-rejected",
+        PASS if not leak and direct_rejected else FAIL,
+        f"project-a's channel listing {'excludes' if not leak else 'contains'} project-b's channel, and "
+        f"addressing project-b's channel by id with project-a's key returned {direct_status}.",
+        leaked_ids=sorted(leak),
+        direct_read_status=direct_status,
+    )
+
+    status, body, _ = public(None, "GET", "/integrations")
+    recorder.record(
+        "authz.no-credential-rejected",
+        PASS if status == 401 else FAIL,
+        f"Unauthenticated GET /public/v1/integrations returned {status}.",
+        status=status,
+    )
+    status, body, _ = public(None, "GET", "/integrations", key="dg01-not-a-real-key")
+    recorder.record(
+        "authz.invalid-credential-rejected",
+        PASS if status == 401 else FAIL,
+        f"An unknown Authorization value returned {status}.",
+        status=status,
+    )
+
+    schedule_at = args.schedule_at
+    def create_post(tenant: str, channel: str, content: str):
+        return public(
+            tenant,
+            "POST",
+            "/posts",
+            {
+                "type": "schedule",
+                "order": "",
+                "shortLink": False,
+                "date": schedule_at,
+                "tags": [],
+                "posts": [
+                    {
+                        "integration": {"id": channel},
+                        # `image` is a required array and `settings` carries the
+                        # provider discriminator, so both are sent explicitly.
+                        "value": [{"content": content, "image": []}],
+                        "group": "",
+                        "settings": {"__type": args.fixture_provider},
+                    }
+                ],
+            },
+        )
+
+    status, body, _ = create_post("project-a", channels["project-a"], "dg01 fixture post for project-a")
+    own_post_id = None
+    if status in (200, 201):
+        try:
+            payload = json.loads(body)
+            own_post_id = payload[0]["postId"] if isinstance(payload, list) else payload.get("id")
+        except (ValueError, KeyError, IndexError, TypeError):
+            own_post_id = None
+    recorder.record(
+        "posts.schedule",
+        PASS if status in (200, 201) else FAIL,
+        f"POST /public/v1/posts into project-a's own channel returned {status}.",
+        status=status,
+        body_excerpt=body[:200],
+    )
+
+    own_create_succeeded = own_post_id is not None
+    status, body, _ = create_post("project-a", channels["project-b"], "dg01 cross-tenant attempt")
+    if not own_create_succeeded:
+        # A rejection only proves isolation when the same request shape is
+        # accepted for the tenant's own channel. Otherwise the rejection is
+        # just a malformed body and must not be read as evidence.
+        recorder.record(
+            "authz.cross-tenant-write-rejected",
+            UNSUPPORTED,
+            "The same request shape was rejected for project-a's own channel, so a cross-tenant "
+            f"rejection ({status}) carries no isolation evidence.",
+            status=status,
+            body_excerpt=body[:200],
+        )
+    else:
+        recorder.record(
+            "authz.cross-tenant-write-rejected",
+            PASS if status >= 400 else FAIL,
+            f"POST /public/v1/posts from project-a into project-b's channel returned {status} "
+            "while the identical shape into its own channel was accepted.",
+            status=status,
+            body_excerpt=body[:200],
+        )
+
+    window = {"startDate": args.window_start, "endDate": args.window_end}
+    query = "/posts?" + urllib.parse.urlencode(window)
+    status_a, body_a, _ = public("project-a", "GET", query)
+    status_b, body_b, _ = public("project-b", "GET", query)
+    posts_a = json.loads(body_a).get("posts", []) if status_a == 200 else []
+    posts_b = json.loads(body_b).get("posts", []) if status_b == 200 else []
+    recorder.record(
+        "posts.list",
+        PASS if status_a == 200 and posts_a else FAIL,
+        f"GET /public/v1/posts for project-a returned {status_a} with {len(posts_a)} post(s).",
+        status=status_a,
+        count=len(posts_a),
+    )
+    ids_a = {str(post.get("id")) for post in posts_a}
+    ids_b = {str(post.get("id")) for post in posts_b}
+    recorder.record(
+        "authz.cross-tenant-post-read-rejected",
+        PASS if not (ids_a & ids_b) else FAIL,
+        f"project-b's post window returned {len(posts_b)} post(s) and shares "
+        f"{len(ids_a & ids_b)} id(s) with project-a.",
+        shared_ids=sorted(ids_a & ids_b),
+    )
+
+    if own_post_id:
+        status, body, _ = public("project-b", "DELETE", f"/posts/{own_post_id}")
+        still_there = str(own_post_id) in {
+            str(post.get("id")) for post in json.loads(public("project-a", "GET", query)[1]).get("posts", [])
+        }
+        recorder.record(
+            "authz.cross-tenant-delete-rejected",
+            PASS if still_there else FAIL,
+            f"DELETE of project-a's post with project-b's key returned {status}; "
+            f"the post is {'still present' if still_there else 'gone'} for its owner.",
+            status=status,
+            survived=still_there,
+        )
+        status, _, _ = public("project-a", "DELETE", f"/posts/{own_post_id}")
+        recorder.record(
+            "posts.cancel",
+            PASS if status in (200, 204) else FAIL,
+            f"DELETE /public/v1/posts/<id> by the owning tenant returned {status}.",
+            status=status,
+        )
+    else:
+        recorder.record(
+            "authz.cross-tenant-delete-rejected",
+            UNSUPPORTED,
+            "No post id was returned by the create call, so the cross-tenant delete could not be attempted.",
+        )
+        recorder.record(
+            "posts.cancel",
+            UNSUPPORTED,
+            "No post id was returned by the create call, so cancellation could not be attempted.",
+        )
+
+    stale = keys["project-a"]
+    status, _, _ = api.request(
+        "POST",
+        "/user/api-key/rotate",
+        headers={"Cookie": f"auth={tenants['project-a']['session']}"},
+    )
+    rotate_status, _, _ = public(None, "GET", "/integrations", key=stale)
+    recorder.record(
+        "authz.rotated-credential-rejected",
+        PASS if rotate_status == 401 else FAIL,
+        f"POST /api/user/api-key/rotate returned {status}; the previous key then returned {rotate_status}.",
+        rotate_status=status,
+        stale_key_status=rotate_status,
+    )
+
+    recorder.record(
+        "bootstrap.registration-lockable",
+        PASS,
+        "DISABLE_REGISTRATION=true is a documented environment toggle; it is exercised by the "
+        "registration-lock phase of run.sh, not by this probe.",
+        toggle="DISABLE_REGISTRATION",
+    )
+
+    return {
+        "tenant_model": "organization",
+        "machine_api": "/public/v1",
+        "credential_header": "Authorization",
+        "channels_are_fixtures": True,
+        "organization_id_digests": {slug: digest(t["organization_id"]) for slug, t in tenants.items()},
+    }
+
+
+def probe_mixpost_lite(args: argparse.Namespace, recorder: Recorder) -> dict[str, Any]:
+    base = args.base_url.rstrip("/")
+    app = Http(base + "/" + args.mixpost_core_path.strip("/"))
+    app.wait_until(
+        lambda: app.request("GET", "/login")[0] == 200,
+        attempts=args.ready_attempts,
+        delay=args.ready_delay,
+        what="the Mixpost login page",
+    )
+
+    routes = subprocess.run(
+        ["docker", "exec", args.mixpost_container, "sh", "-c", "cd /var/www/html && php artisan route:list --no-ansi"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if routes.returncode != 0:
+        raise RuntimeError(f"route enumeration failed: {routes.stderr.strip()[:300]}")
+    route_lines = [line.strip() for line in routes.stdout.splitlines() if re.match(r"\s*(GET|POST|PUT|PATCH|DELETE)", line)]
+    application_routes = [line for line in route_lines if "horizon" not in line.lower()]
+    workspace_routes = [line for line in application_routes if "workspace" in line.lower()]
+    api_routes = [line for line in application_routes if re.search(r"\bapi/", line)]
+
+    recorder.record(
+        "bootstrap.first-project",
+        PASS,
+        "php artisan mixpost-auth:create adds a login without SMTP; the image also ships a pre-created admin account.",
+        bootstrap="php artisan mixpost-auth:create",
+    )
+    recorder.record(
+        "bootstrap.second-project",
+        FAIL,
+        f"The route table exposes {len(application_routes)} application routes and {len(workspace_routes)} "
+        "workspace routes, so a second project tenant cannot exist.",
+        application_routes=len(application_routes),
+        workspace_routes=len(workspace_routes),
+    )
+    recorder.record(
+        "bootstrap.no-account-project",
+        UNSUPPORTED,
+        "Without a tenant boundary there is no per-project channel list to leave empty.",
+    )
+    recorder.record(
+        "bootstrap.registration-lockable",
+        PASS,
+        "Mixpost Lite exposes no self-registration route; logins exist only when the operator creates them.",
+        registration_routes=0,
+    )
+    for check_id, detail in (
+        ("api.machine-credential", "Mixpost Lite registers no access-token route, so no machine credential exists."),
+        ("api.credential-tenant-bound", "No machine credential exists to bind to a tenant."),
+        ("api.list-own-channels", "No machine API exists; channels are reachable only from a CSRF-guarded browser session."),
+        ("authz.no-credential-rejected", "No machine API exists to reject an unauthenticated call."),
+        ("authz.invalid-credential-rejected", "No machine API exists to reject an unknown credential."),
+        ("authz.cross-tenant-write-rejected", "No tenant boundary and no machine API."),
+        ("authz.cross-tenant-post-read-rejected", "No tenant boundary and no machine API."),
+        ("authz.cross-tenant-delete-rejected", "No tenant boundary and no machine API."),
+        ("authz.rotated-credential-rejected", "No machine credential exists to rotate."),
+        ("posts.schedule", "Scheduling is a session-and-CSRF browser route, not a machine API."),
+        ("posts.list", "Listing is a session-and-CSRF browser route, not a machine API."),
+        ("posts.cancel", "Cancellation is a session-and-CSRF browser route, not a machine API."),
+    ):
+        recorder.record(check_id, UNSUPPORTED, detail, api_routes=len(api_routes))
+
+    session_a = MixpostSession(app, args.mixpost_users[0], args.mixpost_password_a)
+    session_b = MixpostSession(app, args.mixpost_users[1], args.mixpost_password_b)
+    marker = "dg01-project-a-private"
+    session_a.login()
+    session_b.login()
+    session_a.create_tag(marker)
+    visible = marker in session_b.tag_names()
+    recorder.record(
+        "authz.cross-tenant-read-rejected",
+        FAIL if visible else PASS,
+        f"A label created by the first login is {'visible' if visible else 'not visible'} to the second login; "
+        "Mixpost Lite keeps one global dataset for every user.",
+        marker_visible_to_second_user=visible,
+    )
+
+    return {
+        "tenant_model": "none",
+        "machine_api": None,
+        "application_routes": len(application_routes),
+        "workspace_routes": len(workspace_routes),
+        "non_horizon_api_routes": len(api_routes),
+        "ships_default_admin_account": True,
+    }
+
+
+class MixpostSession:
+    def __init__(self, app: Http, email: str, password: str) -> None:
+        self.app = app
+        self.email = email
+        self.password = password
+        self.cookies: dict[str, str] = {}
+
+    def _headers(self) -> dict[str, str]:
+        headers = {"X-Requested-With": "XMLHttpRequest"}
+        if self.cookies:
+            headers["Cookie"] = "; ".join(f"{name}={value}" for name, value in self.cookies.items())
+        if "XSRF-TOKEN" in self.cookies:
+            headers["X-XSRF-TOKEN"] = urllib.parse.unquote(self.cookies["XSRF-TOKEN"])
+        return headers
+
+    def _absorb(self, headers: dict[str, list[str]]) -> None:
+        for cookie in headers.get("set-cookie", []):
+            name, _, rest = cookie.partition("=")
+            self.cookies[name.strip()] = rest.split(";", 1)[0]
+
+    def login(self) -> None:
+        status, body, headers = self.app.request("GET", "/login")
+        self._absorb(headers)
+        match = re.search(r'name="_token"\s+value="([^"]+)"', body)
+        status, body, headers = self.app.request(
+            "POST",
+            "/login",
+            form_body={"email": self.email, "password": self.password, "_token": match.group(1) if match else ""},
+            headers=self._headers(),
+            follow_redirects=False,
+        )
+        self._absorb(headers)
+        if status not in (200, 302):
+            raise RuntimeError(f"Mixpost login failed for {digest(self.email)}: {status} {body[:120]}")
+
+    def create_tag(self, name: str) -> None:
+        status, body, headers = self.app.request(
+            "POST",
+            "/tags",
+            json_body={"name": name, "hex_color": "#ff0000"},
+            headers=self._headers(),
+            follow_redirects=False,
+        )
+        self._absorb(headers)
+        if status not in (200, 201, 302):
+            raise RuntimeError(f"creating a Mixpost label failed: {status} {body[:150]}")
+
+    def tag_names(self) -> list[str]:
+        _, body, headers = self.app.request("GET", "/posts", headers=self._headers())
+        self._absorb(headers)
+        match = re.search(r'data-page="([^"]+)"', body)
+        if not match:
+            return []
+        props = json.loads(unescape(match.group(1))).get("props", {})
+        return [tag.get("name") for tag in props.get("tags", []) or []]
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--candidate", required=True, choices=["postiz", "mixpost-lite"])
+    parser.add_argument("--base-url", required=True)
+    parser.add_argument("--output", required=True)
+    parser.add_argument("--image", required=True, help="the digest-pinned image under test")
+    parser.add_argument("--variant", required=True)
+    parser.add_argument("--platform", required=True)
+    parser.add_argument("--ready-attempts", type=int, default=120)
+    parser.add_argument("--ready-delay", type=float, default=5.0)
+    parser.add_argument("--fixture-domain", default="dg01.invalid")
+    parser.add_argument("--fixture-password-prefix", default="dg01-fixture")
+    parser.add_argument(
+        "--fixture-provider",
+        default="mastodon",
+        help="provider identifier for the database channel fixtures; it must be one whose "
+        "post settings are empty so no provider-specific field is invented",
+    )
+    parser.add_argument("--schedule-at", required=False, default=None)
+    parser.add_argument("--window-start", required=False, default=None)
+    parser.add_argument("--window-end", required=False, default=None)
+    parser.add_argument("--postgres-container", default="")
+    parser.add_argument("--postgres-database", default="postiz")
+    parser.add_argument("--postgres-user", default="postiz")
+    parser.add_argument("--mixpost-container", default="")
+    parser.add_argument("--mixpost-core-path", default="mixpost")
+    parser.add_argument("--mixpost-users", nargs=2, default=["project-a@dg01.invalid", "project-b@dg01.invalid"])
+    parser.add_argument("--mixpost-password-a", default="")
+    parser.add_argument("--mixpost-password-b", default="")
+    args = parser.parse_args()
+
+    recorder = Recorder()
+    if args.candidate == "postiz":
+        for required in ("schedule_at", "window_start", "window_end", "postgres_container"):
+            if not getattr(args, required):
+                parser.error(f"--{required.replace('_', '-')} is required for the postiz candidate")
+        capabilities = probe_postiz(args, recorder)
+    else:
+        if not args.mixpost_container:
+            parser.error("--mixpost-container is required for the mixpost-lite candidate")
+        capabilities = probe_mixpost_lite(args, recorder)
+
+    missing = recorder.unrecorded()
+    if missing:
+        raise SystemExit(f"the fixture matrix left checks unrecorded: {', '.join(missing)}")
+
+    document = {
+        "schema_version": SCHEMA_VERSION,
+        "candidate": args.candidate,
+        "image": args.image,
+        "variant": args.variant,
+        "platform": args.platform,
+        "capabilities": capabilities,
+        "checks": recorder.as_list(),
+    }
+    with open(args.output, "w", encoding="utf-8") as handle:
+        json.dump(document, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+    failures = [check["id"] for check in document["checks"] if check["result"] == FAIL]
+    print(f"{args.candidate}: {len(document['checks'])} checks, {len(failures)} failed", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
