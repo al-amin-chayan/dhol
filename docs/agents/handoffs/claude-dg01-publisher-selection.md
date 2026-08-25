@@ -2,10 +2,11 @@
 
 Agent: claude
 
-Head: PENDING_HEAD
+Head: recorded in the PR's review-request comment
 
 Issue: #16 — `[10/27][DG-01] Select the self-hosted publisher and record the
-founder decision`
+founder decision`. **This PR deliberately does not close it**: the gate closes
+when the founder records a selection, not when the evidence lands.
 
 ## What changed
 
