@@ -22,6 +22,13 @@ REQUIRED_BEHAVIOUR = {
         "api_credential_restored",
         "own_channel_restored",
         "tenant_boundary_restored",
+        # A restore that reloads settled state but loses pending scheduled work
+        # is not a usable restore, and Postiz cannot repair it: at v2.23.0 the
+        # orchestrator only re-queues posts whose publish time is already past,
+        # so a future job must come back with its own instant or the drill fails.
+        "pending_post_restored",
+        "pending_post_tenant_correct",
+        "pending_post_time_preserved",
     ),
     # Mixpost Lite has no tenant boundary and no machine credential to restore,
     # so requiring either would be requiring a capability the edition lacks.

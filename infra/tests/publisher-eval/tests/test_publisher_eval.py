@@ -321,6 +321,13 @@ RESTORED_OK = {
     "api_credential_restored": True,
     "own_channel_restored": True,
     "tenant_boundary_restored": True,
+    # A restore that returns every row but loses the pending scheduled job has
+    # not restored the publisher: at v2.23.0 the recovery workflow only sweeps
+    # queued posts whose publish time is already past, so a future job can be
+    # dropped or re-timed rather than reconstructed.
+    "pending_post_restored": True,
+    "pending_post_tenant_correct": True,
+    "pending_post_time_preserved": True,
 }
 
 
@@ -362,3 +369,209 @@ def test_mixpost_is_not_required_to_restore_a_boundary_it_lacks() -> None:
         {"login_restored": True, "label_restored": True}, "0", "3", "3", "mixpost-lite"
     )
     assert result == "pass"
+
+
+# --- DG01-01: an interrupted run must never report success -------------------
+
+BASH_3_2 = Path("/bin/bash")
+
+
+def _extract_shell_function(name: str) -> str:
+    """Lift one function out of run.sh so the real code is what gets tested."""
+    source = (HARNESS / "run.sh").read_text(encoding="utf-8").splitlines()
+    start = next(i for i, line in enumerate(source) if line.startswith(f"{name}() {{"))
+    depth = 0
+    for index in range(start, len(source)):
+        depth += source[index].count("{") - source[index].count("}")
+        if depth == 0:
+            return "\n".join(source[start : index + 1])
+    raise AssertionError(f"unterminated function {name}")
+
+
+def _run_bash(script: str) -> subprocess.CompletedProcess:
+    if not BASH_3_2.exists():  # pragma: no cover - non-macOS CI
+        pytest.skip("no /bin/bash on this platform")
+    return subprocess.run([str(BASH_3_2), "-c", script], capture_output=True, text=True, check=False)
+
+
+TRAP_HARNESS = """
+set -euo pipefail
+SIGNAL_STATUS=""
+on_signal() { SIGNAL_STATUS="$1"; trap - INT TERM HUP; exit "$SIGNAL_STATUS"; }
+cleanup() {
+  status=$?
+  trap - EXIT INT TERM HUP
+  [ -z "$SIGNAL_STATUS" ] || status="$SIGNAL_STATUS"
+  echo "cleanup:$status"
+  exit "$status"
+}
+trap cleanup EXIT
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
+trap 'on_signal 129' HUP
+true
+kill -%(signal)s $$
+sleep 5
+"""
+
+
+@pytest.mark.parametrize(("signal", "status"), [("INT", 130), ("TERM", 143), ("HUP", 129)])
+def test_a_signal_makes_an_interrupted_run_exit_nonzero(signal: str, status: int) -> None:
+    # `true` runs first so $? is 0 when the signal lands — the exact shape that
+    # previously let an interrupted run destroy its stack and report success.
+    completed = _run_bash(TRAP_HARNESS % {"signal": signal})
+    assert completed.returncode == status
+    assert f"cleanup:{status}" in completed.stdout
+    assert completed.stdout.count("cleanup:") == 1, "cleanup must not be re-entered"
+
+
+def test_the_runner_installs_a_distinct_handler_for_every_signal() -> None:
+    source = (HARNESS / "run.sh").read_text(encoding="utf-8")
+    for signal, status in (("INT", 130), ("TERM", 143), ("HUP", 129)):
+        assert f"trap 'on_signal {status}' {signal}" in source
+    assert "trap cleanup EXIT\n" in source, "cleanup must remain the single EXIT path"
+
+
+# --- DG01-01: teardown failure and survivors must fail the run ---------------
+
+
+def test_a_failed_teardown_fails_the_run() -> None:
+    teardown = _extract_shell_function("teardown")
+    script = f"""
+set -uo pipefail
+PROJECT=dg01-test
+TEMP_ROOT=$(mktemp -d)
+compose() {{ return 1; }}
+docker() {{ :; }}
+{teardown}
+if teardown >/dev/null 2>&1; then echo "returned-zero"; else echo "returned-nonzero"; fi
+rm -rf "$TEMP_ROOT"
+"""
+    completed = _run_bash(script)
+    assert "returned-nonzero" in completed.stdout, completed.stderr
+
+
+def test_surviving_resources_fail_the_run() -> None:
+    teardown = _extract_shell_function("teardown")
+    # compose down succeeds, but a labelled container is still there afterwards.
+    script = f"""
+set -uo pipefail
+PROJECT=dg01-test
+TEMP_ROOT=$(mktemp -d)
+compose() {{ return 0; }}
+docker() {{
+  case "$*" in
+    *"ps --all"*) echo deadbeef ;;
+    *) ;;
+  esac
+}}
+{teardown}
+if teardown >/dev/null 2>&1; then echo "returned-zero"; else echo "returned-nonzero"; fi
+rm -rf "$TEMP_ROOT"
+"""
+    completed = _run_bash(script)
+    assert "returned-nonzero" in completed.stdout, completed.stderr
+
+
+# --- DG01-02: only the pinned registration-disabled outcome counts -----------
+
+
+def _lock_verdict(status: str, body: str) -> str:
+    function = _extract_shell_function("registration_lock_verdict")
+    script = f"""
+set -uo pipefail
+BODY=$(mktemp)
+printf '%s' {json.dumps(body)} > "$BODY"
+{function}
+registration_lock_verdict {json.dumps(status)} "$BODY" 'Registration is disabled' 401
+rm -f "$BODY"
+"""
+    completed = _run_bash(script)
+    assert completed.returncode == 0, completed.stderr
+    return completed.stdout.split("|", 1)[0].strip()
+
+
+def test_the_pinned_disabled_registration_response_passes() -> None:
+    assert _lock_verdict("400", "Registration is disabled") == "pass"
+
+
+@pytest.mark.parametrize(
+    ("status", "body"),
+    [
+        ("200", "ok"),                              # registration still open
+        ("400", "email must be an email"),          # ordinary DTO validation
+        ("400", ""),                                # bare 400, no marker
+        ("401", "Unauthorized"),                    # auth surface refusing
+        ("403", "Forbidden"),
+        ("404", "Cannot POST /auth/register"),      # route absent, not closed
+        ("429", "Too Many Requests"),               # rate limited
+        ("502", "Bad Gateway"),                     # outage
+    ],
+)
+def test_anything_but_the_pinned_outcome_fails(status: str, body: str) -> None:
+    assert _lock_verdict(status, body) == "fail"
+
+
+def test_a_restore_that_loses_the_pending_post_fails() -> None:
+    results = dict(RESTORED_OK, pending_post_restored=False)
+    result, detail = restore_verdict.judge(results, "0", "3", "3", "postiz")
+    assert result == "fail"
+    assert "pending_post_restored" in detail
+
+
+def test_a_restore_that_re_times_the_pending_post_fails() -> None:
+    # The row came back and the tenant is right, but the scheduled instant
+    # moved. Publishing at the wrong time is not a successful restore.
+    results = dict(RESTORED_OK, pending_post_time_preserved=False)
+    result, detail = restore_verdict.judge(results, "0", "3", "3", "postiz")
+    assert result == "fail"
+    assert "pending_post_time_preserved" in detail
+
+
+def test_a_restore_that_reassigns_the_pending_post_fails() -> None:
+    results = dict(RESTORED_OK, pending_post_tenant_correct=False)
+    assert restore_verdict.judge(results, "0", "3", "3", "postiz")[0] == "fail"
+
+
+# --- DG01-02: an unproven control must not yield `viable` --------------------
+
+
+def _machine_api_checks(results: dict[str, str]) -> dict:
+    document = _checks(results)
+    document["capabilities"] = {"machine_api": "/public/v1"}
+    return document
+
+
+@pytest.mark.parametrize(
+    "check_id",
+    ["posts.cancel", "posts.list", "authz.rotated-credential-rejected", "authz.cross-tenant-read-rejected"],
+)
+def test_an_unsupported_control_on_a_capable_edition_blocks_viable(check_id: str) -> None:
+    # probe.py records UNSUPPORTED when a positive control fails, which is
+    # right — but an edition that has the surface must not then be called
+    # viable just because nothing was marked fail.
+    results = dict(_all_passing(), **{check_id: "unsupported"})
+    document = verdict.build(_machine_api_checks(results), {"drills": []}, _healthy_resources(), "v1.0.0")
+    assert document["verdict"] != "viable"
+    assert check_id in document["unproven_checks"]
+
+
+def test_a_capable_edition_with_every_control_proven_is_viable() -> None:
+    document = verdict.build(
+        _machine_api_checks(_all_passing()), {"drills": []}, _healthy_resources(), "v1.0.0"
+    )
+    assert document["verdict"] == "viable"
+    assert document["unproven_checks"] == []
+
+
+def test_an_edition_without_the_surface_is_not_penalised_for_lacking_it() -> None:
+    # Mixpost Lite's checks are legitimately unsupported; it is disqualified on
+    # capability, and must not additionally be reported as having unproven
+    # controls it never had.
+    results = {check_id: "unsupported" for check_id, _ in probe.MATRIX}
+    results["bootstrap.first-project"] = "pass"
+    document = _checks(results)
+    document["capabilities"] = {"machine_api": None}
+    built = verdict.build(document, {"drills": []}, _healthy_resources(), "v1.0.0")
+    assert built["verdict"] == "disqualified"
+    assert built["unproven_checks"] == []

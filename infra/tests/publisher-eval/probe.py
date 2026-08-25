@@ -10,6 +10,7 @@ password, session token or API key reaches the evidence file.
 from __future__ import annotations
 
 import argparse
+import datetime
 import hashlib
 import json
 import re
@@ -57,6 +58,26 @@ MATRIX_REQUIREMENTS = dict(MATRIX)
 
 def digest(value: str) -> str:
     return "sha256:" + hashlib.sha256(value.encode()).hexdigest()[:16]
+
+
+def parse_instant(value: str) -> datetime.datetime | None:
+    """Read an ISO-8601 timestamp as an aware UTC instant, or None if it is not one.
+
+    A restore is allowed to re-spell a timestamp but not to move it, so every
+    comparison here is on the instant rather than on the string. A naive value
+    is read as UTC because every timestamp this harness requests is UTC.
+    """
+    try:
+        parsed = datetime.datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+    return parsed.astimezone(datetime.timezone.utc)
+
+
+def iso_z(moment: datetime.datetime) -> str:
+    return moment.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 @dataclass
@@ -340,7 +361,7 @@ def probe_postiz(args: argparse.Namespace, recorder: Recorder) -> dict[str, Any]
     )
 
     schedule_at = args.schedule_at
-    def create_post(tenant: str, channel: str, content: str):
+    def create_post(tenant: str, channel: str, content: str, when: str | None = None):
         return public(
             tenant,
             "POST",
@@ -349,7 +370,7 @@ def probe_postiz(args: argparse.Namespace, recorder: Recorder) -> dict[str, Any]
                 "type": "schedule",
                 "order": "",
                 "shortLink": False,
-                "date": schedule_at,
+                "date": when or schedule_at,
                 "tags": [],
                 "posts": [
                     {
@@ -495,6 +516,57 @@ def probe_postiz(args: argparse.Namespace, recorder: Recorder) -> dict[str, Any]
             "No post id was returned by the create call, so cancellation could not be attempted.",
         )
 
+    # DG01-03: the lifecycle above cancels its own fixture, so a dump taken
+    # after it holds no pending scheduled work and a rebuild cannot be shown to
+    # preserve any. One extra post is scheduled well into the future and left
+    # uncancelled on purpose. Postiz cannot repair a loss here by itself: at
+    # v2.23.0 the orchestrator's missingPostWorkflow rescans hourly and
+    # searchForMissingThreeHoursPosts only selects QUEUE posts whose publishDate
+    # is already past (gte now-2d, lt now), so a future job that a rebuild loses
+    # or re-times is never reconstructed.
+    retained_id = None
+    retained_at = None
+    retained_status = None
+    retained_listed = False
+    scheduled_at = parse_instant(schedule_at)
+    window_end_at = parse_instant(args.window_end or "")
+    if scheduled_at is not None:
+        requested = scheduled_at + datetime.timedelta(days=5)
+        # The confirmation re-read below uses the matrix window, so a retained
+        # post scheduled past its end could not be confirmed. Fall back to the
+        # middle of the window rather than scheduling where the probe is blind.
+        if window_end_at is not None and requested >= window_end_at:
+            requested = scheduled_at + (window_end_at - scheduled_at) / 2
+        retained_request = iso_z(requested)
+        retained_status, retained_body, _ = create_post(
+            "project-a",
+            channels["project-a"],
+            "dg01 retained pending post for project-a",
+            when=retained_request,
+        )
+        if retained_status in (200, 201):
+            try:
+                payload = json.loads(retained_body)
+                retained_id = payload[0]["postId"] if isinstance(payload, list) else payload.get("id")
+            except (ValueError, KeyError, IndexError, TypeError):
+                retained_id = None
+        # A create that returns an id is a claim, not a pending job. The post
+        # must be listed in its owner's window before the dump is taken, or a
+        # later absence would be blamed on the rebuild instead of on the setup.
+        if retained_id:
+            confirm_status, confirm_body, _ = public("project-a", "GET", query)
+            listed = (
+                {str(post.get("id")) for post in json.loads(confirm_body).get("posts", [])}
+                if confirm_status == 200
+                else set()
+            )
+            retained_listed = str(retained_id) in listed
+        if not retained_listed:
+            # Unconfirmed means unproven: publish no id or instant for the
+            # restore drill to check rather than one that was never pending.
+            retained_id = None
+        retained_at = retained_request if retained_listed else None
+
     stale = keys["project-a"]
     session = {"Cookie": f"auth={tenants['project-a']['session']}"}
     rotate_status, _, _ = api.request("POST", "/user/api-key/rotate", headers=session)
@@ -542,6 +614,13 @@ def probe_postiz(args: argparse.Namespace, recorder: Recorder) -> dict[str, Any]
         "credential_header": "Authorization",
         "channels_are_fixtures": True,
         "organization_id_digests": {slug: digest(t["organization_id"]) for slug, t in tenants.items()},
+        # Read by run.sh and handed to `--mode restore-verify`. A post id and a
+        # schedule are fixture metadata, not credentials, so they are recorded
+        # as they are; nothing here identifies a secret.
+        "retained_pending_post_id": retained_id,
+        "retained_pending_post_at": retained_at,
+        "retained_pending_post_status": retained_status,
+        "retained_pending_post_confirmed": retained_listed,
     }
 
 
@@ -691,6 +770,24 @@ class MixpostSession:
         return [tag.get("name") for tag in props.get("tags", []) or []]
 
 
+def postiz_api_key(api: Http, email: str, password: str) -> tuple[int, str]:
+    """Log a fixture tenant in and return (status, its public API key or "")."""
+    status, _, headers = api.request(
+        "POST", "/auth/login", json_body={"email": email, "password": password, "provider": "LOCAL"}
+    )
+    token = None
+    for cookie in headers.get("set-cookie", []):
+        match = re.match(r"auth=([^;]+)", cookie)
+        if match:
+            token = match.group(1)
+    if status != 200 or not token:
+        return status, ""
+    self_status, body, _ = api.request("GET", "/user/self", headers={"Cookie": f"auth={token}"})
+    if self_status != 200:
+        return self_status, ""
+    return self_status, (json.loads(body).get("publicApi") or "")
+
+
 def verify_postiz_restore(args: argparse.Namespace) -> dict[str, Any]:
     """Prove a restored Postiz still serves the state n8n depends on.
 
@@ -747,6 +844,58 @@ def verify_postiz_restore(args: argparse.Namespace) -> dict[str, Any]:
     results["own_direct_status"] = direct_own
     results["foreign_direct_status"] = direct_foreign
     results["tenant_boundary_restored"] = direct_own == 200 and direct_foreign >= 400
+
+    # DG01-03: a restore that reloads settled state but drops or re-times
+    # pending scheduled work is not a usable restore, and Postiz will not notice
+    # — at v2.23.0 its recovery scan only re-queues posts whose publishDate is
+    # already past, so a future job comes back with its own instant or not at all.
+    pending_id = (args.restored_pending_post_id or "").strip()
+    pending_instant = parse_instant(args.restored_pending_post_at or "")
+    if not pending_id or pending_instant is None:
+        # Nothing was retained before the dump, so there is nothing to prove.
+        # None keeps that distinguishable from a check that actually passed.
+        results["pending_post_restored"] = None
+        results["pending_post_tenant_correct"] = None
+        results["pending_post_time_preserved"] = None
+        return results
+
+    # Deliberately wide: a post that came back at the wrong instant must still
+    # be found, so that it fails as re-timed rather than as lost.
+    window = urllib.parse.urlencode(
+        {
+            "startDate": iso_z(pending_instant - datetime.timedelta(days=180)),
+            "endDate": iso_z(pending_instant + datetime.timedelta(days=180)),
+        }
+    )
+    owner_status, owner_body, _ = public("/posts?" + window)
+    owner_posts = json.loads(owner_body).get("posts", []) if owner_status == 200 else []
+    restored = next((post for post in owner_posts if str(post.get("id")) == pending_id), None)
+    results["pending_post_window_status"] = owner_status
+    results["pending_post_restored"] = restored is not None
+    results["pending_post_state"] = restored.get("state") if restored else None
+
+    foreign_login, foreign_key = postiz_api_key(
+        api,
+        f"project-b@{args.fixture_domain}",
+        f"{args.fixture_password_prefix}-project-b",
+    )
+    results["foreign_login_status"] = foreign_login
+    if not foreign_key:
+        # Without a working credential for the other tenant, its failure to see
+        # the post proves nothing, so no verdict is recorded for the boundary.
+        results["pending_post_tenant_correct"] = None
+    else:
+        foreign_status, foreign_body, _ = public("/posts?" + window, key=foreign_key)
+        foreign_posts = json.loads(foreign_body).get("posts", []) if foreign_status == 200 else []
+        foreign_ids = {str(post.get("id")) for post in foreign_posts}
+        results["foreign_window_status"] = foreign_status
+        results["pending_post_tenant_correct"] = (
+            restored is not None and foreign_status == 200 and pending_id not in foreign_ids
+        )
+
+    restored_instant = parse_instant(str(restored.get("publishDate"))) if restored else None
+    results["pending_post_restored_at"] = iso_z(restored_instant) if restored_instant else None
+    results["pending_post_time_preserved"] = restored_instant == pending_instant
     return results
 
 
@@ -786,6 +935,8 @@ def main() -> int:
     parser.add_argument("--restored-own-channel", default="dg01-project-a")
     parser.add_argument("--restored-foreign-channel", default="dg01-project-b")
     parser.add_argument("--restored-marker", default="dg01-project-a-private")
+    parser.add_argument("--restored-pending-post-id", default="")
+    parser.add_argument("--restored-pending-post-at", default="")
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--output", required=True)
     parser.add_argument("--image", required=True, help="the digest-pinned image under test")

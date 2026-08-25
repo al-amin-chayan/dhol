@@ -126,9 +126,25 @@ teardown() {
   return "$failed"
 }
 
+# An interrupted evaluation must never report success. `cleanup` preserves
+# whatever `$?` preceded it, and on bash 3.2 a signal delivered right after a
+# successful command reaches the handler with `$?` still 0 — so running cleanup
+# straight off INT/TERM/HUP let a run that destroyed its stack mid-flight exit
+# 0. The signal handlers now record the conventional 128+n status explicitly and
+# exit with it; cleanup stays the single, non-reentrant teardown path and runs
+# only from EXIT, where it honours that recorded status.
+SIGNAL_STATUS=""
+
+on_signal() {
+  SIGNAL_STATUS="$1"
+  trap - INT TERM HUP
+  exit "$SIGNAL_STATUS"
+}
+
 cleanup() {
   status=$?
   trap - EXIT INT TERM HUP
+  [ -z "$SIGNAL_STATUS" ] || status="$SIGNAL_STATUS"
   if [ -n "$SAMPLER_PID" ]; then
     kill "$SAMPLER_PID" >/dev/null 2>&1 || true
     wait "$SAMPLER_PID" 2>/dev/null || true
@@ -150,7 +166,10 @@ cleanup() {
   fi
   exit "$status"
 }
-trap cleanup EXIT INT TERM HUP
+trap cleanup EXIT
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
+trap 'on_signal 129' HUP
 
 TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/dholbeat-dg01.XXXXXX")"
 # Throwaway fixture credentials are generated per run and must never be written
@@ -209,19 +228,67 @@ sample_resources() {
 # A Compose healthcheck reports the web server, not the first-boot database
 # migration behind it, so the harness waits for the application's own entry
 # route before it creates fixtures.
+#
+# Readiness is the one status the route is supposed to answer with, never
+# "anything that is not a gateway error". Accepting any other code let a 404
+# from a half-registered route, or a reverse-proxy error page the harness had
+# not enumerated, count as a serving application — and the registration-lock
+# drill then read that outage as a working control.
 wait_for_http() {
   local url="$1"
   local attempts="$2"
+  local expected="$3"
   local code=""
   local attempt=0
   while [ "$attempt" -lt "$attempts" ]; do
     code="$(curl -s -o /dev/null -w '%{http_code}' "$url" || true)"
-    case "$code" in ""|000|502|503|504) ;; *) printf '%s\n' "$code"; return 0 ;; esac
+    if [ "$code" = "$expected" ]; then
+      printf '%s\n' "$code"
+      return 0
+    fi
     attempt=$((attempt + 1))
     sleep 5
   done
   diagnose_stalled_application >&2
-  dholbeat_die "timed out waiting for $url (last HTTP code: ${code:-none})"
+  dholbeat_die "timed out waiting for $url (expected HTTP $expected, last HTTP code: ${code:-none})"
+}
+
+# The serving response of each candidate's readiness route at its pinned
+# version. Postiz's /api/user/self sits behind AuthMiddleware, which raises
+# HttpForbiddenException; the globally registered HttpExceptionFilter rewrites
+# that to a bodyless 401, so an unauthenticated request to a healthy v2.23.0
+# backend answers exactly 401. Mixpost Lite's login page is a plain 200.
+POSTIZ_SERVING_CODE=401
+MIXPOST_SERVING_CODE=200
+
+# Decide what a registration attempt proved, as `result|detail`. Kept a
+# function so the decision itself is unit-tested rather than only exercised by
+# a full live run: the difference between "the toggle closed registration" and
+# "something else refused the request" is the whole point of the drill.
+registration_lock_verdict() {
+  local status="$1"
+  local body="$2"
+  local marker="$3"
+  local ready="$4"
+  case "$status" in
+    200)
+      printf 'fail|DISABLE_REGISTRATION=true still accepted a new registration (HTTP %s).\n' "$status"
+      ;;
+    400)
+      if grep -qF "$marker" "$body" 2>/dev/null; then
+        printf 'pass|the backend answered HTTP %s when serving, then refused a new registration with HTTP %s and the pinned "%s" error.\n' \
+          "$ready" "$status" "$marker"
+      else
+        printf 'fail|registration returned HTTP %s without the pinned "%s" error, so the refusal shows some other validation or auth failure rather than the toggle.\n' \
+          "$status" "$marker"
+      fi
+      ;;
+    *)
+      # 404 would mean the route is absent rather than closed, and 429 is rate
+      # limiting. Neither shows the toggle working.
+      printf 'fail|registration returned HTTP %s, which shows neither an open nor a deliberately closed registration surface.\n' "$status"
+      ;;
+  esac
 }
 
 # A convergence that never answers is the most likely way this harness fails on
@@ -269,14 +336,14 @@ case "$CANDIDATE" in
       --window-end "$(date -u -v+30d '+%Y-%m-%dT00:00:00Z' 2>/dev/null || date -u -d '+30 days' '+%Y-%m-%dT00:00:00Z')"
       --fixture-password-prefix "$FIXTURE_PASSWORD_PREFIX"
     )
-    READY_CODE="$(wait_for_http "http://localhost:$HOST_PORT/api/user/self" 240)" ||
+    READY_CODE="$(wait_for_http "http://localhost:$HOST_PORT/api/user/self" 240 "$POSTIZ_SERVING_CODE")" ||
       dholbeat_die "the Postiz backend never answered; with --variant temporal-sql this is the expected Temporal search-attribute failure"
     STARTUP_SECONDS="$(( $(date +%s) - CONVERGE_EPOCH ))"
     printf '    backend answered HTTP %s after %ss\n' "$READY_CODE" "$STARTUP_SECONDS"
     ;;
   mixpost-lite)
     MIXPOST_CONTAINER="$(container mixpost)"
-    READY_CODE="$(wait_for_http "http://localhost:$HOST_PORT/mixpost/login" 90)" ||
+    READY_CODE="$(wait_for_http "http://localhost:$HOST_PORT/mixpost/login" 90 "$MIXPOST_SERVING_CODE")" ||
       dholbeat_die "the Mixpost login page never answered"
     STARTUP_SECONDS="$(( $(date +%s) - CONVERGE_EPOCH ))"
     printf '    login page answered HTTP %s after %ss\n' "$READY_CODE" "$STARTUP_SECONDS"
@@ -315,36 +382,105 @@ json.dump(document, open(path, "w"), indent=2, sort_keys=True)
 PY
 }
 
+# Read one scalar out of the matrix run's `capabilities` block. Prints nothing
+# when the key is missing, unreadable or not a short, plain scalar, so a caller
+# can decide to pass nothing rather than forward junk into a probe argument.
+capability() {
+  python3 - "$TEMP_ROOT/checks.json" "$1" <<'PY'
+import json, re, sys
+path, key = sys.argv[1], sys.argv[2]
+try:
+    with open(path) as handle:
+        document = json.load(handle)
+except (OSError, ValueError):
+    raise SystemExit(0)
+capabilities = document.get("capabilities")
+if not isinstance(capabilities, dict):
+    raise SystemExit(0)
+value = capabilities.get(key)
+if isinstance(value, bool) or not isinstance(value, (str, int)):
+    raise SystemExit(0)
+value = str(value)
+if re.match(r"^[A-Za-z0-9:._+-]{1,128}$", value):
+    sys.stdout.write(value)
+PY
+}
+
 case "$CANDIDATE" in
   postiz)
-    # Restore after rebuild, not in place. The dump is taken, the database
-    # volume is destroyed, PostgreSQL comes back empty, the dump is reloaded and
-    # the application is restarted against it. A row count would only show the
-    # rows returned; the probe then proves the restored instance still
-    # authenticates a project, mints its credential, serves its own channel and
-    # refuses another project's.
+    # Restore after rebuild, not in place — and the rebuild has to cover every
+    # surface the decision packet calls rebuildable, not just the one the backup
+    # protects. Temporal, its own PostgreSQL and the Elasticsearch visibility
+    # store are excluded from the retained dump on the claim that they can be
+    # regenerated; leaving them running through the drill would have proved only
+    # that the dump reloads beside state that was never at risk. So the dump is
+    # taken, the Postiz database volume *and* every excluded surface are
+    # destroyed, the retained dump alone is reloaded, Temporal is re-provisioned
+    # from empty and the application is restarted against the result. A row
+    # count would only show the rows returned; the probe then proves the
+    # restored instance still authenticates a project, mints its credential,
+    # serves its own channel and refuses another project's.
+    HAS_ES=0
+    case " $PROFILES " in *" visibility-es "*) HAS_ES=1 ;; esac
+
     POSTGRES="$(container postiz-postgres)"
     docker exec "$POSTGRES" pg_dump -U postiz -d postiz --clean --if-exists >"$TEMP_ROOT/postiz.sql"
     BEFORE="$(docker exec "$POSTGRES" psql -U postiz -d postiz -tAc 'select count(*) from "Organization";')"
+    RETAINED_POST_ID="$(capability retained_pending_post_id)"
+    RETAINED_POST_AT="$(capability retained_pending_post_at)"
 
     compose stop postiz >/dev/null
-    compose rm --force --stop --volumes postiz-postgres >/dev/null
+    # Temporal is removed rather than merely stopped: its schema and namespace
+    # live in the temporal-postgres volume that is about to go, and auto-setup
+    # only re-provisions them on a fresh container start.
+    compose rm --force --stop --volumes temporal >/dev/null
+    compose rm --force --stop --volumes postiz-postgres temporal-postgres >/dev/null
+    # `compose rm --volumes` only takes anonymous volumes, so the two named data
+    # volumes are removed explicitly.
     docker volume rm "${PROJECT}_postiz-postgres-data" >/dev/null 2>&1 || true
-    compose up --detach --no-deps --wait --wait-timeout 300 postiz-postgres >/dev/null
+    docker volume rm "${PROJECT}_temporal-postgres-data" >/dev/null 2>&1 || true
+    if [ "$HAS_ES" -eq 1 ]; then
+      # Elasticsearch declares no named volume in this topology, so its indices
+      # live in the container's own writable layer and removing the container is
+      # what destroys the visibility store. It is started first because it is
+      # the slowest of the rebuilt surfaces to accept connections.
+      compose rm --force --stop --volumes temporal-elasticsearch >/dev/null
+      compose up --detach --no-deps temporal-elasticsearch >/dev/null
+    fi
+    compose up --detach --no-deps --wait --wait-timeout 300 postiz-postgres temporal-postgres >/dev/null
     POSTGRES="$(container postiz-postgres)"
     REBUILT="$(docker exec "$POSTGRES" psql -U postiz -d postiz -tAc \
       "select count(*) from information_schema.tables where table_schema='public';")"
     docker exec -i "$POSTGRES" psql -U postiz -d postiz \
       >"$TEMP_ROOT/postiz-restore.log" 2>&1 <"$TEMP_ROOT/postiz.sql" || true
     AFTER="$(docker exec "$POSTGRES" psql -U postiz -d postiz -tAc 'select count(*) from "Organization";')"
+    compose up --detach --no-deps temporal >/dev/null
     compose start postiz >/dev/null
+    # The verification probe must not race the rebuild: a backend still coming
+    # back refuses a project's login exactly the way an unrestored database
+    # would, which would report a lost restore as a lost restore for the wrong
+    # reason.
+    wait_for_http "http://localhost:$HOST_PORT/api/user/self" 240 "$POSTIZ_SERVING_CODE" >/dev/null ||
+      dholbeat_die "the Postiz backend never came back after the restore rebuild"
 
-    python3 "$SCRIPT_DIR/probe.py" \
-      --candidate postiz --mode restore-verify \
-      --base-url "http://localhost:$HOST_PORT" \
-      --image "$IMAGE" --variant "$VARIANT" --platform "$PLATFORM" \
-      --fixture-password-prefix "$FIXTURE_PASSWORD_PREFIX" \
-      --output "$TEMP_ROOT/restore-verify.json" 2>/dev/null || true
+    RESTORE_PROBE_ARGS=(
+      --candidate postiz --mode restore-verify
+      --base-url "http://localhost:$HOST_PORT"
+      --image "$IMAGE" --variant "$VARIANT" --platform "$PLATFORM"
+      --fixture-password-prefix "$FIXTURE_PASSWORD_PREFIX"
+      --output "$TEMP_ROOT/restore-verify.json"
+    )
+    # The matrix run leaves one pending scheduled post behind and records it
+    # under `capabilities`; the probe checks that the restored instance still
+    # holds it. Both halves are needed to identify it, so a missing or
+    # unusable value forwards nothing and leaves the verdict tool to say so.
+    if [ -n "$RETAINED_POST_ID" ] && [ -n "$RETAINED_POST_AT" ]; then
+      RESTORE_PROBE_ARGS+=(
+        --restored-pending-post-id "$RETAINED_POST_ID"
+        --restored-pending-post-at "$RETAINED_POST_AT"
+      )
+    fi
+    python3 "$SCRIPT_DIR/probe.py" "${RESTORE_PROBE_ARGS[@]}" 2>/dev/null || true
 
     RESTORE_VERDICT="$(python3 "$SCRIPT_DIR/restore_verdict.py" \
       --results "$TEMP_ROOT/restore-verify.json" \
@@ -358,28 +494,26 @@ case "$CANDIDATE" in
     # reject a registration. A restarting or rate-limiting instance refuses
     # everything, and counting that as a locked registration surface would let
     # an outage masquerade as a working control.
-    READY_CODE="$(wait_for_http "http://localhost:$HOST_PORT/api/user/self" 240)" ||
+    READY_CODE="$(wait_for_http "http://localhost:$HOST_PORT/api/user/self" 240 "$POSTIZ_SERVING_CODE")" ||
       dholbeat_die "the Postiz backend never came back after the registration-lock restart"
-    LOCK_STATUS="$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+    # At the pinned v2.23.0, AuthService.routeAuth throws Error('Registration is
+    # disabled') when canRegister() is false and AuthController.register catches
+    # it as `response.status(400).send(e.message)` — so the toggle working looks
+    # like exactly HTTP 400 carrying that plain-text message, and nothing else.
+    # A bare 400 is an ordinary DTO validation failure and a 401/403 is the auth
+    # surface refusing for its own reasons; neither shows the lock. The body is
+    # captured but never quoted into evidence beyond the marker itself.
+    # https://github.com/gitroomhq/postiz-app/blob/v2.23.0/apps/backend/src/services/auth/auth.service.ts#L55-L57
+    LOCK_MARKER='Registration is disabled'
+    LOCK_BODY="$TEMP_ROOT/registration-lock.body"
+    LOCK_STATUS="$(curl -s -o "$LOCK_BODY" -w '%{http_code}' -X POST \
+      --max-filesize 65536 \
       -H 'Content-Type: application/json' \
       -d '{"email":"locked@dg01.invalid","password":"dg01-locked-fixture","company":"Locked","provider":"LOCAL"}' \
       "http://localhost:$HOST_PORT/api/auth/register" || true)"
-    case "$LOCK_STATUS" in
-      200)
-        drill registration.lock fail \
-          "DISABLE_REGISTRATION=true still accepted a new registration (HTTP $LOCK_STATUS)."
-        ;;
-      400|401|403)
-        drill registration.lock pass \
-          "the backend answered HTTP $READY_CODE when serving, then rejected a new registration with HTTP $LOCK_STATUS."
-        ;;
-      *)
-        # 404 would mean the route is absent rather than closed, and 429 is rate
-        # limiting. Neither shows the toggle working.
-        drill registration.lock fail \
-          "registration returned HTTP $LOCK_STATUS, which shows neither an open nor a deliberately closed registration surface."
-        ;;
-    esac
+    LOCK_VERDICT="$(registration_lock_verdict "$LOCK_STATUS" "$LOCK_BODY" "$LOCK_MARKER" "$READY_CODE")"
+    drill registration.lock "${LOCK_VERDICT%%|*}" "${LOCK_VERDICT#*|}"
+    rm -f "$LOCK_BODY"
     ;;
   mixpost-lite)
     # Same shape as the Postiz drill: rebuild the data volume from empty rather

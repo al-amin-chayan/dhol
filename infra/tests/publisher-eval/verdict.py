@@ -24,6 +24,14 @@ REQUIRED_CHECKS = (
     "authz.no-credential-rejected",
 )
 
+# An `unsupported` result on these means the probe's own positive control
+# failed, so the behaviour was never measured — not that the edition lacks the
+# surface. The runbook defines `viable` as every measured check and drill
+# passing, so an unmeasured lifecycle or authorization check cannot be part of
+# one. The gate applies only where `capabilities.machine_api` is non-null: an
+# edition without a machine API reports these as `unsupported` legitimately.
+UNPROVEN_PREFIXES = ("authz.", "posts.")
+
 
 def build(checks: dict, drills: dict, resources: dict, version: str) -> dict:
     by_id = {check["id"]: check for check in checks["checks"]}
@@ -36,6 +44,12 @@ def build(checks: dict, drills: dict, resources: dict, version: str) -> dict:
     )
     failed = sorted(check["id"] for check in checks["checks"] if check["result"] == "fail")
     unsupported = sorted(check["id"] for check in checks["checks"] if check["result"] == "unsupported")
+    has_machine_api = checks["capabilities"].get("machine_api") is not None
+    unproven = (
+        [check_id for check_id in unsupported if check_id.startswith(UNPROVEN_PREFIXES)]
+        if has_machine_api
+        else []
+    )
     failed_drills = sorted(drill["id"] for drill in drills["drills"] if drill["result"] != "pass")
     # Only budgets this harness actually measured may gate the verdict. Update
     # headroom needs a real 30 GB host mid-upgrade, so it is carried as
@@ -48,7 +62,7 @@ def build(checks: dict, drills: dict, resources: dict, version: str) -> dict:
 
     if disqualifiers:
         verdict = "disqualified"
-    elif failed or failed_drills:
+    elif failed or failed_drills or unproven:
         verdict = "viable-with-findings"
     elif capacity:
         verdict = "viable-over-budget"
@@ -66,6 +80,7 @@ def build(checks: dict, drills: dict, resources: dict, version: str) -> dict:
         "disqualifying_checks": disqualifiers,
         "failed_checks": failed,
         "unsupported_checks": unsupported,
+        "unproven_checks": unproven,
         "failed_drills": failed_drills,
         "capacity_breaches": capacity,
         "unmeasured_capacity": {"update_headroom": resources.get("update_headroom")},
