@@ -154,10 +154,17 @@ passed. Neither fact reaches the requirement.
 3. **Cross-tenant delete answers 500, not 403.** The post correctly survives,
    so the boundary holds, but the error path is wrong. n8n must treat a 500
    from a delete as *indeterminate* and re-read state, never as *deleted*.
-4. **Upstream ships no backup documentation.** The dump/restore procedure is
-   ours. Temporal's own database and Elasticsearch index are rebuildable state
-   and must be excluded from the restore expectation deliberately, not by
-   accident.
+4. **Upstream ships no backup documentation, and Temporal's database is not
+   rebuildable.** The dump/restore procedure is ours. The obvious reading —
+   that Temporal is a workflow engine and can simply be re-provisioned — is
+   wrong here: a scheduled post is a Postiz row *plus* the Temporal workflow
+   that sends it, and at `v2.23.0` the recovery scan only re-queues posts whose
+   publish time is already past. Rebuild Temporal empty and every *future* post
+   comes back as a row that never fires until it is late. Temporal's PostgreSQL
+   is therefore retained state and belongs in the backup contract. Only the
+   Elasticsearch visibility index is genuinely rebuildable. The drill proves
+   this by destroying both and requiring the restored post to be queued with an
+   open workflow behind it.
 5. **The upstream Compose file is not deployable as-is.** It pins `:latest`,
    publishes database ports, and ships pgAdmin, Sentry Spotlight, Temporal UI
    and `temporal-admin-tools`. None of those may reach `publish-1`.
@@ -196,7 +203,7 @@ bound to a named later gate, not quietly dropped.
 | Scheduled create, list, cancel/delete | **met** | `posts.schedule`, `posts.list`, `posts.cancel`; cancellation re-reads the window |
 | Immediate publishing (`type=now`) | **deferred to `WP-13` canary-account gate** | never exercised: `create_post` in `infra/tests/publisher-eval/probe.py` always sends `type=schedule` with a future date. A genuine `type=now` call against a database-fixture channel would attempt a real provider call, which DG-01 forbids, so no provider-safe drill is possible here; it runs against the same founder-approved canary connection as token refresh, below |
 | Token refresh behaviour | **deferred to `WP-13` canary-account gate** | needs a connected provider account, which DG-01 forbids here. No synthetic substitute is honest: refresh is provider behaviour, not publisher behaviour. Runs against a founder-approved canary connection, per the sequence in Founder decision |
-| Application-aware backup/restore | **met** | restore-after-rebuild drill: volume destroyed, database rebuilt empty, dump reloaded, then login, credential, own-channel and tenant-boundary re-verified |
+| Application-aware backup/restore | **met** | restore-after-rebuild drill: Postiz and Temporal databases destroyed and reloaded from dumps, Elasticsearch rebuilt from empty, then login, credential, own-channel, tenant boundary, and a pending post still queued with an open workflow behind it |
 | 6 GB / 30 GB footprint | **partly met** | peak RAM and topology disk measured; host steady usage is a lower bound only |
 | Update headroom | **not met — unmeasured** | needs a real 30 GB host mid-upgrade; the harness reports `unmeasured` rather than a computed pass |
 | Update rollback | **deferred to `WP-13`** | no pinned upgrade/rollback drill was run; the evaluation converges one version |
@@ -259,9 +266,9 @@ chosen.
 
 | | Postiz | Mixpost Lite |
 | --- | --- | --- |
-| State of record | one PostgreSQL database plus an uploads volume or R2 bucket | one MySQL database plus a storage volume |
+| State of record | the Postiz PostgreSQL database, **Temporal's PostgreSQL database**, and an uploads volume or R2 bucket | one MySQL database plus a storage volume |
 | Export | `pg_dump`, drilled in this evaluation | `mysqldump --no-tablespaces`, drilled in this evaluation |
-| Rebuildable state | Temporal's PostgreSQL and Elasticsearch index | Redis queue |
+| Rebuildable state | the Elasticsearch visibility index | Redis queue |
 | Not portable | provider OAuth tokens, which are bound to the connected account and must be re-granted on any other tool | same |
 
 Approval state is Dholbeat's own (`WP-14`), not the publisher's. Migrating away
@@ -329,9 +336,11 @@ If the founder selects Postiz, `WP-13` inherits these conditions:
 4. Give the registration toggle a runbook step: registration opens only to
    onboard one project account and closes immediately afterwards.
 5. Make the n8n publisher adapter treat a `500` from a delete as indeterminate.
-6. Back up the Postiz database and uploads. Exclude Temporal's database and
-   the Elasticsearch index from the restore expectation, and say so in the
-   restore runbook.
+6. Back up the Postiz database, **Temporal's database**, and uploads. Only the
+   Elasticsearch visibility index may be excluded as rebuildable. Treating
+   Temporal as rebuildable would leave every future scheduled post stranded
+   after a host recovery; the restore runbook must say which of the three is
+   retained and why.
 7. Budget minutes, not seconds, for a `publish-1` publisher restart. Set the
    health-check grace period and the update-rollback drill's timeout from a
    measured cold start on the real host, not from this evaluation's figure.

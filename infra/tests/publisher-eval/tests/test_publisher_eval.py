@@ -328,6 +328,11 @@ RESTORED_OK = {
     "pending_post_restored": True,
     "pending_post_tenant_correct": True,
     "pending_post_time_preserved": True,
+    # The row must still be queued for sending, and the scheduler must still
+    # hold the workflow that sends it. A restored DRAFT, or a QUEUE row with no
+    # workflow behind it, is a post that never fires at its time.
+    "pending_post_state": "QUEUE",
+    "workflow_execution_restored": True,
 }
 
 
@@ -342,7 +347,11 @@ def test_a_database_that_was_not_rebuilt_empty_fails() -> None:
     assert "not empty" in detail
 
 
-@pytest.mark.parametrize("missing", sorted(RESTORED_OK))
+# `pending_post_state` is a string, not a behaviour flag — the verdict derives
+# `pending_post_still_queued` from it, and its own tests below cover that.
+@pytest.mark.parametrize(
+    "missing", sorted(k for k, v in RESTORED_OK.items() if isinstance(v, bool))
+)
 def test_rows_returning_without_working_behaviour_fails(missing: str) -> None:
     # The exact false pass a count-only drill would report: every row is back,
     # but the application cannot use the restored state.
@@ -575,3 +584,34 @@ def test_an_edition_without_the_surface_is_not_penalised_for_lacking_it() -> Non
     built = verdict.build(document, {"drills": []}, _healthy_resources(), "v1.0.0")
     assert built["verdict"] == "disqualified"
     assert built["unproven_checks"] == []
+
+
+def test_a_restored_draft_is_not_a_restored_schedule() -> None:
+    # The reviewer's reproduction: every boolean true, but the row came back as
+    # a DRAFT, so nothing will send it.
+    results = dict(RESTORED_OK, pending_post_state="DRAFT")
+    result, detail = restore_verdict.judge(results, "0", "3", "3", "postiz")
+    assert result == "fail"
+    assert "pending_post_still_queued" in detail
+
+
+def test_a_queued_row_without_its_workflow_fails() -> None:
+    # At v2.23.0 the recovery scan only re-queues posts already past due, so a
+    # future job whose workflow was destroyed never fires on time.
+    results = dict(RESTORED_OK, workflow_execution_restored=False)
+    result, detail = restore_verdict.judge(results, "0", "3", "3", "postiz")
+    assert result == "fail"
+    assert "workflow_execution_restored" in detail
+
+
+def test_a_missing_post_state_cannot_pass() -> None:
+    results = dict(RESTORED_OK)
+    del results["pending_post_state"]
+    assert restore_verdict.judge(results, "0", "3", "3", "postiz")[0] == "fail"
+
+
+def test_mixpost_is_not_asked_for_a_scheduler_it_lacks() -> None:
+    result, _ = restore_verdict.judge(
+        {"login_restored": True, "label_restored": True}, "0", "3", "3", "mixpost-lite"
+    )
+    assert result == "pass"

@@ -29,11 +29,22 @@ REQUIRED_BEHAVIOUR = {
         "pending_post_restored",
         "pending_post_tenant_correct",
         "pending_post_time_preserved",
+        # A row is not a schedule. The post must still be queued for sending,
+        # and the workflow that will send it must exist, or the restore has
+        # produced a post that never fires at its time.
+        "pending_post_still_queued",
+        "workflow_execution_restored",
     ),
     # Mixpost Lite has no tenant boundary and no machine credential to restore,
     # so requiring either would be requiring a capability the edition lacks.
     "mixpost-lite": ("login_restored", "label_restored"),
 }
+
+
+# Postiz post states that still represent work waiting to be sent. A restored
+# DRAFT is a row that came back without its schedule, which is exactly the
+# false pass this drill exists to catch.
+QUEUED_STATES = {"QUEUE", "PENDING"}
 
 
 def judge(
@@ -48,6 +59,12 @@ def judge(
         return "fail", (
             f"the restore probe produced no result; the database rebuilt to "
             f"{rebuilt_tables} table(s) and holds {after} organization(s)"
+        )
+    results = dict(results)
+    if candidate == "postiz":
+        state = results.get("pending_post_state")
+        results["pending_post_still_queued"] = (
+            isinstance(state, str) and state.upper() in QUEUED_STATES
         )
     missing = [name for name in required if not results.get(name)]
     leaked = bool(results.get("foreign_channel_visible"))
@@ -74,12 +91,21 @@ def main() -> int:
     parser.add_argument("--organizations-before", required=True)
     parser.add_argument("--organizations-after", required=True)
     parser.add_argument("--candidate", default="postiz", choices=sorted(REQUIRED_BEHAVIOUR))
+    parser.add_argument(
+        "--workflow-execution-restored",
+        default="",
+        help="whether the scheduler still holds an open workflow execution after the restore",
+    )
     args = parser.parse_args()
 
     try:
         results = json.loads(args.results.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         results = None
+    if results is not None and args.workflow_execution_restored:
+        # Measured against the scheduler's own store by the caller, because the
+        # publisher's HTTP API cannot see whether the workflow exists.
+        results["workflow_execution_restored"] = args.workflow_execution_restored == "true"
     result, detail = judge(
         results,
         args.rebuilt_tables,

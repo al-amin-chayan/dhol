@@ -119,7 +119,12 @@ attribute of type Text.` Then destroy the kept stack as shown above.
 - It does not upgrade or roll back a pinned version, and it does not measure
   free space on a real 30 GB host. Update rollback and update headroom are
   `WP-13` obligations; see the decision record's disposition table.
-- The restore drill destroys the database volume, rebuilds it empty, reloads the
-  dump and re-verifies the application. It does not rebuild the whole host.
+- The restore drill destroys the Postiz and Temporal database volumes and the
+  Elasticsearch index, reloads the two retained dumps, and re-verifies the
+  application — including that a pending scheduled post is still queued with an
+  open workflow behind it. Temporal's database is retained state, not
+  rebuildable: at `v2.23.0` the recovery scan only re-queues posts already past
+  due, so an empty Temporal strands every future job. The drill does not rebuild
+  the whole host.
 - It does not run on the production architecture. See the limitations section
   of the decision record.

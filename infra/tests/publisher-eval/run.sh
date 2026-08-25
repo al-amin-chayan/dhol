@@ -429,6 +429,16 @@ case "$CANDIDATE" in
     RETAINED_POST_ID="$(capability retained_pending_post_id)"
     RETAINED_POST_AT="$(capability retained_pending_post_at)"
 
+    # Temporal's database is RETAINED state, not rebuildable. A post is a row
+    # plus the workflow that will send it, and at v2.23.0 the recovery scan only
+    # re-queues posts whose publishDate is already past — so rebuilding Temporal
+    # empty strands every future job until it is late. It is therefore dumped
+    # and restored alongside the Postiz database, and only the Elasticsearch
+    # visibility index is treated as rebuildable.
+    TEMPORAL_POSTGRES="$(container temporal-postgres)"
+    docker exec "$TEMPORAL_POSTGRES" pg_dump -U temporal -d temporal --clean --if-exists \
+      >"$TEMP_ROOT/temporal.sql"
+
     compose stop postiz >/dev/null
     # Temporal is removed rather than merely stopped: its schema and namespace
     # live in the temporal-postgres volume that is about to go, and auto-setup
@@ -454,7 +464,23 @@ case "$CANDIDATE" in
     docker exec -i "$POSTGRES" psql -U postiz -d postiz \
       >"$TEMP_ROOT/postiz-restore.log" 2>&1 <"$TEMP_ROOT/postiz.sql" || true
     AFTER="$(docker exec "$POSTGRES" psql -U postiz -d postiz -tAc 'select count(*) from "Organization";')"
+
+    # Restore the retained Temporal database before Temporal starts, so
+    # auto-setup finds an existing schema rather than provisioning an empty one.
+    TEMPORAL_POSTGRES="$(container temporal-postgres)"
+    docker exec -i "$TEMPORAL_POSTGRES" psql -U temporal -d temporal \
+      >"$TEMP_ROOT/temporal-restore.log" 2>&1 <"$TEMP_ROOT/temporal.sql" || true
     compose up --detach --no-deps temporal >/dev/null
+
+    # A restored row that has no workflow behind it will not fire at its time.
+    # Count Temporal's own open executions rather than trusting the Postiz row.
+    OPEN_EXECUTIONS="$(docker exec "$TEMPORAL_POSTGRES" psql -U temporal -d temporal -tAc \
+      "select count(*) from executions;" 2>/dev/null | tr -d ' ')"
+    case "${OPEN_EXECUTIONS:-}" in
+      ''|*[!0-9]*) WORKFLOW_RESTORED=false ;;
+      0) WORKFLOW_RESTORED=false ;;
+      *) WORKFLOW_RESTORED=true ;;
+    esac
     compose start postiz >/dev/null
     # The verification probe must not race the rebuild: a backend still coming
     # back refuses a project's login exactly the way an unrestored database
@@ -484,6 +510,7 @@ case "$CANDIDATE" in
 
     RESTORE_VERDICT="$(python3 "$SCRIPT_DIR/restore_verdict.py" \
       --results "$TEMP_ROOT/restore-verify.json" \
+      --workflow-execution-restored "$WORKFLOW_RESTORED" \
       --rebuilt-tables "$REBUILT" --organizations-before "$BEFORE" --organizations-after "$AFTER")"
     drill backup.dump-restore "${RESTORE_VERDICT%%|*}" "${RESTORE_VERDICT#*|}"
 
