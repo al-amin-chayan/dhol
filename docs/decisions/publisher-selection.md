@@ -193,13 +193,14 @@ bound to a named later gate, not quietly dropped.
 | --- | --- | --- |
 | Exact editions, versions, licences pinned | **met** | `candidates.yml`, digest-pinned; licence read from the immutable `v2.23.0` tag |
 | Project/workspace authorization, API ownership | **met** | seventeen-check matrix, both candidates |
-| Immediate/scheduled create, list, cancel/delete | **met** | `posts.schedule`, `posts.list`, `posts.cancel`; cancellation re-reads the window |
-| Token refresh behaviour | **deferred to `WP-13` pre-account gate** | needs a real provider connection, which DG-01 forbids. No synthetic substitute is honest: refresh is provider behaviour, not publisher behaviour |
+| Scheduled create, list, cancel/delete | **met** | `posts.schedule`, `posts.list`, `posts.cancel`; cancellation re-reads the window |
+| Immediate publishing (`type=now`) | **deferred to `WP-13` canary-account gate** | never exercised: `create_post` in `infra/tests/publisher-eval/probe.py` always sends `type=schedule` with a future date. A genuine `type=now` call against a database-fixture channel would attempt a real provider call, which DG-01 forbids, so no provider-safe drill is possible here; it runs against the same founder-approved canary connection as token refresh, below |
+| Token refresh behaviour | **deferred to `WP-13` canary-account gate** | needs a connected provider account, which DG-01 forbids here. No synthetic substitute is honest: refresh is provider behaviour, not publisher behaviour. Runs against a founder-approved canary connection, per the sequence in Founder decision |
 | Application-aware backup/restore | **met** | restore-after-rebuild drill: volume destroyed, database rebuilt empty, dump reloaded, then login, credential, own-channel and tenant-boundary re-verified |
 | 6 GB / 30 GB footprint | **partly met** | peak RAM and topology disk measured; host steady usage is a lower bound only |
 | Update headroom | **not met — unmeasured** | needs a real 30 GB host mid-upgrade; the harness reports `unmeasured` rather than a computed pass |
 | Update rollback | **deferred to `WP-13`** | no pinned upgrade/rollback drill was run; the evaluation converges one version |
-| Duplicate-post controls | **deferred to `WP-13` pre-account gate** | Postiz `v2.23.0` advertises duplicate-post protection, but demonstrating it needs a connected account |
+| Duplicate-post controls | **deferred to `WP-13` canary-account gate** | Postiz `v2.23.0` advertises duplicate-post protection; demonstrating it needs the same canary-account drill as token refresh |
 | Registration control | **met** | `registration.lock` drill, gated on the backend being ready first |
 | Access / service-token integration fit | **met, by inspection not measurement** | see below |
 | Maintenance burden | **met, by inspection not measurement** | see below |
@@ -353,9 +354,14 @@ If the founder selects Postiz, `WP-13` inherits these conditions:
 and dump/restore adapter may now be committed under its own review.
 
 Closing this gate does not close the criteria dispositioned `deferred` above.
-Update rollback, update headroom on a real 30 GB host, token refresh and
-duplicate-post protection are `WP-13` obligations, and the last two are
-pre-conditions on connecting any real account.
+Update rollback, update headroom on a real 30 GB host, immediate publishing,
+token refresh and duplicate-post protection are `WP-13` obligations. The last
+three follow a fixed sequence, not a single blanket precondition: the founder
+explicitly approves a disposable or canary provider connection, the
+immediate-publish, token-refresh and duplicate-post drills run against that
+canary, and only then may production publishing be enabled or real brand
+accounts be onboarded. They are pre-conditions on production publishing and
+brand-account onboarding, not on connecting any account at all.
 
 Changing this decision means a new dated row in the status table and a
 `README.md` §10 change-log line, never a silent edit.
@@ -371,9 +377,10 @@ Everything this evidence does **not** cover:
    seven-day `WP-13` canary. The peak figure bounds convergence and the
    fixture matrix; it does not bound a week of scheduled work, media uploads,
    or a Postiz upgrade.
-3. **No real provider.** Channels are database fixtures. Token refresh,
-   provider rate limits, media upload to a provider, duplicate-post protection
-   against a live account, and OAuth grant behaviour are all untested here.
+3. **No real provider.** Channels are database fixtures. Immediate publishing
+   (`type=now`), token refresh, provider rate limits, media upload to a
+   provider, duplicate-post protection against a live account, and OAuth
+   grant behaviour are all untested here.
 4. **Paid Mixpost editions are entirely untested.** Their workspace isolation,
    API authorization, footprint and restore behaviour are vendor claims.
 5. **Postiz upgrade rollback is untested.** The evaluation converges one
