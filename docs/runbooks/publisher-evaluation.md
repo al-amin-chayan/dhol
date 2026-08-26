@@ -91,6 +91,16 @@ the matching Compose file under `infra/tests/publisher-eval/compose/`, never in
 `run.sh`. `scripts/check` fails on an image reference without a `sha256`
 digest and on a paid edition marked evaluable.
 
+## When a run wedges
+
+The Postiz evaluation restarts the backend twice — once for the restore rebuild
+and once for the registration lock. On a contended machine that backend can take
+many minutes to come back, and has been observed not to come back at all inside
+a twenty-minute budget. The harness fails closed in that case: it reports the
+timeout and destroys the stack rather than recording a pass. Re-run it on a
+quieter machine; do not raise the readiness budget to make the symptom go away,
+because a publisher that will not restart is the finding.
+
 ## Reproducing the Elasticsearch finding
 
 The decision record states that Temporal's SQL visibility store makes the

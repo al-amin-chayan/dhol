@@ -68,9 +68,9 @@ request body cannot be mistaken for an authorization boundary.
 | Drills passed | 2 / 2 | 2 / 2 |
 | Tenant model | organization | none |
 | Machine API | `/public/v1`, `Authorization: <key>` | none |
-| Cold start to first API answer | 59 s | 329 s |
-| Peak RAM (whole topology) | 2,616 MiB | 755 MiB |
-| Topology disk, images plus volumes | 5,474 MiB | 1,887 MiB |
+| Cold start to first API answer | 29-59 s, one restart never completed | 20-329 s |
+| Peak RAM (whole topology) | 2,647 MiB | 849 MiB |
+| Topology disk, images plus volumes | 5,473 MiB | 1,887 MiB |
 | Update headroom | not measured | not measured |
 
 **Topology disk is a lower bound, not host usage.** It counts this topology's
@@ -168,10 +168,13 @@ passed. Neither fact reaches the requirement.
 5. **The upstream Compose file is not deployable as-is.** It pins `:latest`,
    publishes database ports, and ships pgAdmin, Sentry Spotlight, Temporal UI
    and `temporal-admin-tools`. None of those may reach `publish-1`.
-6. **Cold start is slow and highly variable.** On a quiet machine the backend
-   answered 59 seconds after the converge command. On a machine also running
-   unrelated containers, two separate runs never answered inside a ten-minute
-   budget and were abandoned. Six containers, a JVM, and Prisma
+6. **Cold start is slow and highly variable, and a restart can wedge.** On a
+   quiet machine the backend answered 29-59 seconds after the converge command.
+   On a machine also running unrelated containers, several runs never answered
+   inside a ten-minute budget and were abandoned, and one run's backend never
+   came back at all within twenty minutes after a container recreate — the
+   evaluation restarts Postiz twice, once for the restore rebuild and once for
+   the registration lock, and the second restart is where it wedged. Six containers, a JVM, and Prisma
    migrations do not degrade gracefully when memory and I/O are contended, and
    `publish-1` is a 6 GB host that will also run monitoring and restic. Restart
    time is therefore a real operational property: the restart window,
@@ -341,9 +344,12 @@ If the founder selects Postiz, `WP-13` inherits these conditions:
    Temporal as rebuildable would leave every future scheduled post stranded
    after a host recovery; the restore runbook must say which of the three is
    retained and why.
-7. Budget minutes, not seconds, for a `publish-1` publisher restart. Set the
-   health-check grace period and the update-rollback drill's timeout from a
-   measured cold start on the real host, not from this evaluation's figure.
+7. Budget minutes, not seconds, for a `publish-1` publisher restart, and treat
+   a restart that never completes as a case the runbook must cover rather than
+   an anomaly. Set the health-check grace period and the update-rollback
+   drill's timeout from a measured cold start on the real host, not from this
+   evaluation's figure, and give the incident runbook a step for a wedged
+   publisher restart.
 
 ## Founder decision
 
