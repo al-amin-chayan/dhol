@@ -896,6 +896,33 @@ def verify_postiz_restore(args: argparse.Namespace) -> dict[str, Any]:
     restored_instant = parse_instant(str(restored.get("publishDate"))) if restored else None
     results["pending_post_restored_at"] = iso_z(restored_instant) if restored_instant else None
     results["pending_post_time_preserved"] = restored_instant == pending_instant
+
+    # A surviving row and a surviving workflow are still not a usable restore if
+    # the publisher can no longer manage that workflow. At v2.23.0 Postiz finds a
+    # scheduled post's running `post_<id>` workflow through a Temporal list
+    # query, and list queries are served by the Visibility store — which the
+    # rebuild empties. Exercising a real lifecycle operation is the only honest
+    # way to test that path, so the retained post is cancelled through the same
+    # public API n8n would use, and the cancellation is confirmed by re-reading.
+    if restored is None:
+        results["pending_post_manageable"] = None
+        return results
+    cancel_status, cancel_body, _ = api.request(
+        "DELETE", f"/public/v1/posts/{pending_id}", headers={"Authorization": api_key}
+    )
+    recheck_status, recheck_body, _ = public("/posts?" + window)
+    still_present = (
+        pending_id in {str(post.get("id")) for post in json.loads(recheck_body).get("posts", [])}
+        if recheck_status == 200
+        else None
+    )
+    results["pending_post_cancel_status"] = cancel_status
+    results["pending_post_recheck_status"] = recheck_status
+    results["pending_post_manageable"] = (
+        cancel_status in (200, 204) and recheck_status == 200 and still_present is False
+    )
+    if not results["pending_post_manageable"]:
+        results["pending_post_manage_detail"] = cancel_body[:160]
     return results
 
 

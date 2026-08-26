@@ -261,6 +261,28 @@ wait_for_http() {
 POSTIZ_SERVING_CODE=401
 MIXPOST_SERVING_CODE=200
 
+# Count the executions Temporal holds for one exact workflow id. Temporal's SQL
+# persistence stores the workflow id as bytes in `executions`, so the id is
+# matched by its encoded form rather than by a text comparison. Prints 0 when
+# the id is empty, the table is absent, or the query fails, so a caller can
+# never read a broken query as a surviving workflow.
+temporal_execution_count() {
+  local container="$1"
+  local workflow_id="$2"
+  [ -n "$workflow_id" ] || { printf 'error\n'; return 0; }
+  local count
+  count="$(docker exec "$container" psql -U temporal -d temporal -tAc \
+    "select count(*) from executions where workflow_id = '${workflow_id}';" \
+    2>"$TEMP_ROOT/temporal-query.err" | tr -d ' ')"
+  # A query that cannot run must never look like a workflow that is not there:
+  # reporting both as 0 would let a broken predicate read as a lost workflow,
+  # or worse, an unbroken one read as present.
+  case "${count:-}" in
+    ''|*[!0-9]*) printf 'error\n' ;;
+    *) printf '%s\n' "$count" ;;
+  esac
+}
+
 # Decide what a registration attempt proved, as `result|detail`. Kept a
 # function so the decision itself is unit-tested rather than only exercised by
 # a full live run: the difference between "the toggle closed registration" and
@@ -423,9 +445,6 @@ case "$CANDIDATE" in
     HAS_ES=0
     case " $PROFILES " in *" visibility-es "*) HAS_ES=1 ;; esac
 
-    POSTGRES="$(container postiz-postgres)"
-    docker exec "$POSTGRES" pg_dump -U postiz -d postiz --clean --if-exists >"$TEMP_ROOT/postiz.sql"
-    BEFORE="$(docker exec "$POSTGRES" psql -U postiz -d postiz -tAc 'select count(*) from "Organization";')"
     RETAINED_POST_ID="$(capability retained_pending_post_id)"
     RETAINED_POST_AT="$(capability retained_pending_post_at)"
 
@@ -435,11 +454,28 @@ case "$CANDIDATE" in
     # empty strands every future job until it is late. It is therefore dumped
     # and restored alongside the Postiz database, and only the Elasticsearch
     # visibility index is treated as rebuildable.
+    #
+    # Once the backup spans two databases, two individually valid dumps are not
+    # an application-consistent backup: a schedule written between them exists
+    # in one and not the other. So the application is quiesced first — the app
+    # stops issuing workflow mutations, then Temporal stops advancing them —
+    # and only then are both dumps taken, at the same stopped boundary.
+    compose stop postiz >/dev/null
+    compose stop temporal >/dev/null
+
+    POSTGRES="$(container postiz-postgres)"
+    docker exec "$POSTGRES" pg_dump -U postiz -d postiz --clean --if-exists >"$TEMP_ROOT/postiz.sql"
+    BEFORE="$(docker exec "$POSTGRES" psql -U postiz -d postiz -tAc 'select count(*) from "Organization";')"
     TEMPORAL_POSTGRES="$(container temporal-postgres)"
     docker exec "$TEMPORAL_POSTGRES" pg_dump -U temporal -d temporal --clean --if-exists \
       >"$TEMP_ROOT/temporal.sql"
 
-    compose stop postiz >/dev/null
+    # The exact workflow the retained post depends on, as Postiz names it at
+    # v2.23.0: `post_<postId>`. Counting executions globally would pass on the
+    # unrelated long-running recovery workflow this topology always has.
+    RETAINED_WORKFLOW_ID="post_${RETAINED_POST_ID}"
+    WORKFLOW_BEFORE="$(temporal_execution_count "$TEMPORAL_POSTGRES" "$RETAINED_WORKFLOW_ID")"
+
     # Temporal is removed rather than merely stopped: its schema and namespace
     # live in the temporal-postgres volume that is about to go, and auto-setup
     # only re-provisions them on a fresh container start.
@@ -472,14 +508,12 @@ case "$CANDIDATE" in
       >"$TEMP_ROOT/temporal-restore.log" 2>&1 <"$TEMP_ROOT/temporal.sql" || true
     compose up --detach --no-deps temporal >/dev/null
 
-    # A restored row that has no workflow behind it will not fire at its time.
-    # Count Temporal's own open executions rather than trusting the Postiz row.
-    OPEN_EXECUTIONS="$(docker exec "$TEMPORAL_POSTGRES" psql -U temporal -d temporal -tAc \
-      "select count(*) from executions;" 2>/dev/null | tr -d ' ')"
-    case "${OPEN_EXECUTIONS:-}" in
-      ''|*[!0-9]*) WORKFLOW_RESTORED=false ;;
-      0) WORKFLOW_RESTORED=false ;;
-      *) WORKFLOW_RESTORED=true ;;
+    # A restored row with no workflow behind it will not fire at its time. Ask
+    # for the retained post's own workflow by id, not for any execution at all.
+    WORKFLOW_AFTER="$(temporal_execution_count "$TEMPORAL_POSTGRES" "$RETAINED_WORKFLOW_ID")"
+    case "${WORKFLOW_BEFORE}/${WORKFLOW_AFTER}" in
+      error/*|*/error|0/*) WORKFLOW_RESTORED=false ;;
+      *) [ "$WORKFLOW_AFTER" = "$WORKFLOW_BEFORE" ] && WORKFLOW_RESTORED=true || WORKFLOW_RESTORED=false ;;
     esac
     compose start postiz >/dev/null
     # The verification probe must not race the rebuild: a backend still coming
@@ -511,6 +545,8 @@ case "$CANDIDATE" in
     RESTORE_VERDICT="$(python3 "$SCRIPT_DIR/restore_verdict.py" \
       --results "$TEMP_ROOT/restore-verify.json" \
       --workflow-execution-restored "$WORKFLOW_RESTORED" \
+      --workflow-executions-before "$WORKFLOW_BEFORE" \
+      --workflow-executions-after "$WORKFLOW_AFTER" \
       --rebuilt-tables "$REBUILT" --organizations-before "$BEFORE" --organizations-after "$AFTER")"
     drill backup.dump-restore "${RESTORE_VERDICT%%|*}" "${RESTORE_VERDICT#*|}"
 

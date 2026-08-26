@@ -333,6 +333,10 @@ RESTORED_OK = {
     # workflow behind it, is a post that never fires at its time.
     "pending_post_state": "QUEUE",
     "workflow_execution_restored": True,
+    # Holding the workflow is not the same as being able to manage it: Postiz
+    # finds a scheduled post's workflow through a Temporal list query, and list
+    # queries are served by the Visibility store the rebuild empties.
+    "pending_post_manageable": True,
 }
 
 
@@ -615,3 +619,10 @@ def test_mixpost_is_not_asked_for_a_scheduler_it_lacks() -> None:
         {"login_restored": True, "label_restored": True}, "0", "3", "3", "mixpost-lite"
     )
     assert result == "pass"
+
+
+def test_a_post_the_publisher_can_no_longer_manage_fails() -> None:
+    results = dict(RESTORED_OK, pending_post_manageable=False)
+    result, detail = restore_verdict.judge(results, "0", "3", "3", "postiz")
+    assert result == "fail"
+    assert "pending_post_manageable" in detail

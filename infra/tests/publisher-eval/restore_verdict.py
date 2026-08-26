@@ -34,6 +34,10 @@ REQUIRED_BEHAVIOUR = {
         # produced a post that never fires at its time.
         "pending_post_still_queued",
         "workflow_execution_restored",
+        # The publisher must still be able to manage that workflow, not merely
+        # hold it: lifecycle operations go through Temporal's Visibility store,
+        # which the rebuild empties.
+        "pending_post_manageable",
     ),
     # Mixpost Lite has no tenant boundary and no machine credential to restore,
     # so requiring either would be requiring a capability the edition lacks.
@@ -69,6 +73,25 @@ def judge(
     missing = [name for name in required if not results.get(name)]
     leaked = bool(results.get("foreign_channel_visible"))
     behaviour = ", ".join(f"{name}={bool(results.get(name))}" for name in required)
+    # A failed restore has to say enough to be diagnosed from the evidence
+    # alone: which call answered what, not merely which booleans came out false.
+    observed = ", ".join(
+        f"{name}={results[name]!r}"
+        for name in (
+            "pending_post_window_status",
+            "pending_post_state",
+            "pending_post_restored_at",
+            "pending_post_cancel_status",
+            "pending_post_recheck_status",
+            "pending_post_manage_detail",
+            "foreign_window_status",
+            "workflow_executions_before",
+            "workflow_executions_after",
+        )
+        if name in results
+    )
+    if observed:
+        behaviour = f"{behaviour}; observed: {observed}"
     detail = (
         f"database volume destroyed and rebuilt to {rebuilt_tables} table(s), dump reloaded, "
         f"rows {before} -> {after}; restored instance: {behaviour}"
@@ -91,6 +114,8 @@ def main() -> int:
     parser.add_argument("--organizations-before", required=True)
     parser.add_argument("--organizations-after", required=True)
     parser.add_argument("--candidate", default="postiz", choices=sorted(REQUIRED_BEHAVIOUR))
+    parser.add_argument("--workflow-executions-before", default="")
+    parser.add_argument("--workflow-executions-after", default="")
     parser.add_argument(
         "--workflow-execution-restored",
         default="",
@@ -106,6 +131,8 @@ def main() -> int:
         # Measured against the scheduler's own store by the caller, because the
         # publisher's HTTP API cannot see whether the workflow exists.
         results["workflow_execution_restored"] = args.workflow_execution_restored == "true"
+        results["workflow_executions_before"] = args.workflow_executions_before
+        results["workflow_executions_after"] = args.workflow_executions_after
     result, detail = judge(
         results,
         args.rebuilt_tables,
