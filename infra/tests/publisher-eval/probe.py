@@ -621,6 +621,10 @@ def probe_postiz(args: argparse.Namespace, recorder: Recorder) -> dict[str, Any]
         "retained_pending_post_at": retained_at,
         "retained_pending_post_status": retained_status,
         "retained_pending_post_confirmed": retained_listed,
+        # The post the lifecycle matrix cancelled, so the caller can ask the
+        # scheduler whether an ordinary cancellation actually terminated its
+        # workflow — the row disappearing does not answer that.
+        "cancelled_post_id": own_post_id or "",
     }
 
 

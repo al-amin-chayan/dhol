@@ -261,24 +261,46 @@ wait_for_http() {
 POSTIZ_SERVING_CODE=401
 MIXPOST_SERVING_CODE=200
 
-# Count the executions Temporal holds for one exact workflow id. Temporal's SQL
-# persistence stores the workflow id as bytes in `executions`, so the id is
-# matched by its encoded form rather than by a text comparison. Prints 0 when
-# the id is empty, the table is absent, or the query fails, so a caller can
-# never read a broken query as a surviving workflow.
-temporal_execution_count() {
+# Ask Temporal for one exact workflow's lifecycle status, from its own
+# `current_executions` table where `workflow_id` is VARCHAR and `status` is the
+# WorkflowExecutionStatus enum (1 = RUNNING). The `executions` table retains
+# closed runs and carries no directly usable status, so counting rows there
+# cannot tell a live schedule from a finished one.
+#
+# Prints the integer status, `absent` when Temporal holds no such workflow, or
+# `error` when the query itself could not run. Those three stay distinct:
+# collapsing them would let a broken query read as a missing workflow, or a
+# closed workflow read as a live one.
+temporal_workflow_status() {
   local container="$1"
   local workflow_id="$2"
   [ -n "$workflow_id" ] || { printf 'error\n'; return 0; }
-  local count
-  count="$(docker exec "$container" psql -U temporal -d temporal -tAc \
-    "select count(*) from executions where workflow_id = '${workflow_id}';" \
-    2>"$TEMP_ROOT/temporal-query.err" | tr -d ' ')"
-  # A query that cannot run must never look like a workflow that is not there:
-  # reporting both as 0 would let a broken predicate read as a lost workflow,
-  # or worse, an unbroken one read as present.
+  local value
+  value="$(docker exec "$container" psql -U temporal -d temporal -tAc \
+    "select status from current_executions where workflow_id = '${workflow_id}';" \
+    2>/dev/null | tr -d ' ')"
+  case "${value:-}" in
+    '') printf 'absent\n' ;;
+    *[!0-9]*) printf 'error\n' ;;
+    *) printf '%s\n' "$value" ;;
+  esac
+}
+
+# Ask the Visibility store the same question Postiz asks before it manages a
+# scheduled post. Temporal serves list queries from Visibility, so a workflow
+# can exist in primary persistence and still be invisible to the exact lookup
+# the publisher depends on. Prints the hit count, or `error`.
+temporal_visibility_hits() {
+  local container="$1"
+  local workflow_id="$2"
+  [ -n "$workflow_id" ] || { printf 'error\n'; return 0; }
+  local body count
+  body="$(docker exec "$container" curl -s --max-time 20 \
+    "http://localhost:9200/temporal_visibility_v1_dev/_count?q=WorkflowId:%22${workflow_id}%22" \
+    2>/dev/null)"
+  count="$(printf '%s' "$body" | sed -n 's/.*"count":\([0-9][0-9]*\).*/\1/p')"
   case "${count:-}" in
-    ''|*[!0-9]*) printf 'error\n' ;;
+    '') printf 'error\n' ;;
     *) printf '%s\n' "$count" ;;
   esac
 }
@@ -445,6 +467,30 @@ case "$CANDIDATE" in
     HAS_ES=0
     case " $PROFILES " in *" visibility-es "*) HAS_ES=1 ;; esac
 
+    # Before touching the restore path at all: did an ordinary cancellation
+    # terminate its workflow? Postiz deletes the row, then lists and terminates
+    # inside catch-and-ignore blocks, so a 200 and a vanished row say nothing.
+    # Answering this on the untouched instance separates "restore leaves
+    # orphans" from "cancel always leaves orphans" — very different findings.
+    CANCELLED_POST_ID="$(capability cancelled_post_id)"
+    if [ -n "$CANCELLED_POST_ID" ]; then
+      CANCEL_WORKFLOW_STATUS="$(temporal_workflow_status "$(container temporal-postgres)" "post_${CANCELLED_POST_ID}")"
+      case "$CANCEL_WORKFLOW_STATUS" in
+        1)
+          drill cancel.terminates-workflow fail \
+            "the public API reported the cancellation and removed the row, but Temporal still holds post_<id> RUNNING, so an orphaned workflow outlives its post."
+          ;;
+        error)
+          drill cancel.terminates-workflow fail \
+            "the scheduler could not be queried, so the cancellation's effect on the workflow is unknown."
+          ;;
+        *)
+          drill cancel.terminates-workflow pass \
+            "after the public-API cancellation Temporal reports the workflow in state ${CANCEL_WORKFLOW_STATUS} rather than RUNNING."
+          ;;
+      esac
+    fi
+
     RETAINED_POST_ID="$(capability retained_pending_post_id)"
     RETAINED_POST_AT="$(capability retained_pending_post_at)"
 
@@ -474,7 +520,10 @@ case "$CANDIDATE" in
     # v2.23.0: `post_<postId>`. Counting executions globally would pass on the
     # unrelated long-running recovery workflow this topology always has.
     RETAINED_WORKFLOW_ID="post_${RETAINED_POST_ID}"
-    WORKFLOW_BEFORE="$(temporal_execution_count "$TEMPORAL_POSTGRES" "$RETAINED_WORKFLOW_ID")"
+    # 1 is WorkflowExecutionStatus RUNNING. Anything else means the schedule was
+    # already closed before the rebuild, which would make the whole drill
+    # meaningless rather than passing.
+    WORKFLOW_STATUS_BEFORE="$(temporal_workflow_status "$TEMPORAL_POSTGRES" "$RETAINED_WORKFLOW_ID")"
 
     # Temporal is removed rather than merely stopped: its schema and namespace
     # live in the temporal-postgres volume that is about to go, and auto-setup
@@ -510,11 +559,15 @@ case "$CANDIDATE" in
 
     # A restored row with no workflow behind it will not fire at its time. Ask
     # for the retained post's own workflow by id, not for any execution at all.
-    WORKFLOW_AFTER="$(temporal_execution_count "$TEMPORAL_POSTGRES" "$RETAINED_WORKFLOW_ID")"
-    case "${WORKFLOW_BEFORE}/${WORKFLOW_AFTER}" in
-      error/*|*/error|0/*) WORKFLOW_RESTORED=false ;;
-      *) [ "$WORKFLOW_AFTER" = "$WORKFLOW_BEFORE" ] && WORKFLOW_RESTORED=true || WORKFLOW_RESTORED=false ;;
-    esac
+    WORKFLOW_STATUS_AFTER="$(temporal_workflow_status "$TEMPORAL_POSTGRES" "$RETAINED_WORKFLOW_ID")"
+    # The schedule has to come back *open*, not merely present: Temporal keeps
+    # closed executions, so a completed or terminated run would otherwise look
+    # like a surviving schedule.
+    if [ "$WORKFLOW_STATUS_BEFORE" = "1" ] && [ "$WORKFLOW_STATUS_AFTER" = "1" ]; then
+      WORKFLOW_RESTORED=true
+    else
+      WORKFLOW_RESTORED=false
+    fi
     compose start postiz >/dev/null
     # The verification probe must not race the rebuild: a backend still coming
     # back refuses a project's login exactly the way an unrestored database
@@ -540,13 +593,40 @@ case "$CANDIDATE" in
         --restored-pending-post-at "$RETAINED_POST_AT"
       )
     fi
+    # Ask the Visibility store directly, before anything cancels the post. This
+    # is the lookup Postiz performs to find a scheduled post's workflow, and the
+    # rebuild empties it — so it is measured rather than assumed.
+    VISIBILITY_AFTER=error
+    if [ "$HAS_ES" -eq 1 ]; then
+      VISIBILITY_AFTER="$(temporal_visibility_hits "$(container temporal-elasticsearch)" "$RETAINED_WORKFLOW_ID")"
+    fi
+
     python3 "$SCRIPT_DIR/probe.py" "${RESTORE_PROBE_ARGS[@]}" 2>/dev/null || true
+
+    # Postiz's deletePost removes the row first, then lists and terminates the
+    # workflow inside catch-and-ignore blocks and returns regardless. A 200 and
+    # a vanished row therefore say nothing about the workflow, so its status is
+    # read again here: a cancelled schedule must no longer be RUNNING.
+    #
+    # Termination is asynchronous, so this waits before concluding. The wait
+    # exists to tell "not yet" from "never", not to give a stuck workflow more
+    # chances: if it is still RUNNING at the end, that is the finding.
+    WORKFLOW_STATUS_AFTER_CANCEL=""
+    CANCEL_WAIT=0
+    while [ "$CANCEL_WAIT" -lt 12 ]; do
+      WORKFLOW_STATUS_AFTER_CANCEL="$(temporal_workflow_status "$TEMPORAL_POSTGRES" "$RETAINED_WORKFLOW_ID")"
+      [ "$WORKFLOW_STATUS_AFTER_CANCEL" = "1" ] || break
+      CANCEL_WAIT=$((CANCEL_WAIT + 1))
+      sleep 5
+    done
 
     RESTORE_VERDICT="$(python3 "$SCRIPT_DIR/restore_verdict.py" \
       --results "$TEMP_ROOT/restore-verify.json" \
       --workflow-execution-restored "$WORKFLOW_RESTORED" \
-      --workflow-executions-before "$WORKFLOW_BEFORE" \
-      --workflow-executions-after "$WORKFLOW_AFTER" \
+      --workflow-status-before "$WORKFLOW_STATUS_BEFORE" \
+      --workflow-status-after "$WORKFLOW_STATUS_AFTER" \
+      --visibility-hits-after "$VISIBILITY_AFTER" \
+      --workflow-status-after-cancel "$WORKFLOW_STATUS_AFTER_CANCEL" \
       --rebuilt-tables "$REBUILT" --organizations-before "$BEFORE" --organizations-after "$AFTER")"
     drill backup.dump-restore "${RESTORE_VERDICT%%|*}" "${RESTORE_VERDICT#*|}"
 

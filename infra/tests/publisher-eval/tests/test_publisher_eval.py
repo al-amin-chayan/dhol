@@ -337,6 +337,11 @@ RESTORED_OK = {
     # finds a scheduled post's workflow through a Temporal list query, and list
     # queries are served by the Visibility store the rebuild empties.
     "pending_post_manageable": True,
+    # Postiz reports a successful cancel whether or not it found and terminated
+    # the workflow, and Temporal keeps closed executions — so the scheduler is
+    # asked directly, and the lookup the publisher depends on must return it.
+    "workflow_terminated_after_cancel": True,
+    "visibility_lists_workflow": True,
 }
 
 
@@ -626,3 +631,28 @@ def test_a_post_the_publisher_can_no_longer_manage_fails() -> None:
     result, detail = restore_verdict.judge(results, "0", "3", "3", "postiz")
     assert result == "fail"
     assert "pending_post_manageable" in detail
+
+
+def test_a_closed_workflow_is_not_a_restored_schedule() -> None:
+    # Temporal retains closed executions, so a completed or terminated
+    # `post_<id>` is present without being a schedule that will ever fire.
+    results = dict(RESTORED_OK, workflow_execution_restored=False)
+    result, detail = restore_verdict.judge(results, "0", "3", "3", "postiz")
+    assert result == "fail"
+    assert "workflow_execution_restored" in detail
+
+
+def test_a_cancel_that_left_the_workflow_running_fails() -> None:
+    # deletePost removes the row first and terminates inside catch-and-ignore,
+    # so an orphaned live workflow produces the same HTTP success.
+    results = dict(RESTORED_OK, workflow_terminated_after_cancel=False)
+    result, detail = restore_verdict.judge(results, "0", "3", "3", "postiz")
+    assert result == "fail"
+    assert "workflow_terminated_after_cancel" in detail
+
+
+def test_a_workflow_absent_from_visibility_fails() -> None:
+    results = dict(RESTORED_OK, visibility_lists_workflow=False)
+    result, detail = restore_verdict.judge(results, "0", "3", "3", "postiz")
+    assert result == "fail"
+    assert "visibility_lists_workflow" in detail

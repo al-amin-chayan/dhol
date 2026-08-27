@@ -38,6 +38,11 @@ REQUIRED_BEHAVIOUR = {
         # hold it: lifecycle operations go through Temporal's Visibility store,
         # which the rebuild empties.
         "pending_post_manageable",
+        # The publisher reports success on a cancel whether or not it actually
+        # found and terminated the workflow, so the scheduler is asked directly.
+        "workflow_terminated_after_cancel",
+        # And the lookup the publisher depends on has to actually return it.
+        "visibility_lists_workflow",
     ),
     # Mixpost Lite has no tenant boundary and no machine credential to restore,
     # so requiring either would be requiring a capability the edition lacks.
@@ -85,8 +90,10 @@ def judge(
             "pending_post_recheck_status",
             "pending_post_manage_detail",
             "foreign_window_status",
-            "workflow_executions_before",
-            "workflow_executions_after",
+            "workflow_status_before",
+            "workflow_status_after",
+            "workflow_status_after_cancel",
+            "visibility_hits_after",
         )
         if name in results
     )
@@ -114,8 +121,10 @@ def main() -> int:
     parser.add_argument("--organizations-before", required=True)
     parser.add_argument("--organizations-after", required=True)
     parser.add_argument("--candidate", default="postiz", choices=sorted(REQUIRED_BEHAVIOUR))
-    parser.add_argument("--workflow-executions-before", default="")
-    parser.add_argument("--workflow-executions-after", default="")
+    parser.add_argument("--workflow-status-before", default="")
+    parser.add_argument("--workflow-status-after", default="")
+    parser.add_argument("--workflow-status-after-cancel", default="")
+    parser.add_argument("--visibility-hits-after", default="")
     parser.add_argument(
         "--workflow-execution-restored",
         default="",
@@ -131,8 +140,20 @@ def main() -> int:
         # Measured against the scheduler's own store by the caller, because the
         # publisher's HTTP API cannot see whether the workflow exists.
         results["workflow_execution_restored"] = args.workflow_execution_restored == "true"
-        results["workflow_executions_before"] = args.workflow_executions_before
-        results["workflow_executions_after"] = args.workflow_executions_after
+        results["workflow_status_before"] = args.workflow_status_before
+        results["workflow_status_after"] = args.workflow_status_after
+        results["workflow_status_after_cancel"] = args.workflow_status_after_cancel
+        results["visibility_hits_after"] = args.visibility_hits_after
+        # RUNNING is 1. A cancelled schedule must have left that state; `absent`
+        # also counts, since a workflow Temporal no longer holds cannot fire.
+        results["workflow_terminated_after_cancel"] = args.workflow_status_after_cancel not in (
+            "1",
+            "error",
+            "",
+        )
+        results["visibility_lists_workflow"] = (
+            args.visibility_hits_after.isdigit() and int(args.visibility_hits_after) > 0
+        )
     result, detail = judge(
         results,
         args.rebuilt_tables,
