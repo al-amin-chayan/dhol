@@ -229,6 +229,7 @@ run_controller() {
   local image_id
   image_id="$(controller_image_id)"
   docker run --rm \
+    --interactive \
     --read-only \
     --network none \
     --cap-drop ALL \
