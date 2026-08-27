@@ -38,7 +38,7 @@ dependency receipts and live fixture evidence below exist.
   restore Compose renders with synthetic values and no network calls.
 - `scripts/check` — passed: repository/branch policy, lint, secret scan, all
   schema/inventory/SOPS/baseline/tooling suites, 90 publisher-evaluation tests,
-  43 selected-publisher tests, the offline publisher contract, and Ansible lint
+  47 selected-publisher tests, the offline publisher contract, and Ansible lint
   with zero failures or warnings.
 - `git diff --check` — passed.
 
@@ -73,9 +73,18 @@ state by default behind a disk-headroom gate; rejects ambiguous memory units;
 binds backup IDs; preserves primary plus restart failures; documents explicit
 decommission; and imports `sys` directly.
 
-Any follow-up is founder-triggered and must review the later exact PR head. The
-author did not invoke or enqueue it. Live evidence may still change the head
-again before the PR becomes implementation-complete.
+Claude Code performed the founder-triggered Follow-up at
+`905b6a491f1eff16837244b3b741019510303bf2`, verified all eleven Baseline
+findings closed, and raised two required findings plus three suggestions on the
+fix delta. The author accepted all five before editing. This second delta gives
+retained Redis explicit AOF rewrite/shutdown headroom and an RSS canary; makes
+the freeze marker durable before a bounded, operator-visible lock wait; renames
+the restore digest for the controls it actually covers; and replaces brittle
+source/prose assertions with behavioral and whitespace-normalized tests.
+
+Another Follow-up is founder-triggered and must review the later exact PR head.
+The author did not invoke or enqueue it. Live evidence may still change the
+head again before the PR becomes implementation-complete.
 
 ## Cost and rollback boundary
 
