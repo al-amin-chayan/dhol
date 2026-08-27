@@ -37,9 +37,21 @@ COMPOSE_TO_REGISTRY = {
     "temporal-postgres": "publisher-temporal-postgres",
     "temporal-elasticsearch": "publisher-temporal-visibility",
 }
+EXPECTED_REGISTRY_VOLUMES = {
+    "publisher": [],
+    "publisher-postgres": ["publisher-postgres-data"],
+    "publisher-redis": ["publisher-redis-data"],
+    "publisher-temporal": [],
+    "publisher-temporal-postgres": ["publisher-temporal-postgres-data"],
+    "publisher-temporal-visibility": [
+        "publisher-temporal-visibility-data",
+        "publisher-backup-staging",
+    ],
+}
 STATE_SERVICES = EXPECTED_SERVICES - {"postiz"}
 RETAINED_VOLUME_NAMES = {
     "postiz-postgres-data",
+    "postiz-redis-data",
     "temporal-postgres-data",
     "temporal-elasticsearch-data",
 }
@@ -56,12 +68,12 @@ def load_yaml(path: Path) -> dict[str, Any]:
 
 def memory_mebibytes(value: Any) -> int:
     text = str(value).strip().lower()
-    match = re.fullmatch(r"([0-9]+)([kmg]?)", text)
+    match = re.fullmatch(r"([0-9]+)([mg])", text)
     if match is None:
-        raise ValueError(f"unsupported memory limit: {value}")
+        raise ValueError(f"memory limit must use integral m or g units: {value}")
     number = int(match.group(1))
     unit = match.group(2)
-    return number * {"": 1, "k": 1 / 1024, "m": 1, "g": 1024}[unit]
+    return number * {"m": 1, "g": 1024}[unit]
 
 
 def validate_compose(document: dict[str, Any]) -> list[str]:
@@ -108,6 +120,9 @@ def validate_compose(document: dict[str, Any]) -> list[str]:
         findings.append("postiz: media storage must use the dedicated Cloudflare R2 provider")
     if environment.get("UPLOAD_DIRECTORY") or environment.get("NEXT_PUBLIC_UPLOAD_DIRECTORY"):
         findings.append("postiz: local upload persistence is forbidden")
+    tmpfs = postiz.get("tmpfs", [])
+    if tmpfs != ["/tmp:size=268435456,mode=1777"]:
+        findings.append("postiz: /tmp tmpfs must be exactly 256 MiB")
     registration = environment.get("DISABLE_REGISTRATION")
     if not isinstance(registration, str) or REQUIRED_RUNTIME_VARIABLE_RE.fullmatch(registration) is None:
         findings.append("postiz: registration state must be a required runtime variable")
@@ -145,6 +160,15 @@ def validate_compose(document: dict[str, Any]) -> list[str]:
     temporal = services.get("temporal", {})
     if temporal.get("environment", {}).get("ENABLE_ES") != "true":
         findings.append("temporal: Elasticsearch Visibility must remain enabled")
+    redis = services.get("postiz-redis", {})
+    redis_command = redis.get("command", [])
+    if not all(
+        value in redis_command
+        for value in ("--appendonly", "yes", "--maxmemory-policy", "noeviction")
+    ):
+        findings.append("postiz-redis: retained state requires AOF and noeviction")
+    if redis.get("volumes") != ["postiz-redis-data:/data"]:
+        findings.append("postiz-redis: retained data volume is required")
     return sorted(set(findings))
 
 
@@ -226,6 +250,8 @@ def validate_desired_state_registries(root: Path, compose: dict[str, Any]) -> li
         compose_memory = memory_mebibytes(compose["services"][compose_id]["mem_limit"])
         if service["resources"]["memory_mb"] != compose_memory:
             findings.append(f"registries: {registry_id} memory differs from Compose")
+        if service["volume_ids"] != EXPECTED_REGISTRY_VOLUMES[registry_id]:
+            findings.append(f"registries: {registry_id} volume ownership differs from Compose")
         if service["backup_adapter_id"] not in backup_ids:
             findings.append(f"registries: {registry_id} has no backup/rebuild adapter")
         for secret_id in service["secret_ids"]:
@@ -239,6 +265,7 @@ def validate_desired_state_registries(root: Path, compose: dict[str, Any]) -> li
     }
     if retained != {
         "publisher-postgres-data",
+        "publisher-redis-data",
         "publisher-temporal-postgres-data",
         "publisher-temporal-visibility-data",
     }:

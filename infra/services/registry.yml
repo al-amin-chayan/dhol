@@ -56,10 +56,10 @@ services:
     exposure: none
     private_origin_addresses: []
     route_ids: []
-    volume_ids: []
+    volume_ids: [publisher-redis-data]
     secret_ids: [platform-publisher-postiz-redis-password]
-    writable_paths: []
-    backup_adapter_id: publisher-redis-rebuild
+    writable_paths: [/var/lib/docker/volumes/dholbeat-publisher_postiz-redis-data/_data]
+    backup_adapter_id: publisher-postiz-state
     health_probe: {type: command, target: redis-cli ping}
     resources:
       cpus: 0.25
@@ -67,7 +67,7 @@ services:
       pids: 96
       logs: {driver: json-file, max_size_mb: 10, max_files: 3}
     monitoring_owner: platform-operations
-    rollback_command: docker compose up --detach postiz-redis
+    rollback_command: /usr/local/sbin/dholbeat-publisher-state restore-disposable
   - id: publisher-temporal-postgres
     project_id: platform
     host_id: publish-1

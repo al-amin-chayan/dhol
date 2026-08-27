@@ -90,6 +90,8 @@
     group: root
     mode: "0750"
   loop:
+    - src: publisher_docker.py
+      dest: "{{ publisher_docker_cli }}"
     - src: publisher_control.py
       dest: /usr/local/sbin/dholbeat-publisher-control
     - src: publisher_state.py
@@ -118,6 +120,7 @@
 
 - name: Converge the selected publisher unless the kill switch is active
   community.docker.docker_compose_v2:
+    docker_cli: "{{ publisher_docker_cli }}"
     project_src: "{{ publisher_project_directory }}"
     files: [compose.yml]
     state: present

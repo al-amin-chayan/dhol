@@ -24,6 +24,18 @@ volumes:
     rpo_hours: 24
     rto_hours: 4
     restore_probe: /usr/local/sbin/dholbeat-publisher-state restore-disposable
+  - id: publisher-redis-data
+    service_id: publisher-redis
+    owner_project_id: platform
+    mount_path: /var/lib/docker/volumes/dholbeat-publisher_postiz-redis-data/_data
+    classification: retained
+    data_classification: confidential
+    size_limit_mb: 512
+    backup_adapter_id: publisher-postiz-state
+    retention: {max_age_days: 3650, purge_events: [publisher-retired], owner: platform}
+    rpo_hours: 24
+    rto_hours: 4
+    restore_probe: /usr/local/sbin/dholbeat-publisher-state restore-disposable
   - id: publisher-temporal-visibility-data
     service_id: publisher-temporal-visibility
     owner_project_id: platform

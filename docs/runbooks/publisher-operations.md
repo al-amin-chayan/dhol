@@ -119,9 +119,12 @@ sudo dholbeat-publisher-control freeze --reason 'INCIDENT REASON'
 sudo dholbeat-publisher-control status
 ```
 
-The marker is written before Postiz and Temporal stop. Ansible will not restart
-them while it exists; PostgreSQL, Redis, and Elasticsearch remain available for
-diagnosis. This preserves approval/audit and publisher state.
+The marker is written before Postiz and Temporal stop. Ansible's publisher-only
+Docker CLI guard takes the same host lock, rechecks the marker under that lock
+immediately before any `compose up`, and holds the lock through the mutation.
+It therefore cannot restart the senders across a concurrent freeze. PostgreSQL,
+Redis, and Elasticsearch remain available for diagnosis. This preserves
+approval/audit and publisher state.
 
 Postiz `v2.23.0` returning success from `DELETE /public/v1/posts/<id>` does not
 prove its Temporal workflow stopped. A `500` is also indeterminate. The caller
@@ -133,8 +136,9 @@ sudo dholbeat-publisher-control terminate-post-workflow --post-id POST_ID
 sudo dholbeat-publisher-control verify-post-workflow-stopped --post-id POST_ID
 ```
 
-Only a non-running Temporal status is cancellation evidence. If the status
-cannot be queried or remains `1` (`RUNNING`), keep the global switch frozen; do
+Only a supported Temporal workflow description returning a concrete non-running
+status is cancellation evidence. A missing workflow, invalid response, query
+failure, or `RUNNING` status fails closed; keep the global switch frozen and do
 not retry a provider write.
 
 Unfreeze only after the incident cause, current final approval/hash, mapping,
@@ -160,12 +164,15 @@ sudo dholbeat-publisher-state backup --backup-id BACKUP_ID \
 sudo dholbeat-publisher-state verify --backup-id BACKUP_ID
 ```
 
-The adapter stops Postiz and Temporal, dumps both PostgreSQL databases, creates
-an Elasticsearch filesystem snapshot, hashes every file, and restarts the two
-senders only when the global kill switch was not already active. Redis is a
-bounded rebuildable cache and is not retained. WP-07 must write the verified
+The adapter stops Postiz, Temporal, and Redis; dumps both PostgreSQL databases;
+copies Redis AOF state only while Redis is stopped; creates an Elasticsearch
+filesystem snapshot; and hashes every file. Redis uses a retained volume,
+`appendonly yes`, and `noeviction`: DG-01 proved no Postiz state rebuildable, so
+it cannot be discarded until a later exact live behavior drill proves that safe.
+The adapter restores Redis after the copy and restarts the two senders only when
+the global kill switch was not already active. WP-07 must write the verified
 directory directly to encrypted restic, then purge that exact staging child;
-staging has a 4 GiB bound and one-day maximum age. Copying live database or
+staging has a 4 GiB bound and one-day maximum age. Copying live PostgreSQL or
 Elasticsearch directories is forbidden.
 
 ## Disposable restore
@@ -178,19 +185,26 @@ sudo dholbeat-publisher-state restore-disposable --backup-id BACKUP_ID \
   --project-name dholbeat-publisher-restore-DRILL_ID --loopback-port 15001
 ```
 
-The explicit project name creates isolated volumes and networks. The committed
-restore override makes the application edge network internal and disables
-Postiz cron before restored Temporal/Postiz start, so a retained scheduled job
-cannot contact R2 or any social provider. The receipt passes only when Postiz
-organization count, Temporal running-workflow count, all file digests, and the
-exact Visibility control match the backup.
+Before creating a container, the adapter renders the exact operator-selected
+Compose merge and requires the validated disposable project name, internal-only
+attached networks, disabled Postiz cron, and a read-only snapshot mount. It also
+requires enough Docker-filesystem space for twice the backup size while
+preserving 8 GiB free. The receipt binds those effective controls by SHA-256 and
+passes only when Postiz organization count, retained Redis key count, Temporal
+running-workflow count, all file digests, and the exact Visibility control match
+the backup. That key-count check proves the retained bytes loaded; only the
+later exact scheduling drill can prove whether Redis is behaviorally
+rebuildable.
 
-After collecting redacted evidence, remove only that exact disposable project:
+The default command removes the exact disposable project, networks, and volumes
+on success or failure; it emits a verified result only after successful cleanup.
+For a bounded live inspection, add `--keep`; this is an explicit temporary disk
+exception and must be followed immediately by:
 
 ```sh
 cd /opt/dholbeat/publisher
 docker compose --file compose.yml --file compose.restore.yml \
-  --project-name dholbeat-publisher-restore-DRILL_ID down --volumes
+  --project-name dholbeat-publisher-restore-DRILL_ID down --volumes --remove-orphans
 ```
 
 A production restore is not this command. It requires the WP-07/WP-20 reviewed
@@ -219,14 +233,34 @@ production recovery plan, and reconciliation before any sender is unfrozen.
 Do not clean old images until the rollback window closes and a fresh post-update
 snapshot passes disposable restore.
 
+## Explicit decommission after activation
+
+`publisher_enabled: false` is an admission/apply gate; changing it does not
+claim that already-running containers stopped. To decommission an activated
+publisher, use a separately reviewed exact-host change, then:
+
+```sh
+sudo dholbeat-publisher-control freeze --reason 'reviewed publisher decommission'
+cd /opt/dholbeat/publisher
+sudo docker compose down --remove-orphans
+sudo dholbeat-publisher-control status
+```
+
+Require an empty running-service set and retain the kill-switch marker. Never
+add `--volumes` to this command: PostgreSQL, Redis, and Visibility destruction is
+a separate destructive recovery decision requiring a verified backup and exact
+volume names. Commit `publisher_enabled: false` with the reviewed decommission
+receipt so later applies cannot reactivate the stack accidentally.
+
 ## Seven-day canary and stop conditions
 
 Before a real brand account is admitted, record seven continuous days with no
 OOM, less than 4.5 GiB peak publisher RAM, less than 18 GiB steady host disk,
-and at least 8 GiB update headroom. Exercise the global kill switch and one
-scheduler-verified cancellation. Any threshold breach stops admission and
-returns measured prune/scheduling/upgrade options to the founder; it does not
-raise a limit or purchase a larger VPS automatically.
+at least 8 GiB update headroom, and Postiz `/tmp` below 80% of its 256 MiB
+tmpfs. Exercise the global kill switch and one scheduler-verified cancellation.
+Any threshold breach stops admission and returns measured
+prune/scheduling/upgrade options to the founder; it does not raise a limit or
+purchase a larger VPS automatically.
 
 ## Credential rotation
 

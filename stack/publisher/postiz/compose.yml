@@ -39,7 +39,7 @@ services:
       - "127.0.0.1:${PUBLISHER_LOOPBACK_PORT:?PUBLISHER_LOOPBACK_PORT is required}:5000"
     networks: [publisher-edge, publisher-state]
     tmpfs:
-      - /tmp:size=536870912,mode=1777
+      - /tmp:size=268435456,mode=1777
     depends_on:
       postiz-postgres: {condition: service_healthy}
       postiz-redis: {condition: service_healthy}
@@ -91,15 +91,17 @@ services:
       - --requirepass
       - "${POSTIZ_REDIS_PASSWORD:?POSTIZ_REDIS_PASSWORD is required}"
       - --appendonly
-      - "no"
-      - --save
-      - ""
+      - "yes"
+      - --appendfsync
+      - everysec
       - --maxmemory
       - 128mb
       - --maxmemory-policy
-      - allkeys-lru
+      - noeviction
     environment:
       REDISCLI_AUTH: "${POSTIZ_REDIS_PASSWORD:?POSTIZ_REDIS_PASSWORD is required}"
+    volumes:
+      - postiz-redis-data:/data
     networks: [publisher-state]
     healthcheck:
       test: [CMD, redis-cli, ping]
@@ -199,6 +201,8 @@ networks:
 
 volumes:
   postiz-postgres-data:
+    labels: {com.dholbeat.retention: retained, com.dholbeat.owner: platform}
+  postiz-redis-data:
     labels: {com.dholbeat.retention: retained, com.dholbeat.owner: platform}
   temporal-postgres-data:
     labels: {com.dholbeat.retention: retained, com.dholbeat.owner: platform}
