@@ -217,15 +217,15 @@ requires a fresh founder cost decision. See the linked IaC plan for thresholds.
       later registered founder-owned projects such as w3exam; no project gets a
       duplicate stack by default, and admission remains subject to the IaC
       plan's access, data, isolation and measured-capacity gates
-- [x] ~~Postiz vs Mixpost final call~~ → **Postiz**, self-hosted
-      AGPL-3.0-or-later edition pinned at `v2.23.0`, founder-approved
-      2026-08-25 on the measured evidence in
+- [ ] Reconfirm the Postiz vs Mixpost final call after material new evidence.
+      The founder selected **Postiz** `v2.23.0` on 2026-08-25, but a later live
+      drill found that deleting a scheduled post leaves its Temporal workflow
+      `RUNNING`; what that orphan does at publish time is untested. The current
+      packet is
       [`docs/decisions/publisher-selection.md`](docs/decisions/publisher-selection.md).
-      Mixpost Lite `v2.6.0` was disqualified on capability, not cost: no
-      workspace routes and no machine API, with one login's data visible to
-      another. Paid Mixpost editions stay unevaluated because their images
-      require a licence key. Software cost is `$0` either way. `WP-13` is
-      unblocked and inherits the seven conditions in that record.
+      The founder must explicitly reaffirm Postiz with the scheduler-verified
+      kill-switch condition or reopen the choice. `DG-01` and `WP-13` remain
+      blocked until then. Software cost remains `$0` for the evaluated editions.
 - [ ] Approval bot: custom Telegram bot vs Hermes gateway
 - [ ] Per-brand X usage (worth $2–3/mo per brand?)
 - [ ] Media archival: purge-only vs B2 push
@@ -259,3 +259,4 @@ requires a fresh founder cost decision. See the linked IaC plan for thresholds.
 | 2026-08-25 | Issue #16 (`DG-01`): added a disposable publisher-evaluation harness (`infra/tests/publisher-eval/`) and the decision packet [`docs/decisions/publisher-selection.md`](docs/decisions/publisher-selection.md). Postiz `v2.23.0` passed all seventeen isolation, credential and lifecycle checks; Mixpost Lite `v2.6.0` is disqualified — it has no workspace routes and no machine API, and one login's data is visible to another. Paid Mixpost editions stay unevaluated because their images require a licence key. $0/month software cost either way. The founder decision itself remains open in §9. |
 | 2026-08-25 | Founder closed `DG-01`: **Postiz**, self-hosted AGPL-3.0 edition pinned at `v2.23.0`, chosen on the measured evidence in [`docs/decisions/publisher-selection.md`](docs/decisions/publisher-selection.md). Postiz passed all seventeen isolation, credential and lifecycle checks; Mixpost Lite `v2.6.0` was disqualified for having no workspace routes and no machine API. Elasticsearch is not optional for Postiz `v2.23.0`, so `publish-1` runs a six-container topology — `WP-13` inherits that and the other conditions in the record. Monthly software cost unchanged at `$0`. |
 | 2026-08-25 | PR #49 review corrections to the `DG-01` record (no change to the decision — Postiz `v2.23.0` re-confirmed): the Postiz licence is **`AGPL-3.0-or-later`**, not `AGPL-3.0-only` — the `LICENSE` at the pinned tag grants version 3 "or (at your option) any later version" — and both licence sources now point at immutable tags (`postiz-app@v2.23.0`, `mixpost@2.6.0`) instead of `main`. The paid-Mixpost rationale was made even-handed: Mixpost Pro ($299) *claims* multi-tenant support, API and webhooks on <https://mixpost.app/pricing> and is therefore "claimed sufficient, untested", never measured; the Enterprise-console note covers one human login owning several workspaces, which is ergonomics and is not applied to Postiz either (a Postiz tenant also costs a login), so that argument is withdrawn — cost alone remains decisive. Mixpost Lite's default-admin-password claim is relabelled a manual observation, not harness evidence. Monthly cost unchanged at `$0`. |
+| 2026-08-27 | PR #49 later review evidence reopened `DG-01`: on Postiz `v2.23.0`, `DELETE /public/v1/posts/<id>` removes the row but leaves its Temporal workflow `RUNNING`; the orphan's publish-time behavior is untested and reaches the hard human-approval rule. The original 2026-08-25 selection is preserved as history, but `WP-13` is blocked until the founder explicitly reaffirms Postiz with a scheduler-verified kill switch or reopens the choice. Monthly cost unchanged at `$0`. |

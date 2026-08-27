@@ -97,9 +97,12 @@ digest and on a paid edition marked evaluable.
 measured product finding rather than a broken harness: a cancelled post's
 Temporal workflow keeps running. `backup.dump-restore` fails for the same
 reason, because it re-checks the workflow after cancelling the retained post.
-Both are recorded in the decision record. Do not "fix" them by relaxing the
-predicate — the whole point is that the row disappearing is not the job
-stopping.
+Before that cancellation, the restore drill requires the workflow to be
+`RUNNING` and executes Postiz's exact Temporal Visibility predicate,
+`postId="<id>" AND ExecutionStatus="Running"`, requiring it to return the exact
+`post_<id>` workflow after Elasticsearch is rebuilt. Both failures are recorded
+in the decision record. Do not "fix" them by relaxing the predicate — the whole
+point is that the row disappearing is not the job stopping.
 
 ## When a run wedges
 

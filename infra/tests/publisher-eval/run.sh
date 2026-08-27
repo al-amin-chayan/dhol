@@ -286,21 +286,68 @@ temporal_workflow_status() {
   esac
 }
 
-# Ask the Visibility store the same question Postiz asks before it manages a
-# scheduled post. Temporal serves list queries from Visibility, so a workflow
-# can exist in primary persistence and still be invisible to the exact lookup
-# the publisher depends on. Prints the hit count, or `error`.
+# Ask Temporal the exact Visibility question Postiz asks before it manages a
+# scheduled post. The pinned auto-setup image already carries the official
+# `temporal` CLI, so this goes through List Workflow Executions rather than
+# assuming that a raw Elasticsearch field is equivalent to Temporal's custom
+# Search Attribute query. Prints the number of returned executions whose
+# workflow id is exactly the expected `post_<id>`, or `error`.
 temporal_visibility_hits() {
   local container="$1"
-  local workflow_id="$2"
-  [ -n "$workflow_id" ] || { printf 'error\n'; return 0; }
-  local body count
-  body="$(docker exec "$container" curl -s --max-time 20 \
-    "http://localhost:9200/temporal_visibility_v1_dev/_count?q=WorkflowId:%22${workflow_id}%22" \
-    2>/dev/null)"
-  count="$(printf '%s' "$body" | sed -n 's/.*"count":\([0-9][0-9]*\).*/\1/p')"
+  local post_id="$2"
+  local workflow_id="$3"
+  [ -n "$post_id" ] && [ -n "$workflow_id" ] || { printf 'error\n'; return 0; }
+  local body count attempt
+  attempt=0
+  # The auto-setup service can accept gRPC connections before the rebuilt
+  # Elasticsearch Visibility store is ready. Retry command failures only; an
+  # empty successful response is the measured result and must not be retried
+  # into a false pass. Each request is bounded because Temporal otherwise
+  # retries an unavailable Visibility store for more than a minute itself.
+  while :; do
+    if body="$(docker exec "$container" temporal workflow list \
+      --address temporal:7233 \
+      --namespace default \
+      --query "postId=\"${post_id}\" AND ExecutionStatus=\"Running\"" \
+      --limit 10 \
+      --command-timeout 15s \
+      --output json \
+      2>"$TEMP_ROOT/temporal-visibility.err")"; then
+      break
+    fi
+    attempt=$((attempt + 1))
+    if [ "$attempt" -ge 3 ]; then
+      printf 'error\n'
+      return 0
+    fi
+    sleep 5
+  done
+  if ! count="$(printf '%s' "$body" | python3 -c '
+import json, sys
+
+expected = sys.argv[1]
+try:
+    rows = json.load(sys.stdin)
+except (TypeError, ValueError):
+    raise SystemExit(2)
+if not isinstance(rows, list):
+    raise SystemExit(2)
+matches = 0
+for row in rows:
+    if not isinstance(row, dict):
+        raise SystemExit(2)
+    execution = row.get("execution")
+    if not isinstance(execution, dict):
+        raise SystemExit(2)
+    if execution.get("workflowId") == expected:
+        matches += 1
+print(matches)
+' "$workflow_id")"; then
+    printf 'error\n'
+    return 0
+  fi
   case "${count:-}" in
-    '') printf 'error\n' ;;
+    ''|*[!0-9]*) printf 'error\n' ;;
     *) printf '%s\n' "$count" ;;
   esac
 }
@@ -593,12 +640,14 @@ case "$CANDIDATE" in
         --restored-pending-post-at "$RETAINED_POST_AT"
       )
     fi
-    # Ask the Visibility store directly, before anything cancels the post. This
-    # is the lookup Postiz performs to find a scheduled post's workflow, and the
-    # rebuild empties it — so it is measured rather than assumed.
+    # Ask Temporal's Visibility API directly, before anything cancels the post,
+    # with the exact custom-attribute predicate Postiz uses. The rebuild empties
+    # Elasticsearch, so this must prove that the restored `postId` attribute is
+    # queryable and resolves to this exact running workflow.
     VISIBILITY_AFTER=error
     if [ "$HAS_ES" -eq 1 ]; then
-      VISIBILITY_AFTER="$(temporal_visibility_hits "$(container temporal-elasticsearch)" "$RETAINED_WORKFLOW_ID")"
+      VISIBILITY_AFTER="$(temporal_visibility_hits "$(container temporal)" \
+        "$RETAINED_POST_ID" "$RETAINED_WORKFLOW_ID")"
     fi
 
     python3 "$SCRIPT_DIR/probe.py" "${RESTORE_PROBE_ARGS[@]}" 2>/dev/null || true

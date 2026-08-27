@@ -34,10 +34,11 @@ REQUIRED_BEHAVIOUR = {
         # produced a post that never fires at its time.
         "pending_post_still_queued",
         "workflow_execution_restored",
-        # The publisher must still be able to manage that workflow, not merely
-        # hold it: lifecycle operations go through Temporal's Visibility store,
-        # which the rebuild empties.
-        "pending_post_manageable",
+        # The public API must at least remove its restored row. This deliberately
+        # does not call the workflow "manageable": Postiz can remove the row
+        # while silently failing to terminate the scheduler job, which is judged
+        # separately below.
+        "pending_post_row_removed_after_cancel",
         # The publisher reports success on a cancel whether or not it actually
         # found and terminated the workflow, so the scheduler is asked directly.
         "workflow_terminated_after_cancel",

@@ -3,10 +3,11 @@
 | Field | Value |
 | --- | --- |
 | Gate | `DG-01 publisher` (`docs/plans/two-vps-reproducible-implementation-plan.md` §7) |
-| Status | **decided — Postiz** |
-| Evidence run | `infra/tests/publisher-eval/run.sh`, 2026-08-25 |
-| Unblocks | `WP-13` (`publish-1` and the selected publisher adapter), then `WP-17` |
-| Decision date | 2026-08-25 |
+| Status | **founder reconfirmation required** |
+| Evidence runs | `infra/tests/publisher-eval/run.sh`, 2026-08-25 through 2026-08-27 |
+| Blocks | `WP-13` (`publish-1` and the selected publisher adapter), then `WP-17` |
+| Original decision date | 2026-08-25 |
+| Material new evidence | 2026-08-27 — cancellation leaves the workflow running |
 | Deciding human | Al Amin Chayan (founder) |
 
 ## Question
@@ -56,6 +57,16 @@ account, OAuth grant, provider call or purchase was involved.**
 A cross-tenant rejection is only recorded as isolation evidence when the
 identical request is accepted for the tenant's own channel, so a malformed
 request body cannot be mistaken for an authorization boundary.
+
+The current harness asks Temporal's List Workflow Executions API for Postiz's
+exact `postId="<id>" AND ExecutionStatus="Running"` predicate and then requires
+the returned workflow id to equal `post_<id>`. Its corrected-endpoint live
+result after an Elasticsearch rebuild remains **unproven**: the 2026-08-27
+rerun passed all seventeen matrix checks, then the local Docker daemon failed
+to stop the disposable Postiz container before the restore phase. The harness
+failed closed, the labelled stack was removed manually, and zero resources
+remained. An earlier raw-Elasticsearch count is not evidence for this API
+predicate and is not credited below.
 
 ### Result summary
 
@@ -224,7 +235,7 @@ bound to a named later gate, not quietly dropped.
 | Scheduled create, list, cancel/delete | **met for the post row, not for the job** | `posts.schedule`, `posts.list`, `posts.cancel`; cancellation re-reads the window and the row is gone. The `cancel.terminates-workflow` drill shows the underlying workflow is not stopped — finding 3 |
 | Immediate publishing (`type=now`) | **deferred to `WP-13` canary-account gate** | never exercised: `create_post` in `infra/tests/publisher-eval/probe.py` always sends `type=schedule` with a future date. A genuine `type=now` call against a database-fixture channel would attempt a real provider call, which DG-01 forbids, so no provider-safe drill is possible here; it runs against the same founder-approved canary connection as token refresh, below |
 | Token refresh behaviour | **deferred to `WP-13` canary-account gate** | needs a connected provider account, which DG-01 forbids here. No synthetic substitute is honest: refresh is provider behaviour, not publisher behaviour. Runs against a founder-approved canary connection, per the sequence in Founder decision |
-| Application-aware backup/restore | **met** | restore-after-rebuild drill: Postiz and Temporal databases destroyed and reloaded from dumps, Elasticsearch rebuilt from empty, then login, credential, own-channel, tenant boundary, and a pending post still queued with an open workflow behind it |
+| Application-aware backup/restore | **partly met; exact Visibility restore unproven and composite drill fails on cancellation** | Completed drills destroy and reload the Postiz and Temporal databases and rebuild Elasticsearch from empty; login, credential, own-channel, tenant boundary, the queued post, and its open workflow return. The corrected harness now requires Postiz's exact Temporal Visibility query too, but the corrected-endpoint rerun was interrupted by a local Docker stop failure before restore and cannot be credited. The composite drill independently exposes finding 3 when cancellation leaves the workflow running |
 | 6 GB / 30 GB footprint | **partly met** | peak RAM and topology disk measured; host steady usage is a lower bound only |
 | Update headroom | **not met — unmeasured** | needs a real 30 GB host mid-upgrade; the harness reports `unmeasured` rather than a computed pass |
 | Update rollback | **deferred to `WP-13`** | no pinned upgrade/rollback drill was run; the evaluation converges one version |
@@ -381,16 +392,16 @@ The founder selected Postiz on 2026-08-25. Finding 3 — a cancelled post's
 workflow keeps running — was measured afterwards, during a later review round,
 and is recorded here rather than folded silently into the existing text.
 
-It does not change the comparison: Mixpost Lite cannot host two projects or
-expose a machine API at all, so it was never the alternative this would tip
-towards, and the paid editions remain unevaluated. It does change what `WP-13`
-must build, and it raises a question the founder may want to answer before real
-accounts are connected: whether a publisher whose cancel API does not stop the
-job is acceptable given `README.md`'s human-approval rule. The evaluation's
-answer is that it is workable only if the kill switch verifies termination
-independently, which is now condition 5.
+It does not change the measured comparison: Mixpost Lite cannot host two
+projects or expose a machine API at all, and the paid editions remain
+unevaluated. It does materially change the risk the founder originally saw.
+Whether a publisher whose cancel API does not stop the job is acceptable under
+`README.md`'s human-approval rule is a founder decision, not an inference the
+evaluation or either agent may make. `DG-01` therefore reopened when this
+finding arrived and remains open until the founder explicitly accepts or
+rejects Postiz with this evidence in hand.
 
-## Founder decision
+## Founder decision history and pending reconfirmation
 
 > Recorded from the founder's explicit instruction on 2026-08-25, after reading
 > this document: "my decision is go with Postiz." No agent selected or inferred
@@ -400,14 +411,18 @@ independently, which is now condition 5.
   edition, AGPL-3.0-or-later, pinned at `v2.23.0`
   (`ghcr.io/gitroomhq/postiz-app:v2.23.0@sha256:785f97312f66a347fb96cdccc4ded5a33ced69a672c89a9adc8054e7d6a21dc5`)
 - **Date:** 2026-08-25
-- **Notes and conditions:** none added beyond this document. Selecting Postiz
-  carries the seven `WP-13` conditions listed under Recommendation above, which
-  are part of the decision rather than advice attached to it.
+- **Original notes and conditions:** none stated beyond the packet the founder
+  read on 2026-08-25. Condition 5's scheduler-verified cancellation requirement
+  was added only after the new 2026-08-27 measurement and must not be attributed
+  retroactively to that instruction.
 
-`DG-01` is closed. `WP-13` may start, and the publisher role, Compose project
-and dump/restore adapter may now be committed under its own review.
+**Pending founder action:** explicitly reaffirm Postiz `v2.23.0` with finding 3
+and condition 5 understood, or reopen the candidate choice. Until that happens,
+`DG-01` is open and `WP-13` remains blocked; no publisher role, Compose project,
+or adapter may be committed.
 
-Closing this gate does not close the criteria dispositioned `deferred` above.
+Reconfirming and closing this gate will not close the criteria dispositioned
+`deferred` above.
 Update rollback, update headroom on a real 30 GB host, immediate publishing,
 token refresh and duplicate-post protection are `WP-13` obligations. The last
 three follow a fixed sequence, not a single blanket precondition: the founder
@@ -417,8 +432,9 @@ canary, and only then may production publishing be enabled or real brand
 accounts be onboarded. They are pre-conditions on production publishing and
 brand-account onboarding, not on connecting any account at all.
 
-Changing this decision means a new dated row in the status table and a
-`README.md` §10 change-log line, never a silent edit.
+The founder's response to the pending reconfirmation must be recorded here with
+its date and appended to the `README.md` §10 change log, never folded silently
+into the 2026-08-25 instruction.
 
 ## Limitations
 

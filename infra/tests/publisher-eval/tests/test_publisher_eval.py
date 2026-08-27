@@ -336,7 +336,7 @@ RESTORED_OK = {
     # Holding the workflow is not the same as being able to manage it: Postiz
     # finds a scheduled post's workflow through a Temporal list query, and list
     # queries are served by the Visibility store the rebuild empties.
-    "pending_post_manageable": True,
+    "pending_post_row_removed_after_cancel": True,
     # Postiz reports a successful cancel whether or not it found and terminated
     # the workflow, and Temporal keeps closed executions — so the scheduler is
     # asked directly, and the lookup the publisher depends on must return it.
@@ -626,11 +626,11 @@ def test_mixpost_is_not_asked_for_a_scheduler_it_lacks() -> None:
     assert result == "pass"
 
 
-def test_a_post_the_publisher_can_no_longer_manage_fails() -> None:
-    results = dict(RESTORED_OK, pending_post_manageable=False)
+def test_a_cancel_that_does_not_remove_the_restored_row_fails() -> None:
+    results = dict(RESTORED_OK, pending_post_row_removed_after_cancel=False)
     result, detail = restore_verdict.judge(results, "0", "3", "3", "postiz")
     assert result == "fail"
-    assert "pending_post_manageable" in detail
+    assert "pending_post_row_removed_after_cancel" in detail
 
 
 def test_a_closed_workflow_is_not_a_restored_schedule() -> None:
@@ -656,3 +656,31 @@ def test_a_workflow_absent_from_visibility_fails() -> None:
     result, detail = restore_verdict.judge(results, "0", "3", "3", "postiz")
     assert result == "fail"
     assert "visibility_lists_workflow" in detail
+
+
+def test_visibility_uses_postiz_exact_temporal_query_and_workflow_id() -> None:
+    function = _extract_shell_function("temporal_visibility_hits")
+    assert 'postId=\\"${post_id}\\" AND ExecutionStatus=\\"Running\\"' in function
+    assert "temporal workflow list" in function
+    assert "--address temporal:7233" in function
+    assert "--command-timeout 15s" in function
+    assert "WorkflowId:%22" not in function
+
+    script = f'''\
+set -uo pipefail
+TEMP_ROOT=$(mktemp -d)
+docker() {{
+  if [ ! -f "$TEMP_ROOT/visibility-ready" ]; then
+    : >"$TEMP_ROOT/visibility-ready"
+    return 1
+  fi
+  printf '%s' '[{{"execution":{{"workflowId":"post_expected"}}}},{{"execution":{{"workflowId":"post_other"}}}}]'
+}}
+sleep() {{ :; }}
+{function}
+temporal_visibility_hits temporal-container expected post_expected
+rm -rf "$TEMP_ROOT"
+'''
+    completed = _run_bash(script)
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == "1"

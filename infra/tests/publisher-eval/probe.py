@@ -909,7 +909,7 @@ def verify_postiz_restore(args: argparse.Namespace) -> dict[str, Any]:
     # way to test that path, so the retained post is cancelled through the same
     # public API n8n would use, and the cancellation is confirmed by re-reading.
     if restored is None:
-        results["pending_post_manageable"] = None
+        results["pending_post_row_removed_after_cancel"] = None
         return results
     cancel_status, cancel_body, _ = api.request(
         "DELETE", f"/public/v1/posts/{pending_id}", headers={"Authorization": api_key}
@@ -922,10 +922,10 @@ def verify_postiz_restore(args: argparse.Namespace) -> dict[str, Any]:
     )
     results["pending_post_cancel_status"] = cancel_status
     results["pending_post_recheck_status"] = recheck_status
-    results["pending_post_manageable"] = (
+    results["pending_post_row_removed_after_cancel"] = (
         cancel_status in (200, 204) and recheck_status == 200 and still_present is False
     )
-    if not results["pending_post_manageable"]:
+    if not results["pending_post_row_removed_after_cancel"]:
         results["pending_post_manage_detail"] = cancel_body[:160]
     return results
 
