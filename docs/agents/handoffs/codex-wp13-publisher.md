@@ -38,7 +38,7 @@ dependency receipts and live fixture evidence below exist.
   restore Compose renders with synthetic values and no network calls.
 - `scripts/check` — passed: repository/branch policy, lint, secret scan, all
   schema/inventory/SOPS/baseline/tooling suites, 90 publisher-evaluation tests,
-  47 selected-publisher tests, the offline publisher contract, and Ansible lint
+  49 selected-publisher tests, the offline publisher contract, and Ansible lint
   with zero failures or warnings.
 - `git diff --check` — passed.
 
@@ -82,9 +82,16 @@ the freeze marker durable before a bounded, operator-visible lock wait; renames
 the restore digest for the controls it actually covers; and replaces brittle
 source/prose assertions with behavioral and whitespace-normalized tests.
 
-Another Follow-up is founder-triggered and must review the later exact PR head.
-The author did not invoke or enqueue it. Live evidence may still change the
-head again before the PR becomes implementation-complete.
+Claude Code performed another founder-triggered Follow-up at
+`5e74ab060fed26026b243e64c5fea1eed488cb18`, verified those five findings
+closed, and raised one required finding plus one suggestion. The author accepted
+both before editing. This third delta reasserts the freeze marker under the lock
+after any concurrent unfreeze and extends the default wait budget for a guarded
+converge that also pulls images.
+
+Any further Follow-up is founder-triggered and must review the later exact PR
+head. The author did not invoke or enqueue it. Live evidence may still change
+the head again before the PR becomes implementation-complete.
 
 ## Cost and rollback boundary
 
