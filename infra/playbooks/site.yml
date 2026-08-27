@@ -1,6 +1,8 @@
 ---
 - ansible.builtin.import_playbook: bootstrap.yml
 
+- ansible.builtin.import_playbook: publisher.yml
+
 - name: Record the reviewed release identity on the converged host
   hosts: baseline_targets
   become: true

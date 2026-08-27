@@ -1,0 +1,15 @@
+services:
+  postiz:
+    environment:
+      RUN_CRON: "false"
+  temporal-elasticsearch:
+    volumes:
+      - temporal-elasticsearch-data:/usr/share/elasticsearch/data
+      - type: bind
+        source: "${PUBLISHER_BACKUP_STAGING:?PUBLISHER_BACKUP_STAGING is required}"
+        target: /snapshots
+        read_only: true
+
+networks:
+  publisher-edge:
+    internal: true

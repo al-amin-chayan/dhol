@@ -1,2 +1,17 @@
 schema_version: 1
-backup_adapters: []
+backup_adapters:
+  - id: publisher-postiz-state
+    type: application-dump
+    owner: platform
+    dump_command: /usr/local/sbin/dholbeat-publisher-state backup
+    restore_probe: /usr/local/sbin/dholbeat-publisher-state restore-disposable
+  - id: publisher-redis-rebuild
+    type: rebuild
+    owner: platform
+    dump_command: null
+    restore_probe: redis cache starts empty and Postiz health remains ready
+  - id: publisher-runtime-reconcile
+    type: rebuild
+    owner: platform
+    dump_command: null
+    restore_probe: runtime reconciles from the selected digest-pinned Compose file

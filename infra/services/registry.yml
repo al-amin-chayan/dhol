@@ -1,2 +1,135 @@
 schema_version: 1
-services: []
+services:
+  - id: publisher
+    project_id: platform
+    host_id: publish-1
+    compose_project: dholbeat-publisher
+    source_dir: stack/publisher/postiz
+    image_id: publisher-postiz
+    exposure: loopback
+    private_origin_addresses: []
+    route_ids: []
+    volume_ids: []
+    secret_ids:
+      - platform-publisher-postiz-jwt
+      - platform-publisher-postiz-db-password
+      - platform-publisher-postiz-redis-password
+      - platform-publisher-media-access-key
+      - platform-publisher-media-secret-access-key
+    writable_paths: []
+    backup_adapter_id: publisher-postiz-state
+    health_probe: {type: http, target: /api/user/self}
+    resources:
+      cpus: 1.5
+      memory_mb: 1400
+      pids: 256
+      logs: {driver: json-file, max_size_mb: 10, max_files: 3}
+    monitoring_owner: platform-operations
+    rollback_command: scripts/infra-apply --limit publish-1 --release PREVIOUS_REVIEWED_TAG
+  - id: publisher-postgres
+    project_id: platform
+    host_id: publish-1
+    compose_project: dholbeat-publisher
+    source_dir: stack/publisher/postiz
+    image_id: publisher-postiz-postgres
+    exposure: none
+    private_origin_addresses: []
+    route_ids: []
+    volume_ids: [publisher-postgres-data]
+    secret_ids: [platform-publisher-postiz-db-password]
+    writable_paths: [/var/lib/docker/volumes/dholbeat-publisher_postiz-postgres-data/_data]
+    backup_adapter_id: publisher-postiz-state
+    health_probe: {type: command, target: pg_isready -U postiz -d postiz}
+    resources:
+      cpus: 0.75
+      memory_mb: 640
+      pids: 128
+      logs: {driver: json-file, max_size_mb: 10, max_files: 3}
+    monitoring_owner: platform-operations
+    rollback_command: /usr/local/sbin/dholbeat-publisher-state restore-disposable
+  - id: publisher-redis
+    project_id: platform
+    host_id: publish-1
+    compose_project: dholbeat-publisher
+    source_dir: stack/publisher/postiz
+    image_id: publisher-postiz-redis
+    exposure: none
+    private_origin_addresses: []
+    route_ids: []
+    volume_ids: []
+    secret_ids: [platform-publisher-postiz-redis-password]
+    writable_paths: []
+    backup_adapter_id: publisher-redis-rebuild
+    health_probe: {type: command, target: redis-cli ping}
+    resources:
+      cpus: 0.25
+      memory_mb: 192
+      pids: 96
+      logs: {driver: json-file, max_size_mb: 10, max_files: 3}
+    monitoring_owner: platform-operations
+    rollback_command: docker compose up --detach postiz-redis
+  - id: publisher-temporal-postgres
+    project_id: platform
+    host_id: publish-1
+    compose_project: dholbeat-publisher
+    source_dir: stack/publisher/postiz
+    image_id: publisher-temporal-postgres
+    exposure: none
+    private_origin_addresses: []
+    route_ids: []
+    volume_ids: [publisher-temporal-postgres-data]
+    secret_ids: [platform-publisher-temporal-db-password]
+    writable_paths: [/var/lib/docker/volumes/dholbeat-publisher_temporal-postgres-data/_data]
+    backup_adapter_id: publisher-postiz-state
+    health_probe: {type: command, target: pg_isready -U temporal -d temporal}
+    resources:
+      cpus: 0.5
+      memory_mb: 512
+      pids: 128
+      logs: {driver: json-file, max_size_mb: 10, max_files: 3}
+    monitoring_owner: platform-operations
+    rollback_command: /usr/local/sbin/dholbeat-publisher-state restore-disposable
+  - id: publisher-temporal-visibility
+    project_id: platform
+    host_id: publish-1
+    compose_project: dholbeat-publisher
+    source_dir: stack/publisher/postiz
+    image_id: publisher-temporal-visibility
+    exposure: none
+    private_origin_addresses: []
+    route_ids: []
+    volume_ids: [publisher-temporal-visibility-data, publisher-backup-staging]
+    secret_ids: []
+    writable_paths:
+      - /var/lib/docker/volumes/dholbeat-publisher_temporal-elasticsearch-data/_data
+      - /var/lib/dholbeat/publisher/backup-staging
+    backup_adapter_id: publisher-postiz-state
+    health_probe: {type: http, target: /_cluster/health}
+    resources:
+      cpus: 1.0
+      memory_mb: 1024
+      pids: 256
+      logs: {driver: json-file, max_size_mb: 10, max_files: 3}
+    monitoring_owner: platform-operations
+    rollback_command: /usr/local/sbin/dholbeat-publisher-state restore-disposable
+  - id: publisher-temporal
+    project_id: platform
+    host_id: publish-1
+    compose_project: dholbeat-publisher
+    source_dir: stack/publisher/postiz
+    image_id: publisher-temporal
+    exposure: none
+    private_origin_addresses: []
+    route_ids: []
+    volume_ids: []
+    secret_ids: [platform-publisher-temporal-db-password]
+    writable_paths: []
+    backup_adapter_id: publisher-runtime-reconcile
+    health_probe: {type: command, target: temporal operator cluster health}
+    resources:
+      cpus: 1.0
+      memory_mb: 768
+      pids: 256
+      logs: {driver: json-file, max_size_mb: 10, max_files: 3}
+    monitoring_owner: platform-operations
+    rollback_command: docker compose up --detach temporal
