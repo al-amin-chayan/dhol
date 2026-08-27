@@ -18,6 +18,7 @@ from publisher_control import (  # noqa: E402
     ControlError,
     bounded_exclusive_lock,
     freeze,
+    parser,
     terminate_workflow,
     unfreeze,
     workflow_status,
@@ -77,6 +78,35 @@ def test_freeze_writes_marker_before_waiting_for_lock(
 
     assert observed == [(lock, 12)]
     assert result["frozen"] is True
+
+
+def test_freeze_reasserts_marker_if_unfreeze_removes_it_while_waiting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    marker = tmp_path / "kill-switch.json"
+    marker.write_text('{"state":"frozen"}\n', encoding="utf-8")
+
+    @contextmanager
+    def finish_unfreeze(_path: Path, _timeout_seconds: int):
+        marker.unlink()
+        yield
+
+    monkeypatch.setattr(
+        publisher_control, "bounded_exclusive_lock", finish_unfreeze
+    )
+    result = freeze(
+        FakeRunner(), marker, "freeze during unfreeze", tmp_path / "publisher.lock", 12
+    )
+
+    assert result["frozen"] is True
+    assert json.loads(marker.read_text(encoding="utf-8"))["reason"] == (
+        "freeze during unfreeze"
+    )
+
+
+def test_freeze_default_wait_allows_converge_and_image_pull() -> None:
+    arguments = parser().parse_args(["freeze", "--reason", "fixture incident"])
+    assert arguments.wait_timeout_seconds == 1200
 
 
 def test_bounded_lock_reports_wait_and_times_out(
