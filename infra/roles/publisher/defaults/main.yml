@@ -11,6 +11,7 @@ publisher_compose_file: "{{ publisher_project_directory }}/compose.yml"
 publisher_restore_compose_file: "{{ publisher_project_directory }}/compose.restore.yml"
 publisher_runtime_env_file: "{{ publisher_project_directory }}/.env"
 publisher_kill_switch_marker: "{{ publisher_state_directory }}/kill-switch.json"
+publisher_docker_cli: /usr/local/sbin/dholbeat-publisher-docker
 publisher_secret_values: {}
 publisher_media_account_id: ""
 publisher_media_bucket: ""

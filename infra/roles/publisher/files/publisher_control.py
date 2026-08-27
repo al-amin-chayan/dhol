@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 import time
 from typing import Iterator, Sequence
@@ -147,23 +148,44 @@ def workflow_status(runner: ComposeRunner, post_id: str) -> str:
         [
             "exec",
             "-T",
-            "temporal-postgres",
-            "psql",
-            "-U",
             "temporal",
-            "-d",
             "temporal",
-            "-tAc",
-            f"select status from current_executions where workflow_id = '{workflow_id}';",
+            "workflow",
+            "describe",
+            "--address",
+            "temporal:7233",
+            "--namespace",
+            "default",
+            "--workflow-id",
+            workflow_id,
+            "--output",
+            "json",
         ],
         capture_output=True,
     )
-    value = result.stdout.strip()
-    if not value:
-        return "absent"
-    if not value.isdigit():
-        raise ControlError("Temporal returned a non-numeric workflow status")
-    return value
+    try:
+        document = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise ControlError("Temporal workflow description is invalid") from error
+    if not isinstance(document, dict):
+        raise ControlError("Temporal workflow description must be an object")
+    information = document.get("workflowExecutionInfo")
+    if not isinstance(information, dict):
+        information = document.get("workflow_execution_info")
+    if not isinstance(information, dict):
+        raise ControlError("Temporal workflow description omits execution info")
+    status = information.get("status")
+    if isinstance(status, dict):
+        status = status.get("name")
+    if status == 1:
+        return "RUNNING"
+    if not isinstance(status, str) or not status:
+        raise ControlError("Temporal workflow description omits status")
+    prefix = "WORKFLOW_EXECUTION_STATUS_"
+    normalized = status.removeprefix(prefix).upper()
+    if normalized == "UNSPECIFIED":
+        raise ControlError("Temporal workflow status is unspecified")
+    return normalized
 
 
 def terminate_workflow(
@@ -172,7 +194,7 @@ def terminate_workflow(
     timeout_seconds: int,
 ) -> str:
     status = workflow_status(runner, post_id)
-    if status != "1":
+    if status != "RUNNING":
         return status
     workflow_id = f"post_{post_id}"
     runner.run(
@@ -196,7 +218,7 @@ def terminate_workflow(
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:
         status = workflow_status(runner, post_id)
-        if status != "1":
+        if status != "RUNNING":
             return status
         time.sleep(2)
     raise ControlError(f"Temporal workflow {workflow_id} remains RUNNING")
@@ -260,13 +282,13 @@ def main() -> None:
                 result = {"schema_version": 1, "post_id": args.post_id, "status": workflow}
             elif args.command == "verify-post-workflow-stopped":
                 workflow = workflow_status(runner, args.post_id)
-                if workflow == "1":
+                if workflow == "RUNNING":
                     raise ControlError(f"Temporal workflow post_{args.post_id} remains RUNNING")
                 result = {"schema_version": 1, "post_id": args.post_id, "status": workflow}
             else:
                 result = status_document(runner, args.marker)
     except ControlError as error:
-        print(f"publisher control failure: {error}", file=os.sys.stderr)
+        print(f"publisher control failure: {error}", file=sys.stderr)
         raise SystemExit(1) from error
     print(json.dumps(result, sort_keys=True))
 

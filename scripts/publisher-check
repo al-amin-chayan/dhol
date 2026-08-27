@@ -36,7 +36,7 @@ cd "$REPO_ROOT"
 
 python infra/tests/publisher/validate.py --root "$REPO_ROOT"
 
-publisher_compose() {
+publisher_command() {
   env \
     PUBLISHER_MAIN_URL=https://publisher.invalid \
     PUBLISHER_LOOPBACK_PORT=15000 \
@@ -51,7 +51,11 @@ publisher_compose() {
     PUBLISHER_MEDIA_SECRET_ACCESS_KEY=fixture \
     PUBLISHER_MEDIA_BUCKET=fixture \
     PUBLISHER_MEDIA_PUBLIC_URL=https://media.invalid \
-    docker-compose "$@"
+    "$@"
+}
+
+publisher_compose() {
+  publisher_command docker-compose "$@"
 }
 
 publisher_compose --file stack/publisher/postiz/compose.yml config --quiet
@@ -60,5 +64,15 @@ publisher_compose \
   --file stack/publisher/postiz/compose.restore.yml \
   --project-name dholbeat-publisher-restore-fixture \
   config --quiet
+publisher_compose \
+  --file stack/publisher/postiz/compose.yml \
+  --file stack/publisher/postiz/compose.restore.yml \
+  --project-name dholbeat-publisher-restore-fixture \
+  config --format json | \
+  publisher_command python infra/roles/publisher/files/publisher_state.py \
+    --lock /tmp/dholbeat-publisher-check.lock \
+    validate-effective-restore \
+    --project-name dholbeat-publisher-restore-fixture \
+    --config-stdin
 
 printf 'publisher Compose render passed\n'
