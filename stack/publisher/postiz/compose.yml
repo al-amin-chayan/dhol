@@ -1,0 +1,211 @@
+name: dholbeat-publisher
+
+x-runtime: &runtime
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  postiz:
+    <<: *runtime
+    image: ghcr.io/gitroomhq/postiz-app:v2.23.0@sha256:785f97312f66a347fb96cdccc4ded5a33ced69a672c89a9adc8054e7d6a21dc5
+    environment:
+      MAIN_URL: "${PUBLISHER_MAIN_URL:?PUBLISHER_MAIN_URL is required}"
+      FRONTEND_URL: "${PUBLISHER_MAIN_URL:?PUBLISHER_MAIN_URL is required}"
+      NEXT_PUBLIC_BACKEND_URL: "${PUBLISHER_MAIN_URL:?PUBLISHER_MAIN_URL is required}/api"
+      BACKEND_INTERNAL_URL: http://localhost:3000
+      JWT_SECRET: "${POSTIZ_JWT_SECRET:?POSTIZ_JWT_SECRET is required}"
+      DATABASE_URL: "postgresql://postiz:${POSTIZ_DB_PASSWORD:?POSTIZ_DB_PASSWORD is required}@postiz-postgres:5432/postiz"
+      REDIS_URL: "redis://:${POSTIZ_REDIS_PASSWORD:?POSTIZ_REDIS_PASSWORD is required}@postiz-redis:6379"
+      TEMPORAL_ADDRESS: temporal:7233
+      IS_GENERAL: "true"
+      RUN_CRON: "true"
+      DISABLE_REGISTRATION: "${POSTIZ_DISABLE_REGISTRATION:?POSTIZ_DISABLE_REGISTRATION is required}"
+      API_LIMIT: "3000"
+      NX_ADD_PLUGINS: "false"
+      STORAGE_PROVIDER: cloudflare
+      UPLOAD_DIRECTORY: ""
+      NEXT_PUBLIC_UPLOAD_DIRECTORY: ""
+      CLOUDFLARE_ACCOUNT_ID: "${PUBLISHER_MEDIA_ACCOUNT_ID:?PUBLISHER_MEDIA_ACCOUNT_ID is required}"
+      CLOUDFLARE_ACCESS_KEY: "${PUBLISHER_MEDIA_ACCESS_KEY:?PUBLISHER_MEDIA_ACCESS_KEY is required}"
+      CLOUDFLARE_SECRET_ACCESS_KEY: "${PUBLISHER_MEDIA_SECRET_ACCESS_KEY:?PUBLISHER_MEDIA_SECRET_ACCESS_KEY is required}"
+      CLOUDFLARE_BUCKETNAME: "${PUBLISHER_MEDIA_BUCKET:?PUBLISHER_MEDIA_BUCKET is required}"
+      CLOUDFLARE_BUCKET_URL: "${PUBLISHER_MEDIA_PUBLIC_URL:?PUBLISHER_MEDIA_PUBLIC_URL is required}"
+      CLOUDFLARE_REGION: auto
+    ports:
+      - "127.0.0.1:${PUBLISHER_LOOPBACK_PORT:?PUBLISHER_LOOPBACK_PORT is required}:5000"
+    networks: [publisher-edge, publisher-state]
+    tmpfs:
+      - /tmp:size=268435456,mode=1777
+    depends_on:
+      postiz-postgres: {condition: service_healthy}
+      postiz-redis: {condition: service_healthy}
+      temporal: {condition: service_healthy}
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:5000/api/user/self')
+          .then((response) => process.exit(response.ok || response.status === 401 ? 0 : 1))
+          .catch(() => process.exit(1))
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 5m
+    cpus: 1.50
+    mem_limit: 1400m
+    pids_limit: 256
+    stop_grace_period: 2m
+
+  postiz-postgres:
+    <<: *runtime
+    image: postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+    environment:
+      POSTGRES_USER: postiz
+      POSTGRES_PASSWORD: "${POSTIZ_DB_PASSWORD:?POSTIZ_DB_PASSWORD is required}"
+      POSTGRES_DB: postiz
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postiz-postgres-data:/var/lib/postgresql/data
+    networks: [publisher-state]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U postiz -d postiz]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+    cpus: 0.75
+    mem_limit: 640m
+    pids_limit: 128
+    stop_grace_period: 1m
+
+  postiz-redis:
+    <<: *runtime
+    image: redis:7.2@sha256:0ba67a00a5ad74574c046711778742c6247f5053b0dca3fdb6ddacd7a82bdc39
+    command:
+      - redis-server
+      - --requirepass
+      - "${POSTIZ_REDIS_PASSWORD:?POSTIZ_REDIS_PASSWORD is required}"
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory
+      - 128mb
+      - --maxmemory-policy
+      - noeviction
+    environment:
+      REDISCLI_AUTH: "${POSTIZ_REDIS_PASSWORD:?POSTIZ_REDIS_PASSWORD is required}"
+    volumes:
+      - postiz-redis-data:/data
+    networks: [publisher-state]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+    cpus: 0.25
+    mem_limit: 256m
+    pids_limit: 96
+    stop_grace_period: 1m
+
+  temporal-postgres:
+    <<: *runtime
+    image: postgres:16@sha256:e17e86066e5ef83e0952a9347f5c792b7ece00972e2aa787a6986f471b3dd3d5
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: "${TEMPORAL_DB_PASSWORD:?TEMPORAL_DB_PASSWORD is required}"
+      POSTGRES_DB: temporal
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - temporal-postgres-data:/var/lib/postgresql/data
+    networks: [publisher-state]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U temporal -d temporal]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+    cpus: 0.50
+    mem_limit: 512m
+    pids_limit: 128
+    stop_grace_period: 1m
+
+  temporal-elasticsearch:
+    <<: *runtime
+    image: elasticsearch:7.17.27@sha256:9a6443f55243f6acbfeb4a112d15eb3b9aac74bf25e0e39fa19b3ddd3a6879d0
+    environment:
+      discovery.type: single-node
+      cluster.name: dholbeat-temporal-visibility
+      cluster.routing.allocation.disk.threshold_enabled: "true"
+      cluster.routing.allocation.disk.watermark.low: 1gb
+      cluster.routing.allocation.disk.watermark.high: 768mb
+      cluster.routing.allocation.disk.watermark.flood_stage: 512mb
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+      xpack.security.enabled: "false"
+      path.repo: /snapshots
+    volumes:
+      - temporal-elasticsearch-data:/usr/share/elasticsearch/data
+      - type: bind
+        source: "${PUBLISHER_BACKUP_STAGING:?PUBLISHER_BACKUP_STAGING is required}"
+        target: /snapshots
+    networks: [publisher-state]
+    healthcheck:
+      test: [CMD-SHELL, "curl --fail --silent http://127.0.0.1:9200/_cluster/health?wait_for_status=yellow >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+      start_period: 1m
+    ulimits:
+      nofile: {soft: 65536, hard: 65536}
+    cpus: 1.00
+    mem_limit: 1024m
+    pids_limit: 256
+    stop_grace_period: 2m
+
+  temporal:
+    <<: *runtime
+    image: temporalio/auto-setup:1.28.1@sha256:607d68caa111338d754771efb876c92dfcdae06d056e4530bb31cd0f37406e6a
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: "${TEMPORAL_DB_PASSWORD:?TEMPORAL_DB_PASSWORD is required}"
+      POSTGRES_SEEDS: temporal-postgres
+      ENABLE_ES: "true"
+      ES_SEEDS: temporal-elasticsearch
+      ES_VERSION: v7
+      TEMPORAL_NAMESPACE: default
+      SKIP_DEFAULT_NAMESPACE_CREATION: "false"
+    networks: [publisher-state]
+    depends_on:
+      temporal-postgres: {condition: service_healthy}
+      temporal-elasticsearch: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, temporal, operator, cluster, health, --address, 127.0.0.1:7233]
+      interval: 10s
+      timeout: 10s
+      retries: 60
+      start_period: 2m
+    cpus: 1.00
+    mem_limit: 768m
+    pids_limit: 256
+    stop_grace_period: 2m
+
+networks:
+  publisher-edge:
+  publisher-state:
+    internal: true
+
+volumes:
+  postiz-postgres-data:
+    labels: {com.dholbeat.retention: retained, com.dholbeat.owner: platform}
+  postiz-redis-data:
+    labels: {com.dholbeat.retention: retained, com.dholbeat.owner: platform}
+  temporal-postgres-data:
+    labels: {com.dholbeat.retention: retained, com.dholbeat.owner: platform}
+  temporal-elasticsearch-data:
+    labels: {com.dholbeat.retention: retained, com.dholbeat.owner: platform}

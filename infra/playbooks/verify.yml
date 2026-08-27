@@ -159,6 +159,15 @@
         tasks_from: connection_probe
       tags: [ssh, connection-safety]
 
+    - name: Verify the selected publisher when its dependency gates are enabled
+      ansible.builtin.import_role:
+        name: publisher
+        tasks_from: verify
+      when:
+        - dholbeat_host_role == 'publisher'
+        - publisher_enabled | default(false) | bool
+      tags: [publisher]
+
     - name: Read the host runtime receipt
       ansible.builtin.slurp:
         src: "{{ release_receipt_path }}"

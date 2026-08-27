@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)"
+# shellcheck source=scripts/lib/common.sh
+source "$SCRIPT_DIR/lib/common.sh"
+REPO_ROOT="$(dholbeat_repo_root "$SCRIPT_PATH")"
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/publisher-check [--inside-controller]
+
+Validate the selected publisher's Compose, mapping, resource, retention, and
+offline safety contracts. This command never contacts a host or provider.
+EOF
+}
+
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  "") ;;
+  --inside-controller) ;;
+  *) dholbeat_die "unexpected publisher-check argument: $1" ;;
+esac
+
+if [ "${1:-}" != "--inside-controller" ]; then
+  exec "$SCRIPT_DIR/controller" exec scripts/publisher-check --inside-controller
+fi
+
+[ "${DHOLBEAT_IN_CONTROLLER:-}" = "1" ] || \
+  dholbeat_die "--inside-controller may run only through scripts/controller"
+cd "$REPO_ROOT"
+
+python infra/tests/publisher/validate.py --root "$REPO_ROOT"
+
+publisher_command() {
+  env \
+    PUBLISHER_MAIN_URL=https://publisher.invalid \
+    PUBLISHER_LOOPBACK_PORT=15000 \
+    PUBLISHER_BACKUP_STAGING=/tmp/dholbeat-publisher-fixture \
+    POSTIZ_JWT_SECRET=fixture \
+    POSTIZ_DB_PASSWORD=fixture \
+    POSTIZ_REDIS_PASSWORD=fixture \
+    TEMPORAL_DB_PASSWORD=fixture \
+    POSTIZ_DISABLE_REGISTRATION=true \
+    PUBLISHER_MEDIA_ACCOUNT_ID=fixture \
+    PUBLISHER_MEDIA_ACCESS_KEY=fixture \
+    PUBLISHER_MEDIA_SECRET_ACCESS_KEY=fixture \
+    PUBLISHER_MEDIA_BUCKET=fixture \
+    PUBLISHER_MEDIA_PUBLIC_URL=https://media.invalid \
+    "$@"
+}
+
+publisher_compose() {
+  publisher_command docker-compose "$@"
+}
+
+publisher_compose --file stack/publisher/postiz/compose.yml config --quiet
+publisher_compose \
+  --file stack/publisher/postiz/compose.yml \
+  --file stack/publisher/postiz/compose.restore.yml \
+  --project-name dholbeat-publisher-restore-fixture \
+  config --quiet
+publisher_compose \
+  --file stack/publisher/postiz/compose.yml \
+  --file stack/publisher/postiz/compose.restore.yml \
+  --project-name dholbeat-publisher-restore-fixture \
+  config --format json | \
+  publisher_command python infra/roles/publisher/files/publisher_state.py \
+    --lock /tmp/dholbeat-publisher-check.lock \
+    validate-effective-restore \
+    --project-name dholbeat-publisher-restore-fixture \
+    --config-stdin
+
+printf 'publisher Compose render passed\n'

@@ -1,0 +1,5 @@
+target: publisher-mappings/project-beta.yml
+operation: set
+path: [brands, 0, accounts, 0, provider_grant_id]
+value: fixture-alpha-grant
+expected_error: "publisher-beta: provider grant fixture-alpha-grant is reused by publisher-alpha"

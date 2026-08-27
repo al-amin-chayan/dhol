@@ -1,2 +1,44 @@
 schema_version: 1
-images: []
+images:
+  - id: publisher-postiz
+    repository: ghcr.io/gitroomhq/postiz-app
+    tag: v2.23.0
+    digest: sha256:785f97312f66a347fb96cdccc4ded5a33ced69a672c89a9adc8054e7d6a21dc5
+    source_url: https://github.com/gitroomhq/postiz-app/pkgs/container/postiz-app
+    license: AGPL-3.0-or-later
+    verified_on: "2026-08-27"
+  - id: publisher-postiz-postgres
+    repository: postgres
+    tag: 17-alpine
+    digest: sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73
+    source_url: https://hub.docker.com/_/postgres
+    license: PostgreSQL
+    verified_on: "2026-08-27"
+  - id: publisher-postiz-redis
+    repository: redis
+    tag: "7.2"
+    digest: sha256:0ba67a00a5ad74574c046711778742c6247f5053b0dca3fdb6ddacd7a82bdc39
+    source_url: https://hub.docker.com/_/redis
+    license: BSD-3-Clause
+    verified_on: "2026-08-27"
+  - id: publisher-temporal-postgres
+    repository: postgres
+    tag: "16"
+    digest: sha256:e17e86066e5ef83e0952a9347f5c792b7ece00972e2aa787a6986f471b3dd3d5
+    source_url: https://hub.docker.com/_/postgres
+    license: PostgreSQL
+    verified_on: "2026-08-27"
+  - id: publisher-temporal-visibility
+    repository: elasticsearch
+    tag: 7.17.27
+    digest: sha256:9a6443f55243f6acbfeb4a112d15eb3b9aac74bf25e0e39fa19b3ddd3a6879d0
+    source_url: https://www.docker.elastic.co/r/elasticsearch/elasticsearch
+    license: Elastic-2.0
+    verified_on: "2026-08-27"
+  - id: publisher-temporal
+    repository: temporalio/auto-setup
+    tag: 1.28.1
+    digest: sha256:607d68caa111338d754771efb876c92dfcdae06d056e4530bb31cd0f37406e6a
+    source_url: https://hub.docker.com/r/temporalio/auto-setup
+    license: MIT
+    verified_on: "2026-08-27"

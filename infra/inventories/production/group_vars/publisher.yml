@@ -2,3 +2,15 @@ schema_version: 1
 scope: publisher
 host_ids: [publish-1]
 public_endpoint_ids: [publisher-admin-api]
+
+# WP-13 desired state is present but cannot activate until these live gates
+# produce reviewed receipts on publish-1: #45/WP-05D, #14/WP-06B and #15/WP-07.
+publisher_enabled: false
+publisher_activation_blockers: [wp05d-publish1, wp06b-publish1, wp07-publish1]
+publisher_selected_adapter: postiz-v2.23.0
+publisher_registration_disabled: true
+publisher_main_url: https://publish.chayan.me
+publisher_loopback_port: 5000
+publisher_media_account_id: ""
+publisher_media_bucket: ""
+publisher_media_public_url: ""

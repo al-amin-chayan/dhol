@@ -1,0 +1,86 @@
+---
+- name: Verify the selected publisher Compose renders with its root-owned environment
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ publisher_compose_file }}"
+      - --project-directory
+      - "{{ publisher_project_directory }}"
+      - config
+      - --quiet
+  changed_when: false
+  no_log: true
+  tags: [publisher, publisher-verify]
+
+- name: Read the host-level publisher kill switch for verification
+  ansible.builtin.stat:
+    path: "{{ publisher_kill_switch_marker }}"
+  register: publisher_verify_kill_switch
+  changed_when: false
+  tags: [publisher, publisher-verify]
+
+- name: Read running services in the selected Compose project
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ publisher_compose_file }}"
+      - --project-directory
+      - "{{ publisher_project_directory }}"
+      - ps
+      - --status
+      - running
+      - --services
+  register: publisher_running_services
+  changed_when: false
+  tags: [publisher, publisher-verify]
+
+- name: Require healthy publisher services or the exact frozen set
+  ansible.builtin.assert:
+    that:
+      - >-
+        (publisher_running_services.stdout_lines | sort) ==
+        ((publisher_verify_kill_switch.stat.exists | bool) |
+        ternary(publisher_expected_frozen_services, publisher_expected_services) | sort)
+    fail_msg: The selected publisher service set is incomplete or violates its kill-switch state.
+  when: not ansible_check_mode
+  tags: [publisher, publisher-verify]
+
+- name: Verify Postiz answers only when the kill switch is inactive
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ publisher_loopback_port }}/api/user/self"
+    method: GET
+    status_code: [200, 401]
+    return_content: false
+  changed_when: false
+  when:
+    - not ansible_check_mode
+    - not publisher_verify_kill_switch.stat.exists
+  tags: [publisher, publisher-verify]
+
+- name: Verify Temporal answers only when the kill switch is inactive
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - --file
+      - "{{ publisher_compose_file }}"
+      - --project-directory
+      - "{{ publisher_project_directory }}"
+      - exec
+      - -T
+      - temporal
+      - temporal
+      - operator
+      - cluster
+      - health
+      - --address
+      - temporal:7233
+  changed_when: false
+  when:
+    - not ansible_check_mode
+    - not publisher_verify_kill_switch.stat.exists
+  tags: [publisher, publisher-verify]

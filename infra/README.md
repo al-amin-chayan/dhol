@@ -23,7 +23,7 @@ or Python installation is never used.
 | `secrets/` | SOPS+age ciphertext and the values-free catalog |
 | `release/` | Release identity, plan digest, and host receipt contract |
 | `playbooks/` | `baseline.yml`, `preflight.yml`, `bootstrap.yml`, `site.yml`, `verify.yml` |
-| `roles/` | `base`, `docker`, `firewall`, `wireguard`, `release_receipt` |
+| `roles/` | Shared baseline roles plus the dependency-gated selected `publisher` role |
 | `tests/disposable/` | The disposable Ubuntu convergence harness |
 | `tests/tooling/` | Fail-closed coverage for the plan, apply, and verify gates |
 
@@ -36,6 +36,10 @@ scripts/check
 This runs the same order locally and in CI: repository policy, branch policy,
 YAML and shell lint, secret scan, schema contracts, the production inventory and
 host baseline contracts, SOPS policy, and every test suite. It contacts nothing.
+
+`scripts/publisher-check` is the narrower offline entry point for the selected
+Postiz Compose, mapping, persistence, restore-isolation, and activation-blocker
+contracts. It uses synthetic render values and never contacts a host/provider.
 
 ## Host commands
 

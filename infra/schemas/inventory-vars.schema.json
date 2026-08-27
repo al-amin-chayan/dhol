@@ -44,6 +44,22 @@
       "type": "array",
       "items": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
       "uniqueItems": true
+    },
+    "publisher_enabled": {"type": "boolean"},
+    "publisher_activation_blockers": {
+      "type": "array",
+      "items": {"enum": ["wp05d-publish1", "wp06b-publish1", "wp07-publish1"]},
+      "uniqueItems": true
+    },
+    "publisher_selected_adapter": {"const": "postiz-v2.23.0"},
+    "publisher_registration_disabled": {"const": true},
+    "publisher_main_url": {"const": "https://publish.chayan.me"},
+    "publisher_loopback_port": {"type": "integer", "minimum": 1024, "maximum": 65535},
+    "publisher_media_account_id": {"type": "string"},
+    "publisher_media_bucket": {"type": "string"},
+    "publisher_media_public_url": {
+      "type": "string",
+      "anyOf": [{"const": ""}, {"format": "uri", "pattern": "^https://"}]
     }
   },
   "allOf": [
