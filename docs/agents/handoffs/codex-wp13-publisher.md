@@ -15,8 +15,9 @@ dependency receipts and live fixture evidence below exist.
 
 - Added only the selected Postiz `v2.23.0` six-container stack with exact image
   digests, loopback-only application exposure, private state services, bounded
-  logs/resources, R2-only media, retained Temporal PostgreSQL and Elasticsearch
-  Visibility, and an outbound-blocked disposable-restore override.
+  logs/resources, R2-only media, retained Postiz PostgreSQL/Redis and Temporal
+  PostgreSQL/Elasticsearch Visibility, and an outbound-blocked disposable-
+  restore override.
 - Added a dependency-gated Ansible role, production-disabled inventory, scoped
   runtime-secret catalog, service/image/volume/backup registries, and offline
   Compose/registry validation.
@@ -25,9 +26,11 @@ dependency receipts and live fixture evidence below exist.
   integration, and provider-grant identities. Two account-owning generic
   fixtures and a no-account third fixture pass; cross-project reuse mutations
   fail.
-- Added a durable global freeze marker, exact Temporal workflow termination and
-  recheck, application-aware Postiz/Temporal/Visibility backup, digest checking,
-  isolated restore, and operational/update/rollback/rotation runbooks.
+- Added a durable global freeze marker, a lock-serialized Ansible activation,
+  exact supported-CLI Temporal workflow termination/recheck, application-aware
+  Postiz/Redis/Temporal/Visibility backup, effective-Compose restore validation,
+  default disposable cleanup, digest checking, and operational/update/rollback/
+  rotation/decommission runbooks.
 
 ## Verification
 
@@ -35,7 +38,7 @@ dependency receipts and live fixture evidence below exist.
   restore Compose renders with synthetic values and no network calls.
 - `scripts/check` — passed: repository/branch policy, lint, secret scan, all
   schema/inventory/SOPS/baseline/tooling suites, 90 publisher-evaluation tests,
-  22 selected-publisher tests, the offline publisher contract, and Ansible lint
+  43 selected-publisher tests, the offline publisher contract, and Ansible lint
   with zero failures or warnings.
 - `git diff --check` — passed.
 
@@ -57,9 +60,22 @@ probe is claimed.
    probes. A real provider connection remains a separate founder-approved
    canary; no real post is authorized here.
 
-Because live evidence will change the implementation head, the founder should
-trigger the required Claude Code baseline review only after the PR becomes
-implementation-complete and ready.
+## Baseline review and author fixes
+
+Claude Code performed the founder-triggered Baseline review at
+`3eecd5208b4e265bfcce772f702452b44bafa2de` and requested three required fixes
+plus eight suggestions. The author recorded an evidence-based `accept`
+disposition for all eleven before editing. The fix delta retains Redis rather
+than assuming it rebuildable; derives restore isolation from the effective
+Compose merge; serializes Compose activation with the kill switch; makes an
+absent workflow fail closed; shrinks and monitors the tmpfs; cleans disposable
+state by default behind a disk-headroom gate; rejects ambiguous memory units;
+binds backup IDs; preserves primary plus restart failures; documents explicit
+decommission; and imports `sys` directly.
+
+Any follow-up is founder-triggered and must review the later exact PR head. The
+author did not invoke or enqueue it. Live evidence may still change the head
+again before the PR becomes implementation-complete.
 
 ## Cost and rollback boundary
 
