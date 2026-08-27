@@ -1,0 +1,5 @@
+target: publisher-mappings/project-beta.yml
+operation: set
+path: [brands, 0, accounts, 0, owner_project_id]
+value: project-alpha
+expected_error: "publisher-beta: publisher account fixture-beta-social belongs to another project"

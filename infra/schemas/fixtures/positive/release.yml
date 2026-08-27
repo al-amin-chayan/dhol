@@ -31,7 +31,7 @@ schema_versions:
   workflow: 1
   n8n_consumer: 1
   hermes_project: 1
-  publisher_mapping: 1
+  publisher_mapping: 2
   workflow_export_index: 1
   workflow_source: 1
 images:

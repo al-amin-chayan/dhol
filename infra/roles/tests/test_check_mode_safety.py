@@ -22,7 +22,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[3]
 ROLE_TASK_FILES = sorted(
     path
-    for role in ("base", "docker", "firewall", "wireguard", "release_receipt")
+    for role in ("base", "docker", "firewall", "wireguard", "release_receipt", "publisher")
     for path in (ROOT / f"infra/roles/{role}/tasks").glob("*.yml")
 )
 
@@ -34,11 +34,13 @@ CONTRACT_ASSERTIONS = {
     "Require a complete VPN declaration before configuring administration",
     "Require the complete reviewed release identity before writing a receipt",
     "Refuse to record a receipt outside the reviewed authorization",
+    "Require selected publisher activation inputs",
     # Controller-side inputs, which exist whether or not the host is mutated.
     "Require readable controller-side connection inputs",
     # A precondition on state that already exists, not a postcondition of this
     # run: it must still refuse during planning.
     "Refuse to remove or replace an undeclared container runtime",
+    "Require verified publisher dependency receipts",
 }
 
 

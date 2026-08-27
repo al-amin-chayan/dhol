@@ -1,0 +1,137 @@
+---
+- name: Require selected publisher activation inputs
+  ansible.builtin.assert:
+    that:
+      - dholbeat_host_id == 'publish-1'
+      - dholbeat_host_role == 'publisher'
+      - publisher_selected_adapter == 'postiz-v2.23.0'
+      - publisher_registration_disabled | bool
+      - publisher_main_url == 'https://publish.chayan.me'
+      - publisher_loopback_port | int == 5000
+      - publisher_media_account_id | length > 0
+      - publisher_media_bucket | length > 0
+      - publisher_media_public_url is match('^https://')
+      - publisher_required_secret_ids | difference(publisher_secret_values.keys() | list) | length == 0
+      - publisher_secret_values['platform-publisher-postiz-db-password'] is match('^[A-Za-z0-9_-]{32,}$')
+      - publisher_secret_values['platform-publisher-postiz-redis-password'] is match('^[A-Za-z0-9_-]{32,}$')
+      - publisher_secret_values['platform-publisher-temporal-db-password'] is match('^[A-Za-z0-9_-]{32,}$')
+    fail_msg: >-
+      Refusing publisher activation: the selected adapter, locked registration,
+      R2 boundary, or scoped runtime secret set is incomplete.
+    quiet: true
+  no_log: true
+  tags: [publisher, publisher-preflight]
+
+- name: Read the prerequisite gate receipts already present on publish-1
+  ansible.builtin.slurp:
+    src: "{{ item.value }}"
+  loop: "{{ publisher_required_dependency_receipts | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: publisher_dependency_receipt_files
+  changed_when: false
+  no_log: true
+  tags: [publisher, publisher-preflight]
+
+- name: Require verified publisher dependency receipts
+  ansible.builtin.assert:
+    that:
+      - (item.content | b64decode | from_yaml).schema_version == 1
+      - (item.content | b64decode | from_yaml).gate == item.item.key
+      - (item.content | b64decode | from_yaml).host_id == 'publish-1'
+      - (item.content | b64decode | from_yaml).verified is sameas true
+      - (item.content | b64decode | from_yaml).reviewed_head is match('^[0-9a-f]{40}$')
+    fail_msg: Refusing publisher activation because a prerequisite gate receipt is absent or invalid.
+    quiet: true
+  loop: "{{ publisher_dependency_receipt_files.results }}"
+  loop_control:
+    label: "{{ item.item.key }}"
+  no_log: true
+  tags: [publisher, publisher-preflight]
+
+- name: Create the bounded publisher desired-state and staging directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ publisher_project_directory }}", owner: root, group: root, mode: "0700"}
+    - {path: "{{ publisher_state_directory }}", owner: root, group: root, mode: "0700"}
+    - {path: "{{ publisher_backup_staging }}", owner: "1000", group: root, mode: "0770"}
+  loop_control:
+    label: "{{ item.path }}"
+  tags: [publisher, publisher-files]
+
+- name: Install the selected digest-pinned publisher Compose file
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../stack/publisher/postiz/compose.yml"
+    dest: "{{ publisher_compose_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  tags: [publisher, publisher-files]
+
+- name: Install the outbound-blocked disposable restore override
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../stack/publisher/postiz/compose.restore.yml"
+    dest: "{{ publisher_restore_compose_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  tags: [publisher, publisher-files]
+
+- name: Install the publisher kill-switch and state adapters
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "0750"
+  loop:
+    - src: publisher_control.py
+      dest: /usr/local/sbin/dholbeat-publisher-control
+    - src: publisher_state.py
+      dest: /usr/local/sbin/dholbeat-publisher-state
+  loop_control:
+    label: "{{ item.dest }}"
+  tags: [publisher, publisher-files]
+
+- name: Render only the publisher-scoped runtime values
+  ansible.builtin.template:
+    src: runtime-env.j2
+    dest: "{{ publisher_runtime_env_file }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+  tags: [publisher, publisher-secrets]
+
+- name: Read the host-level publisher kill switch
+  ansible.builtin.stat:
+    path: "{{ publisher_kill_switch_marker }}"
+  register: publisher_kill_switch
+  changed_when: false
+  tags: [publisher, publisher-kill-switch]
+
+- name: Converge the selected publisher unless the kill switch is active
+  community.docker.docker_compose_v2:
+    project_src: "{{ publisher_project_directory }}"
+    files: [compose.yml]
+    state: present
+    pull: always
+    remove_orphans: true
+    wait: true
+    wait_timeout: 900
+  when:
+    - not ansible_check_mode
+    - not publisher_kill_switch.stat.exists
+  no_log: true
+  tags: [publisher, publisher-compose]
+
+- name: Verify the selected publisher runtime
+  ansible.builtin.import_tasks: verify.yml
+  when: not ansible_check_mode
+  tags: [publisher, publisher-verify]

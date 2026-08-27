@@ -1,12 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://schemas.dholbeat.local/v1/publisher-mapping.schema.json",
-  "title": "Publisher project mapping version 1",
+  "$id": "https://schemas.dholbeat.local/v2/publisher-mapping.schema.json",
+  "title": "Publisher project mapping version 2",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "mapping_id", "project_id", "organization_id", "workspace_id", "api_credential_id", "approval", "brands"],
+  "required": ["schema_version", "adapter", "mapping_id", "project_id", "organization_id", "workspace_id", "api_credential_id", "approval", "brands"],
   "properties": {
-    "schema_version": {"const": 1},
+    "schema_version": {"const": 2},
+    "adapter": {"const": "postiz-v2.23.0"},
     "mapping_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
     "project_id": {"type": "string", "minLength": 1},
     "organization_id": {"type": "string", "minLength": 1},
@@ -27,10 +28,24 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["brand_id", "account_ids"],
+        "required": ["brand_id", "accounts"],
         "properties": {
           "brand_id": {"type": "string", "minLength": 1},
-          "account_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true}
+          "accounts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["account_id", "provider", "provider_grant_id", "owner_project_id", "state"],
+              "properties": {
+                "account_id": {"type": "string", "minLength": 1},
+                "provider": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+                "provider_grant_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
+                "owner_project_id": {"type": "string", "minLength": 1},
+                "state": {"enum": ["fixture", "canary", "active", "revoked"]}
+              }
+            }
+          }
         }
       }
     }

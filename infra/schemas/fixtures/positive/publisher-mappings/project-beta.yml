@@ -1,10 +1,16 @@
-schema_version: 1
+schema_version: 2
+adapter: postiz-v2.23.0
 mapping_id: publisher-beta
 project_id: project-beta
 organization_id: fixture-org-beta
-workspace_id: fixture-workspace-beta
+workspace_id: fixture-org-beta
 api_credential_id: secret-beta-api
 approval: {required: true, binds_content_hash: true}
 brands:
   - brand_id: brand-beta
-    account_ids: [fixture-beta-social]
+    accounts:
+      - account_id: fixture-beta-social
+        provider: fixture-social
+        provider_grant_id: fixture-beta-grant
+        owner_project_id: project-beta
+        state: fixture

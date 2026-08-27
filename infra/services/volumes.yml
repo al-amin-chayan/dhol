@@ -1,2 +1,47 @@
 schema_version: 1
-volumes: []
+volumes:
+  - id: publisher-postgres-data
+    service_id: publisher-postgres
+    owner_project_id: platform
+    mount_path: /var/lib/docker/volumes/dholbeat-publisher_postiz-postgres-data/_data
+    classification: retained
+    data_classification: confidential
+    size_limit_mb: 3072
+    backup_adapter_id: publisher-postiz-state
+    retention: {max_age_days: 3650, purge_events: [project-removed, publisher-retired], owner: platform}
+    rpo_hours: 24
+    rto_hours: 4
+    restore_probe: /usr/local/sbin/dholbeat-publisher-state restore-disposable
+  - id: publisher-temporal-postgres-data
+    service_id: publisher-temporal-postgres
+    owner_project_id: platform
+    mount_path: /var/lib/docker/volumes/dholbeat-publisher_temporal-postgres-data/_data
+    classification: retained
+    data_classification: confidential
+    size_limit_mb: 3072
+    backup_adapter_id: publisher-postiz-state
+    retention: {max_age_days: 3650, purge_events: [publisher-retired], owner: platform}
+    rpo_hours: 24
+    rto_hours: 4
+    restore_probe: /usr/local/sbin/dholbeat-publisher-state restore-disposable
+  - id: publisher-temporal-visibility-data
+    service_id: publisher-temporal-visibility
+    owner_project_id: platform
+    mount_path: /var/lib/docker/volumes/dholbeat-publisher_temporal-elasticsearch-data/_data
+    classification: retained
+    data_classification: confidential
+    size_limit_mb: 3072
+    backup_adapter_id: publisher-postiz-state
+    retention: {max_age_days: 3650, purge_events: [publisher-retired], owner: platform}
+    rpo_hours: 24
+    rto_hours: 4
+    restore_probe: exact Temporal Visibility query survives disposable restore
+  - id: publisher-backup-staging
+    service_id: publisher-temporal-visibility
+    owner_project_id: platform
+    mount_path: /var/lib/dholbeat/publisher/backup-staging
+    classification: ephemeral
+    data_classification: confidential
+    size_limit_mb: 4096
+    backup_adapter_id: null
+    retention: {max_age_days: 1, purge_events: [restic-snapshot-complete, backup-failed], owner: platform}
