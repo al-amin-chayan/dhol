@@ -94,15 +94,22 @@ digest and on a paid edition marked evaluable.
 ## Drills that are expected to fail today
 
 `cancel.terminates-workflow` fails against Postiz `v2.23.0`, and that is a
-measured product finding rather than a broken harness: a cancelled post's
-Temporal workflow keeps running. `backup.dump-restore` fails for the same
-reason, because it re-checks the workflow after cancelling the retained post.
-Before that cancellation, the restore drill requires the workflow to be
+measured product finding rather than a broken harness: the API returned 200 and
+removed the row while the untouched-instance workflow remained `RUNNING`.
+Another cancel in the same run ended at raw Temporal status `2` (`COMPLETED`),
+so the finding is specifically that HTTP success cannot prove termination.
+
+`backup.dump-restore` fails on the Elasticsearch recovery gap. Before any
+destruction, and again after rebuild, the drill requires the workflow to be
 `RUNNING` and executes Postiz's exact Temporal Visibility predicate,
-`postId="<id>" AND ExecutionStatus="Running"`, requiring it to return the exact
-`post_<id>` workflow after Elasticsearch is rebuilt. Both failures are recorded
-in the decision record. Do not "fix" them by relaxing the predicate — the whole
-point is that the row disappearing is not the job stopping.
+`postId="<id>" AND ExecutionStatus="Running"`, requiring the exact `post_<id>`
+workflow. Both sides get the same bounded settling window for Visibility's
+eventual consistency. The 2026-08-27 run measured
+`visibility_hits_before='1'` and `visibility_hits_after='0'` while the raw
+workflow status remained `1` before and after restore. The empty Elasticsearch
+store is therefore not a recovered publisher without an explicit reindex.
+Do not "fix" either drill by relaxing its predicate or trusting the vanished
+Postiz row.
 
 ## When a run wedges
 
@@ -147,7 +154,9 @@ attribute of type Text.` Then destroy the kept stack as shown above.
   application — including that a pending scheduled post is still queued with an
   open workflow behind it. Temporal's database is retained state, not
   rebuildable: at `v2.23.0` the recovery scan only re-queues posts already past
-  due, so an empty Temporal strands every future job. The drill does not rebuild
-  the whole host.
+  due, so an empty Temporal strands every future job. Elasticsearch is also not
+  safely excludable yet: this drill deliberately performs no reindex, and the
+  exact Visibility lookup is lost. `WP-13` must retain it or add and rehearse a
+  reindex path. The drill does not rebuild the whole host.
 - It does not run on the production architecture. See the limitations section
   of the decision record.

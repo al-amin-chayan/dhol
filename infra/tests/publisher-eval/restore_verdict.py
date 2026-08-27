@@ -42,8 +42,12 @@ REQUIRED_BEHAVIOUR = {
         # The publisher reports success on a cancel whether or not it actually
         # found and terminated the workflow, so the scheduler is asked directly.
         "workflow_terminated_after_cancel",
-        # And the lookup the publisher depends on has to actually return it.
-        "visibility_lists_workflow",
+        # The exact lookup the publisher depends on must work on the untouched
+        # deployment and after Elasticsearch is rebuilt. Requiring both makes
+        # the result attributable: a failed baseline is a broken control, while
+        # before=true/after=false is state lost during rebuild.
+        "visibility_lists_workflow_before_rebuild",
+        "visibility_lists_workflow_after_rebuild",
     ),
     # Mixpost Lite has no tenant boundary and no machine credential to restore,
     # so requiring either would be requiring a capability the edition lacks.
@@ -94,6 +98,7 @@ def judge(
             "workflow_status_before",
             "workflow_status_after",
             "workflow_status_after_cancel",
+            "visibility_hits_before",
             "visibility_hits_after",
         )
         if name in results
@@ -125,6 +130,7 @@ def main() -> int:
     parser.add_argument("--workflow-status-before", default="")
     parser.add_argument("--workflow-status-after", default="")
     parser.add_argument("--workflow-status-after-cancel", default="")
+    parser.add_argument("--visibility-hits-before", default="")
     parser.add_argument("--visibility-hits-after", default="")
     parser.add_argument(
         "--workflow-execution-restored",
@@ -144,6 +150,7 @@ def main() -> int:
         results["workflow_status_before"] = args.workflow_status_before
         results["workflow_status_after"] = args.workflow_status_after
         results["workflow_status_after_cancel"] = args.workflow_status_after_cancel
+        results["visibility_hits_before"] = args.visibility_hits_before
         results["visibility_hits_after"] = args.visibility_hits_after
         # RUNNING is 1. A cancelled schedule must have left that state; `absent`
         # also counts, since a workflow Temporal no longer holds cannot fire.
@@ -152,7 +159,10 @@ def main() -> int:
             "error",
             "",
         )
-        results["visibility_lists_workflow"] = (
+        results["visibility_lists_workflow_before_rebuild"] = (
+            args.visibility_hits_before.isdigit() and int(args.visibility_hits_before) > 0
+        )
+        results["visibility_lists_workflow_after_rebuild"] = (
             args.visibility_hits_after.isdigit() and int(args.visibility_hits_after) > 0
         )
     result, detail = judge(

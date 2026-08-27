@@ -341,7 +341,8 @@ RESTORED_OK = {
     # the workflow, and Temporal keeps closed executions — so the scheduler is
     # asked directly, and the lookup the publisher depends on must return it.
     "workflow_terminated_after_cancel": True,
-    "visibility_lists_workflow": True,
+    "visibility_lists_workflow_before_rebuild": True,
+    "visibility_lists_workflow_after_rebuild": True,
 }
 
 
@@ -651,11 +652,87 @@ def test_a_cancel_that_left_the_workflow_running_fails() -> None:
     assert "workflow_terminated_after_cancel" in detail
 
 
-def test_a_workflow_absent_from_visibility_fails() -> None:
-    results = dict(RESTORED_OK, visibility_lists_workflow=False)
+def test_a_workflow_absent_from_visibility_before_rebuild_fails() -> None:
+    results = dict(RESTORED_OK, visibility_lists_workflow_before_rebuild=False)
     result, detail = restore_verdict.judge(results, "0", "3", "3", "postiz")
     assert result == "fail"
-    assert "visibility_lists_workflow" in detail
+    assert "visibility_lists_workflow_before_rebuild" in detail
+
+
+def test_a_workflow_lost_from_visibility_during_rebuild_fails() -> None:
+    results = dict(RESTORED_OK, visibility_lists_workflow_after_rebuild=False)
+    result, detail = restore_verdict.judge(results, "0", "3", "3", "postiz")
+    assert result == "fail"
+    assert "visibility_lists_workflow_after_rebuild" in detail
+
+
+def test_visibility_control_runs_on_both_sides_of_rebuild() -> None:
+    source = (HARNESS / "run.sh").read_text(encoding="utf-8")
+    before = source.index("VISIBILITY_BEFORE=error")
+    rebuild = source.index("compose stop postiz", before)
+    after = source.index("VISIBILITY_AFTER=error", rebuild)
+    verdict = source.index('--visibility-hits-before "$VISIBILITY_BEFORE"', after)
+    assert before < rebuild < after < verdict
+
+
+def test_visibility_control_waits_through_eventual_consistency() -> None:
+    function = _extract_shell_function("settled_temporal_visibility_hits")
+    script = f'''\
+set -uo pipefail
+counter=$(mktemp)
+printf '0' >"$counter"
+temporal_visibility_hits() {{
+  calls=$(cat "$counter")
+  calls=$((calls + 1))
+  printf '%s' "$calls" >"$counter"
+  if [ "$calls" -lt 3 ]; then printf '0\\n'; else printf '1\\n'; fi
+}}
+sleep() {{ :; }}
+{function}
+settled_temporal_visibility_hits temporal post workflow 4
+rm -f "$counter"
+'''
+    completed = _run_bash(script)
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.strip() == "1"
+
+
+def test_visibility_measurements_are_preserved_in_failed_evidence(tmp_path: Path) -> None:
+    results = tmp_path / "restore.json"
+    results.write_text(json.dumps(RESTORED_OK), encoding="utf-8")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(HARNESS / "restore_verdict.py"),
+            "--results",
+            str(results),
+            "--workflow-execution-restored",
+            "true",
+            "--workflow-status-before",
+            "1",
+            "--workflow-status-after",
+            "1",
+            "--workflow-status-after-cancel",
+            "2",
+            "--visibility-hits-before",
+            "1",
+            "--visibility-hits-after",
+            "0",
+            "--rebuilt-tables",
+            "0",
+            "--organizations-before",
+            "3",
+            "--organizations-after",
+            "3",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout.startswith("fail|")
+    assert "visibility_hits_before='1'" in completed.stdout
+    assert "visibility_hits_after='0'" in completed.stdout
 
 
 def test_visibility_uses_postiz_exact_temporal_query_and_workflow_id() -> None:

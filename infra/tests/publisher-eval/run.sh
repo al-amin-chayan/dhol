@@ -352,6 +352,33 @@ print(matches)
   esac
 }
 
+# Temporal Visibility is eventually consistent. A scheduled workflow created
+# immediately before the restore drill can therefore have a RUNNING lifecycle
+# row while its custom Search Attribute is not queryable for another few
+# seconds. Give both the intact and rebuilt stores the same bounded settling
+# window; otherwise a one-shot baseline of zero cannot distinguish a broken
+# query from ordinary indexing lag. Command errors are already retried and
+# classified by temporal_visibility_hits(), so only successful zeroes wait.
+settled_temporal_visibility_hits() {
+  local container="$1"
+  local post_id="$2"
+  local workflow_id="$3"
+  local attempts="${4:-7}"
+  local attempt=0
+  local value=error
+  while [ "$attempt" -lt "$attempts" ]; do
+    value="$(temporal_visibility_hits "$container" "$post_id" "$workflow_id")"
+    case "$value" in
+      error) printf 'error\n'; return 0 ;;
+      0) ;;
+      *) printf '%s\n' "$value"; return 0 ;;
+    esac
+    attempt=$((attempt + 1))
+    [ "$attempt" -ge "$attempts" ] || sleep 5
+  done
+  printf '%s\n' "$value"
+}
+
 # Decide what a registration attempt proved, as `result|detail`. Kept a
 # function so the decision itself is unit-tested rather than only exercised by
 # a full live run: the difference between "the toggle closed registration" and
@@ -499,18 +526,16 @@ PY
 
 case "$CANDIDATE" in
   postiz)
-    # Restore after rebuild, not in place — and the rebuild has to cover every
-    # surface the decision packet calls rebuildable, not just the one the backup
-    # protects. Temporal, its own PostgreSQL and the Elasticsearch visibility
-    # store are excluded from the retained dump on the claim that they can be
-    # regenerated; leaving them running through the drill would have proved only
-    # that the dump reloads beside state that was never at risk. So the dump is
-    # taken, the Postiz database volume *and* every excluded surface are
-    # destroyed, the retained dump alone is reloaded, Temporal is re-provisioned
-    # from empty and the application is restarted against the result. A row
-    # count would only show the rows returned; the probe then proves the
-    # restored instance still authenticates a project, mints its credential,
-    # serves its own channel and refuses another project's.
+    # Restore after rebuild, not in place. Postiz and Temporal's PostgreSQL
+    # databases are retained state and are dumped at one quiesced boundary.
+    # Elasticsearch is deliberately destroyed to test the packet's claim that
+    # Temporal Visibility can be rebuilt without a retained backup. The same
+    # exact custom-attribute query runs before and after that destruction so a
+    # failed result says whether rebuild lost a working index or the predicate
+    # never worked in the untouched deployment. A row count would only show the
+    # rows returned; the probe also proves the restored instance authenticates a
+    # project, mints its credential, serves its own channel and refuses another
+    # project's.
     HAS_ES=0
     case " $PROFILES " in *" visibility-es "*) HAS_ES=1 ;; esac
 
@@ -540,13 +565,24 @@ case "$CANDIDATE" in
 
     RETAINED_POST_ID="$(capability retained_pending_post_id)"
     RETAINED_POST_AT="$(capability retained_pending_post_at)"
+    RETAINED_WORKFLOW_ID="post_${RETAINED_POST_ID}"
+
+    # Establish the control while the original deployment is still intact.
+    # This is the same query, post id and workflow id used after rebuild; only
+    # Elasticsearch's lifecycle changes between the two measurements.
+    VISIBILITY_BEFORE=error
+    if [ "$HAS_ES" -eq 1 ]; then
+      VISIBILITY_BEFORE="$(settled_temporal_visibility_hits "$(container temporal)" \
+        "$RETAINED_POST_ID" "$RETAINED_WORKFLOW_ID")"
+    fi
 
     # Temporal's database is RETAINED state, not rebuildable. A post is a row
     # plus the workflow that will send it, and at v2.23.0 the recovery scan only
     # re-queues posts whose publishDate is already past — so rebuilding Temporal
     # empty strands every future job until it is late. It is therefore dumped
-    # and restored alongside the Postiz database, and only the Elasticsearch
-    # visibility index is treated as rebuildable.
+    # and restored alongside the Postiz database. Elasticsearch is destroyed
+    # below only to test whether it is in fact rebuildable; the verdict fails
+    # closed unless the exact Visibility lookup works before and after rebuild.
     #
     # Once the backup spans two databases, two individually valid dumps are not
     # an application-consistent backup: a schedule written between them exists
@@ -566,7 +602,6 @@ case "$CANDIDATE" in
     # The exact workflow the retained post depends on, as Postiz names it at
     # v2.23.0: `post_<postId>`. Counting executions globally would pass on the
     # unrelated long-running recovery workflow this topology always has.
-    RETAINED_WORKFLOW_ID="post_${RETAINED_POST_ID}"
     # 1 is WorkflowExecutionStatus RUNNING. Anything else means the schedule was
     # already closed before the rebuild, which would make the whole drill
     # meaningless rather than passing.
@@ -582,10 +617,10 @@ case "$CANDIDATE" in
     docker volume rm "${PROJECT}_postiz-postgres-data" >/dev/null 2>&1 || true
     docker volume rm "${PROJECT}_temporal-postgres-data" >/dev/null 2>&1 || true
     if [ "$HAS_ES" -eq 1 ]; then
-      # Elasticsearch declares no named volume in this topology, so its indices
-      # live in the container's own writable layer and removing the container is
-      # what destroys the visibility store. It is started first because it is
-      # the slowest of the rebuilt surfaces to accept connections.
+      # Elasticsearch declares no named volume in this topology, so removing
+      # its container destroys the Visibility store. It is started first because
+      # it is the slowest surface to accept connections. No reindex is performed:
+      # this drill is measuring whether one is required, not assuming it away.
       compose rm --force --stop --volumes temporal-elasticsearch >/dev/null
       compose up --detach --no-deps temporal-elasticsearch >/dev/null
     fi
@@ -640,13 +675,13 @@ case "$CANDIDATE" in
         --restored-pending-post-at "$RETAINED_POST_AT"
       )
     fi
-    # Ask Temporal's Visibility API directly, before anything cancels the post,
-    # with the exact custom-attribute predicate Postiz uses. The rebuild empties
-    # Elasticsearch, so this must prove that the restored `postId` attribute is
-    # queryable and resolves to this exact running workflow.
+    # Repeat the untouched-deployment control before anything cancels the post.
+    # Both measurements use Temporal's API and Postiz's exact custom-attribute
+    # predicate. A before=1/after=0 result attributes the loss to Elasticsearch
+    # rebuild; before=0 means the control itself was never established.
     VISIBILITY_AFTER=error
     if [ "$HAS_ES" -eq 1 ]; then
-      VISIBILITY_AFTER="$(temporal_visibility_hits "$(container temporal)" \
+      VISIBILITY_AFTER="$(settled_temporal_visibility_hits "$(container temporal)" \
         "$RETAINED_POST_ID" "$RETAINED_WORKFLOW_ID")"
     fi
 
@@ -674,6 +709,7 @@ case "$CANDIDATE" in
       --workflow-execution-restored "$WORKFLOW_RESTORED" \
       --workflow-status-before "$WORKFLOW_STATUS_BEFORE" \
       --workflow-status-after "$WORKFLOW_STATUS_AFTER" \
+      --visibility-hits-before "$VISIBILITY_BEFORE" \
       --visibility-hits-after "$VISIBILITY_AFTER" \
       --workflow-status-after-cancel "$WORKFLOW_STATUS_AFTER_CANCEL" \
       --rebuilt-tables "$REBUILT" --organizations-before "$BEFORE" --organizations-after "$AFTER")"

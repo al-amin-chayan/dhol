@@ -11,12 +11,12 @@ founder decision`.
 
 ## Current gate state
 
-`DG-01` is open and `WP-13` remains blocked. The founder selected Postiz
-`v2.23.0` on 2026-08-25, but a material cancellation defect was measured after
-that instruction: deleting a scheduled post removes its Postiz row while its
-Temporal workflow remains `RUNNING`. The founder must explicitly reaffirm
-Postiz with the scheduler-verified kill-switch condition or reopen the choice.
-No agent may infer that answer from the earlier selection.
+`DG-01` is closed by the recorded founder selection of Postiz `v2.23.0` on
+2026-08-25. On 2026-08-27 the founder clarified that issue #16 and PR #49 own
+the complete decision/evidence packet while issue #17 (`WP-13`) owns the
+implementation. Later cancellation and Elasticsearch-recovery findings are
+mandatory `WP-13` conditions, not a reason to erase the selected product or
+reduce issue #16's evidence scope.
 
 ## What changed
 
@@ -25,44 +25,40 @@ No agent may infer that answer from the earlier selection.
   drills, scheduler-state checks, and a fail-closed exact Temporal Visibility
   check.
 - `docs/decisions/publisher-selection.md` records the evidence, recommendation,
-  original founder instruction, material later finding, and pending founder
-  action.
+  original founder instruction, material later findings, and implementation
+  conditions.
 - `docs/runbooks/publisher-evaluation.md` reproduces the disposable evaluation.
-- `README.md` keeps the current decision open and appends the later evidence to
-  the change log without rewriting the original history.
+- `README.md` keeps the Postiz decision closed and appends the later evidence
+  as `WP-13` conditions without rewriting the original history.
 - `scripts/check` shellchecks the harness and runs its unit tests.
 
 ## Evidence state
 
 - **Postiz `v2.23.0` — `viable-with-findings`.** All 17 matrix checks pass.
-  `registration.lock` passes; `cancel.terminates-workflow` and the composite
-  `backup.dump-restore` drill fail because cancellation leaves the exact
-  `post_<id>` workflow running. The restored databases return the queued post
-  and its `RUNNING` workflow. The corrected harness now asks Temporal's exact
-  `postId="<id>" AND ExecutionStatus="Running"` predicate through List Workflow
-  Executions and requires that exact workflow id, but its post-rebuild live
-  result remains unproven: the final rerun passed all 17 matrix checks, then the
-  local Docker daemon failed to stop the Postiz container before the restore
-  phase. The disposable stack was removed manually and zero labelled resources
-  remained. Do not substitute the earlier raw-Elasticsearch count for this
-  outstanding proof.
+  `registration.lock` passes. The untouched cancellation check fails because
+  HTTP 200 and row deletion left that workflow `RUNNING`; a second cancellation
+  in the same run ended at raw status `2`, proving only that HTTP success is not
+  a reliable termination signal. The restored databases return the queued post
+  and its `RUNNING` workflow. The exact List Workflow Executions predicate
+  `postId="<id>" AND ExecutionStatus="Running"` returns the exact `post_<id>`
+  workflow before Elasticsearch destruction (`1`) and none after rebuild (`0`).
+  `WP-13` must therefore retain Visibility state or implement and rehearse a
+  reindex path, and must verify its kill switch at scheduler level.
 - **Mixpost Lite `v2.6.0` — `disqualified`.** It has no workspace routes or
   machine API, and one login's label is visible to another. Its two drills pass.
 - Channels are database fixtures. No social account, OAuth grant, provider
   call, production inventory, SOPS key, or purchase is involved.
 - Fixture credentials are generated per run outside the repository, evidence
   contains only bounded redacted values, and successful runs remove their
-  disposable containers and volumes.
+  disposable containers, volumes, and network. The final live run left zero
+  labelled resources.
 
-## Remaining founder action
+## Remaining action
 
-Read finding 3 and the pending-reconfirmation section in
-`docs/decisions/publisher-selection.md`, then state one of:
-
-1. reaffirm Postiz `v2.23.0` with the scheduler-verified cancellation condition;
-2. reopen the publisher choice.
-
-After that instruction, transcribe it with its date, update `README.md` §9 and
-the change log, restore the appropriate closing keyword on PR #49 if the gate is
-closed, and request exact-head Claude Code review because the final fixes are
-Codex-authored.
+No product or scope decision is pending from the founder. Restore `Closes #16`
+on PR #49 and request exact-head Claude Code review because the final fixes are
+Codex-authored. After that opposite-model review is resolved, the normal
+exact-head Codex review of the Claude-authored PR head can satisfy the merge
+gate. Issue #17 owns the production stack, recovery/reindex implementation,
+scheduler-verified kill switch, update rollback, real-provider checks, and
+seven-day canary.
