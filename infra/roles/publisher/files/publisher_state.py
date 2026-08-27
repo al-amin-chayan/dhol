@@ -649,7 +649,7 @@ def restore(
         "backup_id": manifest["backup_id"],
         "restore_project": project_name,
         "outbound_provider_access": "verified-blocked",
-        "effective_restore_contract_sha256": contract_digest,
+        "verified_controls_sha256": contract_digest,
         "capacity": capacity,
         "postiz_organization_count": organization_count,
         "postiz_redis_key_count": restored_redis_key_count,
@@ -748,7 +748,7 @@ def main() -> None:
                 result = {
                     "schema_version": 1,
                     "restore_project": args.project_name,
-                    "effective_restore_contract_sha256": contract_digest,
+                    "verified_controls_sha256": contract_digest,
                     "outbound_provider_access": "verified-blocked",
                     "verified": True,
                 }

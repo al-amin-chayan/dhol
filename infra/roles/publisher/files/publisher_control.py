@@ -69,6 +69,38 @@ def exclusive_lock(path: Path) -> Iterator[None]:
         yield
 
 
+@contextmanager
+def bounded_exclusive_lock(
+    path: Path,
+    timeout_seconds: int,
+    notice_interval_seconds: int = 10,
+) -> Iterator[None]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    started = time.monotonic()
+    next_notice = 0
+    with path.open("a+", encoding="utf-8") as handle:
+        while True:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                elapsed = int(time.monotonic() - started)
+                if elapsed >= next_notice:
+                    print(
+                        "publisher control: waiting on in-flight publisher "
+                        f"converge/state operation ({elapsed}s)",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    next_notice = elapsed + notice_interval_seconds
+                if elapsed >= timeout_seconds:
+                    raise ControlError(
+                        "timed out waiting for publisher lock; kill-switch marker remains active"
+                    )
+                time.sleep(1)
+        yield
+
+
 def running_services(runner: ComposeRunner) -> set[str]:
     result = runner.run(["ps", "--status", "running", "--services"], capture_output=True)
     return {line.strip() for line in result.stdout.splitlines() if line.strip()}
@@ -96,16 +128,28 @@ def write_marker(path: Path, reason: str) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def freeze(runner: ComposeRunner, marker: Path, reason: str) -> None:
+def freeze(
+    runner: ComposeRunner,
+    marker: Path,
+    reason: str,
+    lock: Path = DEFAULT_LOCK,
+    wait_timeout_seconds: int = 930,
+) -> dict[str, object]:
     normalized = " ".join(reason.split())
     if not normalized or len(normalized) > 240:
         raise ControlError("freeze reason must contain 1-240 printable characters")
+    if not 1 <= wait_timeout_seconds <= 1800:
+        raise ControlError("freeze lock wait must be between 1 and 1800 seconds")
     if not marker.exists():
         write_marker(marker, normalized)
-    runner.run(["stop", "postiz", "temporal"])
-    still_running = running_services(runner) & CRITICAL_SERVICES
-    if still_running:
-        raise ControlError(f"kill switch failed; still running: {', '.join(sorted(still_running))}")
+    with bounded_exclusive_lock(lock, wait_timeout_seconds):
+        runner.run(["stop", "postiz", "temporal"])
+        still_running = running_services(runner) & CRITICAL_SERVICES
+        if still_running:
+            raise ControlError(
+                f"kill switch failed; still running: {', '.join(sorted(still_running))}"
+            )
+        return status_document(runner, marker)
 
 
 def health_ready(url: str) -> bool:
@@ -242,6 +286,7 @@ def parser() -> argparse.ArgumentParser:
 
     freeze_parser = commands.add_parser("freeze")
     freeze_parser.add_argument("--reason", required=True)
+    freeze_parser.add_argument("--wait-timeout-seconds", type=int, default=930)
 
     unfreeze_parser = commands.add_parser("unfreeze")
     unfreeze_parser.add_argument("--confirm", required=True)
@@ -264,29 +309,35 @@ def main() -> None:
     args = parser().parse_args()
     runner = ComposeRunner(args.compose_file, args.project_directory)
     try:
-        with exclusive_lock(args.lock):
-            if args.command == "freeze":
-                freeze(runner, args.marker, args.reason)
-                result = status_document(runner, args.marker)
-            elif args.command == "unfreeze":
-                unfreeze(
-                    runner,
-                    args.marker,
-                    args.confirm,
-                    args.health_url,
-                    args.timeout_seconds,
-                )
-                result = status_document(runner, args.marker)
-            elif args.command == "terminate-post-workflow":
-                workflow = terminate_workflow(runner, args.post_id, args.timeout_seconds)
-                result = {"schema_version": 1, "post_id": args.post_id, "status": workflow}
-            elif args.command == "verify-post-workflow-stopped":
-                workflow = workflow_status(runner, args.post_id)
-                if workflow == "RUNNING":
-                    raise ControlError(f"Temporal workflow post_{args.post_id} remains RUNNING")
-                result = {"schema_version": 1, "post_id": args.post_id, "status": workflow}
-            else:
-                result = status_document(runner, args.marker)
+        if args.command == "freeze":
+            result = freeze(
+                runner,
+                args.marker,
+                args.reason,
+                args.lock,
+                args.wait_timeout_seconds,
+            )
+        else:
+            with exclusive_lock(args.lock):
+                if args.command == "unfreeze":
+                    unfreeze(
+                        runner,
+                        args.marker,
+                        args.confirm,
+                        args.health_url,
+                        args.timeout_seconds,
+                    )
+                    result = status_document(runner, args.marker)
+                elif args.command == "terminate-post-workflow":
+                    workflow = terminate_workflow(runner, args.post_id, args.timeout_seconds)
+                    result = {"schema_version": 1, "post_id": args.post_id, "status": workflow}
+                elif args.command == "verify-post-workflow-stopped":
+                    workflow = workflow_status(runner, args.post_id)
+                    if workflow == "RUNNING":
+                        raise ControlError(f"Temporal workflow post_{args.post_id} remains RUNNING")
+                    result = {"schema_version": 1, "post_id": args.post_id, "status": workflow}
+                else:
+                    result = status_document(runner, args.marker)
     except ControlError as error:
         print(f"publisher control failure: {error}", file=sys.stderr)
         raise SystemExit(1) from error

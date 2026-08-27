@@ -18,7 +18,6 @@ from publisher_state import (  # noqa: E402
     backup,
     effective_restore_contract,
     file_receipts,
-    parser,
     require_restore_capacity,
     safe_child,
     running_services,
@@ -245,8 +244,49 @@ def test_restore_override_blocks_provider_egress() -> None:
     assert "read_only: true" in override
 
 
-def test_disposable_restore_cleans_up_unless_explicitly_kept() -> None:
+@pytest.mark.parametrize(("keep", "expected_state"), [(False, "removed"), (True, "retained")])
+def test_disposable_restore_cleans_up_unless_explicitly_kept(
+    keep: bool,
+    expected_state: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    staging = tmp_path / "staging"
+    (staging / "fixture").mkdir(parents=True)
+    project_directory = tmp_path / "project"
+    project_directory.mkdir()
+    docker_root = tmp_path / "docker"
+    docker_root.mkdir()
+
+    class MainRunner:
+        def __init__(self) -> None:
+            self.commands: list[list[str]] = []
+
+        def run(self, arguments, **_kwargs):
+            from subprocess import CompletedProcess
+
+            command = list(arguments)
+            self.commands.append(command)
+            return CompletedProcess(command, 0, b"", b"")
+
+    runner = MainRunner()
+    monkeypatch.setattr(publisher_state, "ComposeRunner", lambda *_args, **_kwargs: runner)
+    monkeypatch.setattr(
+        publisher_state,
+        "restore",
+        lambda *_args, **_kwargs: {"schema_version": 1, "verified": True},
+    )
     arguments = [
+        "publisher_state.py",
+        "--project-directory",
+        str(project_directory),
+        "--staging-root",
+        str(staging),
+        "--docker-data-root",
+        str(docker_root),
+        "--lock",
+        str(tmp_path / "publisher.lock"),
         "restore-disposable",
         "--backup-id",
         "fixture",
@@ -255,9 +295,12 @@ def test_disposable_restore_cleans_up_unless_explicitly_kept() -> None:
         "--loopback-port",
         "15001",
     ]
-    assert parser().parse_args(arguments).keep is False
-    assert parser().parse_args([*arguments, "--keep"]).keep is True
-    source = (ROOT / "infra/roles/publisher/files/publisher_state.py").read_text(
-        encoding="utf-8"
-    )
-    assert 'runner.run(["down", "--volumes", "--remove-orphans"])' in source
+    if keep:
+        arguments.append("--keep")
+    monkeypatch.setattr(publisher_state.sys, "argv", arguments)
+
+    publisher_state.main()
+
+    cleanup = ["down", "--volumes", "--remove-orphans"]
+    assert (cleanup in runner.commands) is not keep
+    assert json.loads(capsys.readouterr().out)["disposable_project"] == expected_state
