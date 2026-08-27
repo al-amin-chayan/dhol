@@ -24,6 +24,8 @@ DEFAULT_PROJECT_DIR = Path("/opt/dholbeat/publisher")
 DEFAULT_COMPOSE_FILE = DEFAULT_PROJECT_DIR / "compose.yml"
 DEFAULT_MARKER = Path("/var/lib/dholbeat/publisher/kill-switch.json")
 DEFAULT_LOCK = Path("/run/lock/dholbeat-publisher.lock")
+DEFAULT_FREEZE_WAIT_SECONDS = 1200
+MAX_FREEZE_WAIT_SECONDS = 1800
 POST_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 CONFIRM_UNFREEZE = "UNFREEZE-PUBLISHER"
 CRITICAL_SERVICES = {"postiz", "temporal"}
@@ -133,16 +135,20 @@ def freeze(
     marker: Path,
     reason: str,
     lock: Path = DEFAULT_LOCK,
-    wait_timeout_seconds: int = 930,
+    wait_timeout_seconds: int = DEFAULT_FREEZE_WAIT_SECONDS,
 ) -> dict[str, object]:
     normalized = " ".join(reason.split())
     if not normalized or len(normalized) > 240:
         raise ControlError("freeze reason must contain 1-240 printable characters")
-    if not 1 <= wait_timeout_seconds <= 1800:
-        raise ControlError("freeze lock wait must be between 1 and 1800 seconds")
+    if not 1 <= wait_timeout_seconds <= MAX_FREEZE_WAIT_SECONDS:
+        raise ControlError(
+            f"freeze lock wait must be between 1 and {MAX_FREEZE_WAIT_SECONDS} seconds"
+        )
     if not marker.exists():
         write_marker(marker, normalized)
     with bounded_exclusive_lock(lock, wait_timeout_seconds):
+        if not marker.exists():
+            write_marker(marker, normalized)
         runner.run(["stop", "postiz", "temporal"])
         still_running = running_services(runner) & CRITICAL_SERVICES
         if still_running:
@@ -286,7 +292,9 @@ def parser() -> argparse.ArgumentParser:
 
     freeze_parser = commands.add_parser("freeze")
     freeze_parser.add_argument("--reason", required=True)
-    freeze_parser.add_argument("--wait-timeout-seconds", type=int, default=930)
+    freeze_parser.add_argument(
+        "--wait-timeout-seconds", type=int, default=DEFAULT_FREEZE_WAIT_SECONDS
+    )
 
     unfreeze_parser = commands.add_parser("unfreeze")
     unfreeze_parser.add_argument("--confirm", required=True)

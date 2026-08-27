@@ -121,14 +121,18 @@ sudo dholbeat-publisher-control status
 
 The marker becomes durable before the command waits for the shared host lock.
 If a converge or state operation already holds that lock, freeze reports that
-wait every ten seconds for at most 930 seconds, then stops Postiz and Temporal
-as soon as it acquires the lock. An interruption or lock timeout leaves the
-marker active; resolve the in-flight operation and rerun freeze to verify both
-senders stopped. Ansible's publisher-only Docker CLI guard rechecks the marker
-under the same lock immediately before any `compose up` and holds the lock
-through the mutation, so a concurrent activation cannot restart the senders
-after freeze acquires it. PostgreSQL, Redis, and Elasticsearch remain available
-for diagnosis. This preserves approval/audit and publisher state.
+wait every ten seconds for at most 1,200 seconds by default, then stops Postiz
+and Temporal as soon as it acquires the lock. For a known first activation or
+image update on a slow link, select the explicit maximum with
+`--wait-timeout-seconds 1800`. Freeze reasserts the marker under the lock before
+stopping, so an unfreeze that completes during the wait cannot remove the
+emergency control. An interruption or lock timeout leaves the marker active;
+resolve the in-flight operation and rerun freeze to verify both senders stopped.
+Ansible's publisher-only Docker CLI guard rechecks the marker under the same
+lock immediately before any `compose up` and holds the lock through the
+mutation, so a concurrent activation cannot restart the senders after freeze
+acquires it. PostgreSQL, Redis, and Elasticsearch remain available for
+diagnosis. This preserves approval/audit and publisher state.
 
 Postiz `v2.23.0` returning success from `DELETE /public/v1/posts/<id>` does not
 prove its Temporal workflow stopped. A `500` is also indeterminate. The caller
