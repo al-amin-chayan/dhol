@@ -61,11 +61,11 @@ request body cannot be mistaken for an authorization boundary.
 
 | | Postiz `v2.23.0` | Mixpost Lite `v2.6.0` |
 | --- | --- | --- |
-| Verdict | `viable` | `disqualified` |
+| Verdict | `viable-with-findings` | `disqualified` |
 | Checks passed | 17 / 17 | 2 / 17 |
 | Checks failed | 0 | 2 |
 | Checks unsupported | 0 | 13 |
-| Drills passed | 2 / 2 | 2 / 2 |
+| Drills passed | 1 / 3 — see finding 3 | 2 / 2 |
 | Tenant model | organization | none |
 | Machine API | `/public/v1`, `Authorization: <key>` | none |
 | Cold start to first API answer | 29-59 s, one restart never completed | 20-329 s |
@@ -151,10 +151,28 @@ passed. Neither fact reaches the requirement.
    new user, so onboarding a project means opening registration, registering
    that project's account, and closing registration again. That toggle needs a
    runbook step and an owner; it is a footgun, not a blocker.
-3. **Cross-tenant delete answers 500, not 403.** The post correctly survives,
+3. **Cancelling a post does not stop it. Measured, on an untouched instance.**
+   `DELETE /public/v1/posts/<id>` returns 200 and the row disappears, but the
+   Temporal workflow that would send the post is still `RUNNING` a minute
+   later. At `v2.23.0` `deletePost()` removes the row first, then performs the
+   visibility lookup and termination inside catch-and-ignore blocks and returns
+   regardless, so a failure there is invisible to the caller. This is not a
+   restore artefact: the same drill fails on a freshly converged instance that
+   has never been rebuilt.
+
+   This matters more here than it would elsewhere. `README.md`'s hard rule is
+   that nothing publishes without human approval, and the plan requires that
+   editing after approval "prevents/cancels an unsent stale publisher job". A
+   workflow that outlives the post row is exactly such a job, and the
+   publisher's own cancel API does not demonstrably stop it. **What the orphan
+   then does was not tested** — whether it publishes stale content, errors, or
+   no-ops is unknown, and assuming the benign case would be exactly the kind of
+   guess this evaluation exists to avoid.
+
+4. **Cross-tenant delete answers 500, not 403.** The post correctly survives,
    so the boundary holds, but the error path is wrong. n8n must treat a 500
    from a delete as *indeterminate* and re-read state, never as *deleted*.
-4. **Upstream ships no backup documentation, and Temporal's database is not
+5. **Upstream ships no backup documentation, and Temporal's database is not
    rebuildable.** The dump/restore procedure is ours. The obvious reading —
    that Temporal is a workflow engine and can simply be re-provisioned — is
    wrong here: a scheduled post is a Postiz row *plus* the Temporal workflow
@@ -165,10 +183,10 @@ passed. Neither fact reaches the requirement.
    Elasticsearch visibility index is genuinely rebuildable. The drill proves
    this by destroying both and requiring the restored post to be queued with an
    open workflow behind it.
-5. **The upstream Compose file is not deployable as-is.** It pins `:latest`,
+6. **The upstream Compose file is not deployable as-is.** It pins `:latest`,
    publishes database ports, and ships pgAdmin, Sentry Spotlight, Temporal UI
    and `temporal-admin-tools`. None of those may reach `publish-1`.
-6. **Cold start is slow and highly variable, and a restart can wedge.** On a
+7. **Cold start is slow and highly variable, and a restart can wedge.** On a
    quiet machine the backend answered 29-59 seconds after the converge command.
    On a machine also running unrelated containers, several runs never answered
    inside a ten-minute budget and were abandoned, and one run's backend never
@@ -181,7 +199,7 @@ passed. Neither fact reaches the requirement.
    health-check grace periods, and any update-rollback drill must budget
    minutes and tolerate a much worse tail. This is the single most likely
    surprise during `WP-13`.
-7. **AGPL-3.0-or-later.** The `LICENSE` file at the pinned tag
+8. **AGPL-3.0-or-later.** The `LICENSE` file at the pinned tag
    ([`v2.23.0`](https://github.com/gitroomhq/postiz-app/blob/v2.23.0/LICENSE))
    grants the GNU Affero General Public License "either version 3 of the
    License, or (at your option) any later version". The exact identifier is
@@ -203,14 +221,14 @@ bound to a named later gate, not quietly dropped.
 | --- | --- | --- |
 | Exact editions, versions, licences pinned | **met** | `candidates.yml`, digest-pinned; licence read from the immutable `v2.23.0` tag |
 | Project/workspace authorization, API ownership | **met** | seventeen-check matrix, both candidates |
-| Scheduled create, list, cancel/delete | **met** | `posts.schedule`, `posts.list`, `posts.cancel`; cancellation re-reads the window |
+| Scheduled create, list, cancel/delete | **met for the post row, not for the job** | `posts.schedule`, `posts.list`, `posts.cancel`; cancellation re-reads the window and the row is gone. The `cancel.terminates-workflow` drill shows the underlying workflow is not stopped — finding 3 |
 | Immediate publishing (`type=now`) | **deferred to `WP-13` canary-account gate** | never exercised: `create_post` in `infra/tests/publisher-eval/probe.py` always sends `type=schedule` with a future date. A genuine `type=now` call against a database-fixture channel would attempt a real provider call, which DG-01 forbids, so no provider-safe drill is possible here; it runs against the same founder-approved canary connection as token refresh, below |
 | Token refresh behaviour | **deferred to `WP-13` canary-account gate** | needs a connected provider account, which DG-01 forbids here. No synthetic substitute is honest: refresh is provider behaviour, not publisher behaviour. Runs against a founder-approved canary connection, per the sequence in Founder decision |
 | Application-aware backup/restore | **met** | restore-after-rebuild drill: Postiz and Temporal databases destroyed and reloaded from dumps, Elasticsearch rebuilt from empty, then login, credential, own-channel, tenant boundary, and a pending post still queued with an open workflow behind it |
 | 6 GB / 30 GB footprint | **partly met** | peak RAM and topology disk measured; host steady usage is a lower bound only |
 | Update headroom | **not met — unmeasured** | needs a real 30 GB host mid-upgrade; the harness reports `unmeasured` rather than a computed pass |
 | Update rollback | **deferred to `WP-13`** | no pinned upgrade/rollback drill was run; the evaluation converges one version |
-| Duplicate-post controls | **deferred to `WP-13` canary-account gate** | Postiz `v2.23.0` advertises duplicate-post protection; demonstrating it needs the same canary-account drill as token refresh |
+| Duplicate-post controls | **deferred to `WP-13` canary-account gate, with a measured caveat** | Postiz `v2.23.0` advertises duplicate-post protection; demonstrating it needs the same canary-account drill as token refresh. Measured here: a cancelled post's workflow keeps running, so the kill switch cannot be built on the cancel API alone — see finding 3 |
 | Registration control | **met** | `registration.lock` drill, gated on the backend being ready first |
 | Access / service-token integration fit | **met, by inspection not measurement** | see below |
 | Maintenance burden | **met, by inspection not measurement** | see below |
@@ -339,6 +357,12 @@ If the founder selects Postiz, `WP-13` inherits these conditions:
 4. Give the registration toggle a runbook step: registration opens only to
    onboard one project account and closes immediately afterwards.
 5. Make the n8n publisher adapter treat a `500` from a delete as indeterminate.
+   Separately, **do not treat a successful cancel as a stopped job**: a 200 from
+   `DELETE /public/v1/posts/<id>` leaves the Temporal workflow running. The
+   duplicate-post kill switch and the approval-invalidation path both have to
+   verify termination against the scheduler, or stop the job by another means,
+   before either can be called tested. Establish first what an orphaned
+   workflow actually does when it fires.
 6. Back up the Postiz database, **Temporal's database**, and uploads. Only the
    Elasticsearch visibility index may be excluded as rebuildable. Treating
    Temporal as rebuildable would leave every future scheduled post stranded
@@ -350,6 +374,21 @@ If the founder selects Postiz, `WP-13` inherits these conditions:
    drill's timeout from a measured cold start on the real host, not from this
    evaluation's figure, and give the incident runbook a step for a wedged
    publisher restart.
+
+## A finding that arrived after the decision
+
+The founder selected Postiz on 2026-08-25. Finding 3 — a cancelled post's
+workflow keeps running — was measured afterwards, during a later review round,
+and is recorded here rather than folded silently into the existing text.
+
+It does not change the comparison: Mixpost Lite cannot host two projects or
+expose a machine API at all, so it was never the alternative this would tip
+towards, and the paid editions remain unevaluated. It does change what `WP-13`
+must build, and it raises a question the founder may want to answer before real
+accounts are connected: whether a publisher whose cancel API does not stop the
+job is acceptable given `README.md`'s human-approval rule. The evaluation's
+answer is that it is workable only if the kill switch verifies termination
+independently, which is now condition 5.
 
 ## Founder decision
 

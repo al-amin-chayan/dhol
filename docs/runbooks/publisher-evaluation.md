@@ -91,6 +91,16 @@ the matching Compose file under `infra/tests/publisher-eval/compose/`, never in
 `run.sh`. `scripts/check` fails on an image reference without a `sha256`
 digest and on a paid edition marked evaluable.
 
+## Drills that are expected to fail today
+
+`cancel.terminates-workflow` fails against Postiz `v2.23.0`, and that is a
+measured product finding rather than a broken harness: a cancelled post's
+Temporal workflow keeps running. `backup.dump-restore` fails for the same
+reason, because it re-checks the workflow after cancelling the retained post.
+Both are recorded in the decision record. Do not "fix" them by relaxing the
+predicate — the whole point is that the row disappearing is not the job
+stopping.
+
 ## When a run wedges
 
 The Postiz evaluation restarts the backend twice — once for the restore rebuild
