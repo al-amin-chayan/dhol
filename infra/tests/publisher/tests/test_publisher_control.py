@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 from pathlib import Path
 import subprocess
@@ -11,9 +12,11 @@ import pytest
 ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(ROOT / "infra/roles/publisher/files"))
 
+import publisher_control  # noqa: E402
 from publisher_control import (  # noqa: E402
     CONFIRM_UNFREEZE,
     ControlError,
+    bounded_exclusive_lock,
     freeze,
     terminate_workflow,
     unfreeze,
@@ -49,10 +52,49 @@ class FakeRunner:
 def test_freeze_is_idempotent_and_stops_both_senders(tmp_path: Path) -> None:
     runner = FakeRunner()
     marker = tmp_path / "kill-switch.json"
-    freeze(runner, marker, "fixture incident")
-    freeze(runner, marker, "fixture incident")
+    lock = tmp_path / "publisher.lock"
+    freeze(runner, marker, "fixture incident", lock)
+    freeze(runner, marker, "fixture incident", lock)
     assert marker.is_file()
     assert runner.running.isdisjoint({"postiz", "temporal"})
+
+
+def test_freeze_writes_marker_before_waiting_for_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    marker = tmp_path / "kill-switch.json"
+    lock = tmp_path / "publisher.lock"
+    observed: list[tuple[Path, int]] = []
+
+    @contextmanager
+    def observe_lock(path: Path, timeout_seconds: int):
+        assert marker.is_file()
+        observed.append((path, timeout_seconds))
+        yield
+
+    monkeypatch.setattr(publisher_control, "bounded_exclusive_lock", observe_lock)
+    result = freeze(FakeRunner(), marker, "fixture incident", lock, 12)
+
+    assert observed == [(lock, 12)]
+    assert result["frozen"] is True
+
+
+def test_bounded_lock_reports_wait_and_times_out(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def always_busy(_handle, _operation):
+        raise BlockingIOError
+
+    monkeypatch.setattr(publisher_control.fcntl, "flock", always_busy)
+    with pytest.raises(ControlError, match="marker remains active"):
+        with bounded_exclusive_lock(tmp_path / "publisher.lock", 0):
+            pytest.fail("busy lock unexpectedly acquired")
+
+    assert "waiting on in-flight publisher converge/state operation (0s)" in (
+        capsys.readouterr().err
+    )
 
 
 def test_freeze_rejects_an_empty_reason(tmp_path: Path) -> None:

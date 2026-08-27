@@ -109,8 +109,9 @@ services:
       timeout: 3s
       retries: 60
     cpus: 0.25
-    mem_limit: 192m
+    mem_limit: 256m
     pids_limit: 96
+    stop_grace_period: 1m
 
   temporal-postgres:
     <<: *runtime

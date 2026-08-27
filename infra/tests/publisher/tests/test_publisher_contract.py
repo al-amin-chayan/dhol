@@ -105,6 +105,15 @@ def test_redis_cannot_be_reclassified_as_rebuildable(compose: dict) -> None:
     assert "postiz-redis: retained data volume is required" in findings
 
 
+def test_redis_aof_has_memory_and_shutdown_headroom(compose: dict) -> None:
+    changed = deepcopy(compose)
+    changed["services"]["postiz-redis"]["mem_limit"] = "192m"
+    changed["services"]["postiz-redis"].pop("stop_grace_period")
+    findings = validate_compose(changed)
+    assert "postiz-redis: AOF rewrite requires a 256 MiB cgroup" in findings
+    assert "postiz-redis: retained AOF requires a one-minute stop grace" in findings
+
+
 def test_postiz_tmpfs_must_stay_within_256_mib(compose: dict) -> None:
     changed = deepcopy(compose)
     changed["services"]["postiz"]["tmpfs"] = ["/tmp:size=536870912,mode=1777"]
@@ -120,7 +129,7 @@ def test_decommission_is_explicit_and_preserves_retained_volumes() -> None:
     )[0]
     assert "dholbeat-publisher-control freeze" in section
     assert "docker compose down --remove-orphans" in section
-    assert "Never\nadd `--volumes`" in section
+    assert "Never add `--volumes`" in " ".join(section.split())
 
 
 def test_yaml_round_trip_preserves_the_contract(compose: dict) -> None:

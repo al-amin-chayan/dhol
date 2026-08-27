@@ -63,7 +63,7 @@ services:
     health_probe: {type: command, target: redis-cli ping}
     resources:
       cpus: 0.25
-      memory_mb: 192
+      memory_mb: 256
       pids: 96
       logs: {driver: json-file, max_size_mb: 10, max_files: 3}
     monitoring_owner: platform-operations

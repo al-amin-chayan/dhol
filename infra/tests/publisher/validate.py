@@ -169,6 +169,10 @@ def validate_compose(document: dict[str, Any]) -> list[str]:
         findings.append("postiz-redis: retained state requires AOF and noeviction")
     if redis.get("volumes") != ["postiz-redis-data:/data"]:
         findings.append("postiz-redis: retained data volume is required")
+    if redis.get("mem_limit") != "256m":
+        findings.append("postiz-redis: AOF rewrite requires a 256 MiB cgroup")
+    if redis.get("stop_grace_period") != "1m":
+        findings.append("postiz-redis: retained AOF requires a one-minute stop grace")
     return sorted(set(findings))
 
 

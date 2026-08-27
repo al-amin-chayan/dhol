@@ -119,12 +119,16 @@ sudo dholbeat-publisher-control freeze --reason 'INCIDENT REASON'
 sudo dholbeat-publisher-control status
 ```
 
-The marker is written before Postiz and Temporal stop. Ansible's publisher-only
-Docker CLI guard takes the same host lock, rechecks the marker under that lock
-immediately before any `compose up`, and holds the lock through the mutation.
-It therefore cannot restart the senders across a concurrent freeze. PostgreSQL,
-Redis, and Elasticsearch remain available for diagnosis. This preserves
-approval/audit and publisher state.
+The marker becomes durable before the command waits for the shared host lock.
+If a converge or state operation already holds that lock, freeze reports that
+wait every ten seconds for at most 930 seconds, then stops Postiz and Temporal
+as soon as it acquires the lock. An interruption or lock timeout leaves the
+marker active; resolve the in-flight operation and rerun freeze to verify both
+senders stopped. Ansible's publisher-only Docker CLI guard rechecks the marker
+under the same lock immediately before any `compose up` and holds the lock
+through the mutation, so a concurrent activation cannot restart the senders
+after freeze acquires it. PostgreSQL, Redis, and Elasticsearch remain available
+for diagnosis. This preserves approval/audit and publisher state.
 
 Postiz `v2.23.0` returning success from `DELETE /public/v1/posts/<id>` does not
 prove its Temporal workflow stopped. A `500` is also indeterminate. The caller
@@ -257,8 +261,9 @@ receipt so later applies cannot reactivate the stack accidentally.
 Before a real brand account is admitted, record seven continuous days with no
 OOM, less than 4.5 GiB peak publisher RAM, less than 18 GiB steady host disk,
 at least 8 GiB update headroom, and Postiz `/tmp` below 80% of its 256 MiB
-tmpfs. Exercise the global kill switch and one scheduler-verified cancellation.
-Any threshold breach stops admission and returns measured
+tmpfs. Record Redis RSS through at least one AOF rewrite and stop at 230 MiB or
+any Redis OOM/restart. Exercise the global kill switch and one scheduler-
+verified cancellation. Any threshold breach stops admission and returns measured
 prune/scheduling/upgrade options to the founder; it does not raise a limit or
 purchase a larger VPS automatically.
 
