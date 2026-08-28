@@ -55,6 +55,15 @@ def test_visibility_cannot_be_removed(compose: dict) -> None:
     assert "temporal: Elasticsearch Visibility must remain enabled" in validate_compose(changed)
 
 
+def test_temporal_healthcheck_uses_its_listening_service_address(compose: dict) -> None:
+    changed = deepcopy(compose)
+    changed["services"]["temporal"]["healthcheck"]["test"][-1] = "127.0.0.1:7233"
+    assert (
+        "temporal: health check must use the listening service address"
+        in validate_compose(changed)
+    )
+
+
 def test_snapshot_path_is_required(compose: dict) -> None:
     changed = deepcopy(compose)
     changed["services"]["temporal-elasticsearch"]["volumes"] = [

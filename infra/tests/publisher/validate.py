@@ -160,6 +160,16 @@ def validate_compose(document: dict[str, Any]) -> list[str]:
     temporal = services.get("temporal", {})
     if temporal.get("environment", {}).get("ENABLE_ES") != "true":
         findings.append("temporal: Elasticsearch Visibility must remain enabled")
+    if temporal.get("healthcheck", {}).get("test") != [
+        "CMD",
+        "temporal",
+        "operator",
+        "cluster",
+        "health",
+        "--address",
+        "temporal:7233",
+    ]:
+        findings.append("temporal: health check must use the listening service address")
     redis = services.get("postiz-redis", {})
     redis_command = redis.get("command", [])
     if not all(
