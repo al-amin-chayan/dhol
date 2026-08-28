@@ -28,12 +28,15 @@ admin:
   user: dholbeat-admin
   uid: 1100
   authorized_keys:
+    # Phase one installs and proves the durable key before phase two removes
+    # the WP-05A recovery key and closes public SSH.
+    - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGRiShC/okfJwjMbckqbzl5FMoKEi58y6gHcwZJgiW45 dholbeat-publish-1-admin-2026-08-28
     - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOgtvZDB2rf6L+kniaXqJk5S+FwZ1litgbMP/NWthMKo codex-wp05a-disposable-2026-08-21
 break_glass:
   method: provider-console
   owner: founder
   recovery_identity: VPSDime control-panel console
-  verification: console session opened and host key verified 2026-08-28
+  verification: authenticated root shell exercised for host-key verification and SSH recovery 2026-08-28
 ssh:
   port: 22
   allow_cidrs:

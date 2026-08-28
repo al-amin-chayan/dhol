@@ -259,7 +259,7 @@ printf '\n==> Compose scope for %s\n' "$LIMIT"
 COMPOSE_STACKS="$("$SCRIPT_DIR/controller" exec python3 scripts/lib/plan_document.py compose-scope \
   --root /workspace --limit "$LIMIT")"
 COMPOSE_RENDER_ARGS=()
-while IFS= read -r stack_id; do
+while IFS= read -r stack_id <&3; do
   [ -n "$stack_id" ] || continue
   printf 'rendering Compose configuration: %s\n' "$stack_id"
   compose_file=""
@@ -276,7 +276,7 @@ while IFS= read -r stack_id; do
         'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'
   )" || dholbeat_die "Compose configuration could not be rendered for stack: $stack_id"
   COMPOSE_RENDER_ARGS+=(--compose-render "$stack_id=$compose_digest")
-done <<EOF
+done 3<<EOF
 $COMPOSE_STACKS
 EOF
 
