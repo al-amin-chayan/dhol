@@ -124,6 +124,15 @@ rule. Removal happens only after the replacement path is proven, and the run
 asserts afterwards that the owned rule set is exactly what the contract declares
 — no stale rule, no missing rule.
 
+If an emergency console cutover already produced that target firewall state,
+the reconciliation plan should show no firewall rule delta. A managed-template
+change may still replace emergency comments in `wg0.conf`; comment-only and
+blank-line differences are file drift, not runtime drift, so the plan must not
+queue `Restart WireGuard`. The plan also reads the active interface public key
+and must prove it equals `vpn.server_public_key`. Stop if the handler is queued,
+the firewall changes, or either identity check fails: the live state differs in
+an effective way from the emergency state this release is meant to adopt.
+
 ## 6. Verify
 
 ```sh
