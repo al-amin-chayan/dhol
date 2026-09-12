@@ -59,15 +59,41 @@ use, repeat the same `infra/playbooks/baseline.yml` convergence against an
 approved disposable Ubuntu 24.04 VM/VPS with at least 6 GB RAM and 30 GB disk.
 Supply its inventory values locally, retain provider-console access, run twice
 through the guarded `scripts/controller exec-ssh` command, and attach the same
-redacted evidence fields. Store the private identity, strict known-hosts file,
-and target-specific inventory only under ignored `.artifacts/`; never pass a
-password. The controller requires `--confirm disposable-host`, keeps the
-repository read-only, and copies only the declared known-hosts file into its
-ephemeral home.
+redacted evidence fields plus the interface-binding fields required below.
+Store the private identity, strict known-hosts file, and target-specific
+inventory only under ignored `.artifacts/`; never pass a password. The
+controller requires `--confirm disposable-host`, keeps the repository
+read-only, and copies only the declared known-hosts file into its ephemeral
+home.
 The inventory's `ansible_port` and `baseline_second_connection_port` must name
 the same active SSH listener; preflight rejects a mismatch, and the firewall
 opens that exact port from the declared controller networks.
 Never use a production hostname or IP for this test.
+
+Run it with no hand-added `dholbeat-temporary-ssh` rule, and no other
+manually added firewall rule. The role's own `dholbeat-admin-ssh` task must be
+what opens the SSH port; a port an operator opened beforehand proves nothing
+about the role. The attached `ufw status numbered` output must show exactly one
+role-owned admin-SSH rule, on the port actually in use.
+
+The evidence must also include the interface-binding fields:
+
+```sh
+ip -o link
+ip route show default
+sudo iptables -S DHOLBEAT-DOCKER-INGRESS
+```
+
+These three are required, not optional. The `-i <iface> -j DROP` line inside
+`DHOLBEAT-DOCKER-INGRESS` names an interface, and on its own it does not show
+that the interface exists or carries any traffic. Read side by side, `ip -o
+link` lists the interfaces the host actually has, the default route names the
+one real ingress and egress use, and the iptables ruleset names the one the
+DROP targets. Only all three together establish that the Docker ingress policy
+binds to the interface carrying the default route rather than to an assumed
+name. Addresses and MAC addresses stay redacted as usual; interface names do
+not, because they identify nothing about the operator and are the fact under
+review.
 
 ## Rollback and recovery
 

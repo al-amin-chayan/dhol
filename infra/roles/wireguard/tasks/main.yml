@@ -31,6 +31,46 @@
   ansible.builtin.set_fact:
     wireguard_plan_only: "{{ ansible_check_mode and not wireguard_existing_config.stat.exists }}"
 
+# The committed template may adopt an emergency-created file whose only drift
+# is explanatory comments. Replacing that file is useful, but restarting the
+# interface for comments would needlessly drop the transport carrying this
+# play. Preserve every effective directive and its ordering in the comparison;
+# ignore only blank and comment-only lines that wg-quick does not execute.
+- name: Read the existing WireGuard configuration for restart classification
+  ansible.builtin.slurp:
+    src: "{{ wireguard_config_dir }}/{{ baseline_vpn.interface }}.conf"
+  changed_when: false
+  check_mode: false
+  register: wireguard_existing_configuration
+  when: wireguard_existing_config.stat.exists
+
+- name: Normalize effective WireGuard directives for restart classification
+  ansible.builtin.set_fact:
+    wireguard_existing_effective_configuration: >-
+      {{
+        (wireguard_existing_configuration.content | default('') | b64decode).splitlines()
+        | map('trim')
+        | reject('equalto', '')
+        | reject('match', '^#')
+        | list
+      }}
+    wireguard_desired_effective_configuration: >-
+      {{
+        lookup('ansible.builtin.template', 'wireguard.conf.j2').splitlines()
+        | map('trim')
+        | reject('equalto', '')
+        | reject('match', '^#')
+        | list
+      }}
+
+- name: Decide whether WireGuard runtime configuration must restart
+  ansible.builtin.set_fact:
+    wireguard_runtime_configuration_changed: >-
+      {{
+        wireguard_existing_effective_configuration
+        != wireguard_desired_effective_configuration
+      }}
+
 - name: Report the planned tunnel delta on a host that has no tunnel yet
   ansible.builtin.debug:
     msg: >-
@@ -74,6 +114,7 @@
     - not wireguard_plan_only
     - wireguard_restore_key_path | length > 0
   no_log: true
+  register: wireguard_key_restore_result
   notify: Restart WireGuard
 
 - name: Check whether a server private key already exists
@@ -115,14 +156,28 @@
     - not wireguard_plan_only
     - wireguard_restore_key_path | length > 0
 
-- name: Read the server public key for peer configuration
+- name: Read the on-disk server public key for peer configuration
   ansible.builtin.shell:
     cmd: set -o pipefail && wg pubkey <{{ wireguard_key_path | quote }}
     executable: /bin/bash
   changed_when: false
   check_mode: false
   failed_when: false
-  register: wireguard_public_key
+  register: wireguard_key_file_public_key
+
+- name: Require the on-disk key to match the reviewed identity
+  ansible.builtin.assert:
+    that:
+      - wireguard_key_file_public_key.rc | default(1) == 0
+      - >-
+        wireguard_key_file_public_key.stdout | default('') | trim
+        == baseline_vpn.server_public_key
+    fail_msg: >-
+      The on-disk WireGuard key does not match vpn.server_public_key. Refusing
+      to change or restart the interface before the identity mismatch is resolved.
+  when:
+    - not wireguard_plan_only
+    - baseline_vpn.server_public_key is defined
 
 - name: Install the WireGuard interface configuration
   ansible.builtin.template:
@@ -132,6 +187,16 @@
     group: root
     mode: "{{ wireguard_config_mode }}"
   when: not wireguard_plan_only
+
+- name: Queue a restart only for effective WireGuard configuration changes
+  ansible.builtin.debug:
+    msg: >-
+      Effective WireGuard directives changed; wg-quick@{{ baseline_vpn.interface }}
+      will restart before the interface is verified.
+  changed_when: true
+  when:
+    - not wireguard_plan_only
+    - wireguard_runtime_configuration_changed | bool
   notify: Restart WireGuard
 
 # One deliberate flush, after both the key and a complete configuration exist.
@@ -152,6 +217,19 @@
 - name: Apply pending WireGuard configuration before the tunnel is relied upon
   ansible.builtin.meta: flush_handlers
 
+# `meta: reset_connection` does not accept a task-level conditional. Gate the
+# dynamic include instead so its reset and fresh probe run only after a real
+# interface restart. Recovery follows the event, not desired administration
+# mode: rollback can deliberately carry a public-administration run over the
+# tunnel, while resetting a public SSH connection is safe too.
+- name: Recover the administrative connection after a WireGuard restart
+  ansible.builtin.include_tasks: recover_connection.yml
+  when:
+    - not ansible_check_mode
+    - >-
+      (wireguard_runtime_configuration_changed | bool)
+      or (wireguard_key_restore_result.changed | default(false) | bool)
+
 - name: Enable and start the WireGuard interface
   ansible.builtin.systemd_service:
     name: "wg-quick@{{ baseline_vpn.interface }}.service"
@@ -160,23 +238,45 @@
     daemon_reload: true
   when: not wireguard_plan_only
 
+- name: Read the running WireGuard public key
+  ansible.builtin.command:
+    argv:
+      - wg
+      - show
+      - "{{ baseline_vpn.interface }}"
+      - public-key
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  register: wireguard_running_public_key
+  when: not wireguard_plan_only
+
 - name: Report the server public key to escrow with each peer configuration
   ansible.builtin.debug:
     msg: >-
-      wireguard_server_public_key={{ wireguard_public_key.stdout | default('') | trim }}
+      wireguard_server_public_key={{
+        wireguard_running_public_key.stdout
+        | default(wireguard_key_file_public_key.stdout | default(''), true)
+        | trim
+      }}
       endpoint_port={{ baseline_vpn.listen_port | int }}
-  when: wireguard_public_key.stdout | default('') | length > 0
+  when: >-
+    (wireguard_running_public_key.stdout | default('') | length > 0)
+    or (wireguard_key_file_public_key.stdout | default('') | length > 0)
 
 - name: Require the running key to match the reviewed identity
   ansible.builtin.assert:
     that:
-      - wireguard_public_key.stdout | default('') | trim == baseline_vpn.server_public_key
+      - wireguard_running_public_key.rc | default(1) == 0
+      - >-
+        wireguard_running_public_key.stdout | default('') | trim
+        == baseline_vpn.server_public_key
     fail_msg: >-
       The running WireGuard identity does not match vpn.server_public_key. Either
       the host key was replaced without review, or the contract records a key this
       host never had.
   when:
-    - not ansible_check_mode
+    - not wireguard_plan_only
     - baseline_vpn.server_public_key is defined
 
 # Postconditions cannot be asserted against state a check run has not created.

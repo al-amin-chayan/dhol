@@ -110,6 +110,34 @@ def test_committed_production_baselines_match_the_inventory_manifest() -> None:
         assert manifest[document["host_id"]]["role"] == document["host_role"]
 
 
+def test_publish_1_production_contract_matches_the_proven_tunnel_cutover() -> None:
+    """Issue #55 adopts the live identity without reopening the public path."""
+
+    document = load_yaml(BASELINE_ROOT / "publish-1.yml")
+    assert document["admin"]["authorized_keys"] == [
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGRiShC/okfJwjMbckqbzl5FMoKEi58y6gHcwZJgiW45 "
+        "dholbeat-publish-1-admin-2026-08-28"
+    ]
+    assert document["ssh"]["allow_cidrs"] == ["10.99.0.0/24"]
+    assert document["vpn"]["administration"] == "tunnel"
+    assert (
+        document["vpn"]["server_public_key"]
+        == "5OU7xOLv/xhh49u46SW9MZBxjuy8MfVGg6o4nVyfiRw="
+    )
+    assert document["vpn"]["peers"] == [
+        {
+            "id": "founder-laptop",
+            "public_key": "a/MmsygtIlvISc785A3Cs6H2Y98EKjE9DKkYBw/LkxI=",
+            "allowed_ips": ["10.99.0.2/32"],
+        },
+        {
+            "id": "founder-recovery",
+            "public_key": "Gbg7GoBiAZL7T212/9CfQY/YTKXewhevPqotXJTM8UA=",
+            "allowed_ips": ["10.99.0.3/32"],
+        },
+    ]
+
+
 def test_an_empty_baseline_directory_is_valid_but_a_missing_one_is_not(tmp_path: Path) -> None:
     assert HOST_BASELINE.validate_all(tmp_path) == [
         "infra/inventories/production/baseline: production baseline directory is missing"

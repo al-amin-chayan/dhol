@@ -109,9 +109,11 @@ def main() -> None:
     )
     arguments = parser.parse_args()
 
+    firewall_state = sys.stdin.read()
+    parsed_rules, _ = parse_rules(firewall_state)
     desired, desired_findings = desired_tuples(arguments.desired)
     obsolete, missing, findings = reconcile(
-        sys.stdin.read(), set(arguments.owned_comment), desired
+        firewall_state, set(arguments.owned_comment), desired
     )
     if arguments.report:
         for problem in sorted(set(desired_findings + findings)):
@@ -120,8 +122,13 @@ def main() -> None:
             raise SystemExit(1)
         for entry in missing:
             print(f"planned add: {entry.split(': ', 1)[1]}")
+        rules_by_index = {rule["index"]: rule for rule in parsed_rules}
         for index in obsolete:
-            print(f"planned delete: rule {index}")
+            rule = rules_by_index[index]
+            print(
+                f"planned delete: rule {index}: {rule['to']} from {rule['source']} "
+                f"({rule['comment']})"
+            )
         if not missing and not obsolete:
             print("planned change: none")
         return

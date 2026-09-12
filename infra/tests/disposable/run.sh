@@ -34,6 +34,10 @@ usage() {
     'through the locked controller, run check mode, and prove a failed second SSH' \
     'connection leaves bootstrap access and the unapplied firewall intact.' \
     '' \
+    'Every run records the link list, the default route and the Docker ingress' \
+    'chain, so the interface the DROP rule names is visible and is proven to be' \
+    'the interface that actually carries the default route.' \
+    '' \
     'The harness never contacts production. It removes only its named containers,' \
     'network, target image, builder/cache, and temporary key material. Evidence is' \
     'redacted and bounded.'
@@ -262,6 +266,52 @@ changed_count() {
   sed -n 's/.*changed=\([0-9][0-9]*\).*/\1/p' "$1" | tail -n 1
 }
 
+# The Docker ingress policy drops public ingress with `-i <interface> -j DROP`.
+# Record the link list, the default route and the chain itself so a reviewer can
+# see which interface that rule names and that it is the real default-route NIC.
+# Missing commands and an absent chain are recorded, never silently empty.
+capture_network_evidence() {
+  local container="$1"
+  # The single-quoted collector expands only inside the disposable target.
+  # shellcheck disable=SC2016
+  docker exec "$container" /bin/sh -u -c '
+    collect() {
+      section=$1
+      shift
+      if ! command -v "$1" >/dev/null 2>&1; then
+        printf "## %s status=unavailable reason=command-not-found:%s\n" "$section" "$1"
+        return 0
+      fi
+      if ! output=$("$@" 2>/dev/null); then
+        printf "## %s status=absent reason=command-failed:%s\n" "$section" "$1"
+        return 0
+      fi
+      printf "## %s status=ok\n" "$section"
+      [ -z "$output" ] || printf "%s\n" "$output"
+    }
+    collect links ip -o link
+    collect default-route ip route show default
+    collect docker-ingress-chain iptables -w -S DHOLBEAT-DOCKER-INGRESS
+  ' fixture-network 2>&1 \
+    | python3 "$SCRIPT_DIR/redact_network_evidence.py"
+}
+
+assert_network_evidence() {
+  local evidence="$1"
+  grep -q '^redaction_residue: 0$' "$evidence" \
+    || die "network evidence withheld an address-shaped line; inspect $evidence"
+  grep -q '^drop_interfaces_exist_on_host: true$' "$evidence" \
+    || die "the Docker ingress DROP rule names an interface the host does not have"
+  grep -q '^default_route_interfaces_dropped: true$' "$evidence" \
+    || die "the Docker ingress DROP rule does not cover the default-route interface"
+  grep -q '^evidence_complete: true$' "$evidence" \
+    || die "network interface evidence is incomplete; inspect $evidence"
+}
+
+evidence_field() {
+  sed -n "s/^$2: //p" "$1" | tail -n 1
+}
+
 start_target "$POSITIVE_CONTAINER" "$TARGET_ALIAS"
 write_known_hosts "$POSITIVE_CONTAINER" "$TARGET_ALIAS" "$TEMP_ROOT/known_hosts-positive"
 write_vars "$TEMP_ROOT/vars.json"
@@ -306,6 +356,12 @@ docker exec "$POSITIVE_CONTAINER" systemctl is-active dholbeat-docker-firewall.s
   >"$ARTIFACT_ROOT/docker-firewall-restart.txt"
 docker exec "$POSITIVE_CONTAINER" iptables -w -C DOCKER-USER \
   -j DHOLBEAT-DOCKER-INGRESS
+
+NETWORK_EVIDENCE="$ARTIFACT_ROOT/host-network-evidence.txt"
+run_logged "$NETWORK_EVIDENCE" capture_network_evidence "$POSITIVE_CONTAINER"
+assert_network_evidence "$NETWORK_EVIDENCE"
+DEFAULT_ROUTE_INTERFACES="$(evidence_field "$NETWORK_EVIDENCE" default_route_interfaces)"
+DROP_INTERFACES="$(evidence_field "$NETWORK_EVIDENCE" docker_ingress_drop_interfaces)"
 
 # The single-quoted script expands only inside the disposable target.
 # shellcheck disable=SC2016
@@ -391,6 +447,9 @@ printf '%s\n' \
   'bootstrap_access_after_failure: passed' \
   'firewall_after_failed_probe: inactive' \
   'docker_firewall_restart: passed' \
+  "default_route_interfaces: $DEFAULT_ROUTE_INTERFACES" \
+  "docker_ingress_drop_interfaces: $DROP_INTERFACES" \
+  'docker_ingress_drop_covers_default_route: true' \
   'container_egress: passed' \
   'container_to_container: passed' \
   'unlisted_published_port: blocked' \

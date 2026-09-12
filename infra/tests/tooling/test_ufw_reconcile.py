@@ -168,7 +168,10 @@ def test_phase_two_check_mode_reports_the_planned_deletion() -> None:
     )
     completed = report(PHASE_TWO, live)
     assert completed.returncode == 0, completed.stderr
-    assert "planned delete: rule 1" in completed.stdout
+    assert (
+        "planned delete: rule 1: 22/tcp from 203.0.113.0/24 "
+        "(dholbeat-admin-ssh)"
+    ) in completed.stdout
 
 
 def test_a_converged_host_reports_no_planned_change() -> None:

@@ -1,0 +1,13 @@
+---
+# A real interface restart can briefly invalidate the SSH route that carried
+# the handler itself. Discard the persistent control socket and prove a fresh
+# connection over the declared tunnel before the parent play advances to
+# firewall or SSH mutations.
+- name: Reset the administrative connection after a WireGuard restart
+  ansible.builtin.meta: reset_connection
+
+- name: Wait for the tunnel administration path after a WireGuard restart
+  ansible.builtin.wait_for_connection:
+    connect_timeout: 5
+    sleep: 2
+    timeout: 120
