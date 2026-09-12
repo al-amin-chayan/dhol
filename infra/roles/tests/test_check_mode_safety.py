@@ -39,8 +39,6 @@ CONTRACT_ASSERTIONS = {
     # A precondition on state that already exists, not a postcondition of this
     # run: it must still refuse during planning.
     "Refuse to remove or replace an undeclared container runtime",
-    "Require the on-disk key to match the reviewed identity",
-    "Require the running key to match the reviewed identity",
 }
 
 

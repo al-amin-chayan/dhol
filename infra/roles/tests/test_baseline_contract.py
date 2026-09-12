@@ -292,7 +292,7 @@ def test_wireguard_restart_recovers_tunnel_transport_before_play_continues() -> 
     recover_task = tasks[recover]
     assert recover_task["ansible.builtin.include_tasks"] == "recover_connection.yml"
     assert "not ansible_check_mode" in recover_task["when"]
-    assert "baseline_vpn.administration == 'tunnel'" in recover_task["when"]
+    assert not any("baseline_vpn.administration" in item for item in recover_task["when"])
     assert any(
         "wireguard_runtime_configuration_changed" in item
         for item in recover_task["when"]

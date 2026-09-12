@@ -219,12 +219,13 @@
 
 # `meta: reset_connection` does not accept a task-level conditional. Gate the
 # dynamic include instead so its reset and fresh probe run only after a real
-# interface restart on the tunnel-carried administration path.
+# interface restart. Recovery follows the event, not desired administration
+# mode: rollback can deliberately carry a public-administration run over the
+# tunnel, while resetting a public SSH connection is safe too.
 - name: Recover the administrative connection after a WireGuard restart
   ansible.builtin.include_tasks: recover_connection.yml
   when:
     - not ansible_check_mode
-    - baseline_vpn.administration == 'tunnel'
     - >-
       (wireguard_runtime_configuration_changed | bool)
       or (wireguard_key_restore_result.changed | default(false) | bool)
