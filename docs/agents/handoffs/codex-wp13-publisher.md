@@ -2,14 +2,15 @@
 
 Agent: codex
 
-Head: see draft PR metadata; cross-review must use the later implementation-complete head
+Head: see ready PR #50 metadata; cross-review must use its current remote head
 
 ## Status
 
-WP-13's safe offline implementation is complete, but the issue is not. The
-production inventory keeps `publisher_enabled: false`; no host, Cloudflare,
-R2, Postiz, or social-provider state was changed. Keep the PR draft until the
-dependency receipts and live fixture evidence below exist.
+WP-13's safe offline implementation is complete and PR #50 is ready for review
+and merge. The issue's production definition of done remains blocked: the
+inventory keeps `publisher_enabled: false`, and no host, Cloudflare, R2,
+Postiz, or social-provider state was changed. Activation still requires the
+dependency receipts and live fixture evidence below.
 
 ## What changed
 
@@ -38,7 +39,7 @@ dependency receipts and live fixture evidence below exist.
   restore Compose renders with synthetic values and no network calls.
 - `scripts/check` — passed: repository/branch policy, lint, secret scan, all
   schema/inventory/SOPS/baseline/tooling suites, 90 publisher-evaluation tests,
-  49 selected-publisher tests, the offline publisher contract, and Ansible lint
+  54 selected-publisher tests, the offline publisher contract, and Ansible lint
   with zero failures or warnings.
 - `git diff --check` — passed.
 
@@ -89,9 +90,18 @@ both before editing. This third delta reasserts the freeze marker under the lock
 after any concurrent unfreeze and extends the default wait budget for a guarded
 converge that also pulls images.
 
-Any further Follow-up is founder-triggered and must review the later exact PR
-head. The author did not invoke or enqueue it. Live evidence may still change
-the head again before the PR becomes implementation-complete.
+Claude Code then performed a founder-triggered Follow-up at
+`8d1b53a4192a7f72f9181b2fe364dedaefc09e97`, reverified all twenty-two earlier
+findings, and raised four required findings plus one suggestion. The author
+accepted all five. This fourth delta synchronizes the 512 PID allowance with
+the service registry and adds a lockstep guard; records that 512 is a
+conservative doubling rather than measured capacity; makes the seven-day
+canary capture Postiz PID usage and stop at 410; and derives the Temporal health
+probe from Postiz's non-loopback service address.
+
+Any further Follow-up is founder-triggered and must review PR #50's current
+exact head. The author did not invoke or enqueue it. Production evidence may
+still be recorded outside this inactive implementation PR after it merges.
 
 ## Cost and rollback boundary
 

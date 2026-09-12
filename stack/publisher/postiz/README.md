@@ -23,6 +23,13 @@ silent LRU loss is forbidden. Its one-minute stop grace protects the retained
 AOF copy. Postiz `/tmp` is a 256 MiB tmpfs, and both `/tmp` high-water and Redis
 RSS are part of the seven-day canary.
 
+Postiz's 512 PID limit is a conservative allowance introduced on 2026-08-28 by
+doubling the earlier 256 limit. No peak process count, workload, or host record
+was retained for that change, so 512 is not measured capacity evidence. The
+seven-day production canary must record the real peak and stop admission at 410
+PIDs (80% of the limit); changing the limit again requires that evidence rather
+than another unrecorded estimate.
+
 The aggregate container memory limits total 4,600 MiB. That is a hard ceiling,
 not canary evidence: production still must demonstrate less than 4.5 GiB peak
 RAM, less than 18 GiB steady disk and at least 8 GiB update headroom for seven

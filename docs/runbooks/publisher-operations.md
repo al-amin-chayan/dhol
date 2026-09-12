@@ -266,10 +266,22 @@ Before a real brand account is admitted, record seven continuous days with no
 OOM, less than 4.5 GiB peak publisher RAM, less than 18 GiB steady host disk,
 at least 8 GiB update headroom, and Postiz `/tmp` below 80% of its 256 MiB
 tmpfs. Record Redis RSS through at least one AOF rewrite and stop at 230 MiB or
-any Redis OOM/restart. Exercise the global kill switch and one scheduler-
-verified cancellation. Any threshold breach stops admission and returns measured
-prune/scheduling/upgrade options to the founder; it does not raise a limit or
-purchase a larger VPS automatically.
+any Redis OOM/restart. At the same sampling cadence, record the Postiz process
+count and stop admission at 410 PIDs (80% of its 512 limit). Resolve the
+Compose-managed container, fail if it is absent, and take a point-in-time
+reading with:
+
+```sh
+cd /opt/dholbeat/publisher
+postiz_container="$(sudo docker compose ps -q postiz)"
+test -n "$postiz_container"
+sudo docker stats --no-stream --format '{{.PIDs}}' "$postiz_container"
+```
+
+Exercise the global kill switch and one scheduler-verified cancellation. Any
+threshold breach stops admission and returns measured prune/scheduling/upgrade
+options to the founder; it does not raise a limit or purchase a larger VPS
+automatically.
 
 ## Credential rotation
 

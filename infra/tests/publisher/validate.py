@@ -113,7 +113,7 @@ def validate_compose(document: dict[str, Any]) -> list[str]:
 
     postiz = services.get("postiz", {})
     if postiz.get("pids_limit") != 512:
-        findings.append("postiz: PID limit must preserve measured process headroom")
+        findings.append("postiz: PID limit must preserve the conservative process allowance")
     ports = postiz.get("ports", [])
     if len(ports) != 1 or not str(ports[0]).startswith("127.0.0.1:"):
         findings.append("postiz: the only published port must bind to loopback")
@@ -162,6 +162,19 @@ def validate_compose(document: dict[str, Any]) -> list[str]:
     temporal = services.get("temporal", {})
     if temporal.get("environment", {}).get("ENABLE_ES") != "true":
         findings.append("temporal: Elasticsearch Visibility must remain enabled")
+    temporal_address = environment.get("TEMPORAL_ADDRESS")
+    temporal_host = ""
+    if isinstance(temporal_address, str):
+        temporal_host, separator, temporal_port = temporal_address.rpartition(":")
+    else:
+        separator, temporal_port = "", ""
+    if (
+        not separator
+        or temporal_host != "temporal"
+        or temporal_host not in services
+        or temporal_port != "7233"
+    ):
+        findings.append("postiz: TEMPORAL_ADDRESS must target the Temporal service network")
     if temporal.get("healthcheck", {}).get("test") != [
         "CMD",
         "temporal",
@@ -169,9 +182,9 @@ def validate_compose(document: dict[str, Any]) -> list[str]:
         "cluster",
         "health",
         "--address",
-        "temporal:7233",
+        temporal_address,
     ]:
-        findings.append("temporal: health check must use the listening service address")
+        findings.append("temporal: health check must match Postiz TEMPORAL_ADDRESS")
     redis = services.get("postiz-redis", {})
     redis_command = redis.get("command", [])
     if not all(
@@ -266,6 +279,8 @@ def validate_desired_state_registries(root: Path, compose: dict[str, Any]) -> li
         compose_memory = memory_mebibytes(compose["services"][compose_id]["mem_limit"])
         if service["resources"]["memory_mb"] != compose_memory:
             findings.append(f"registries: {registry_id} memory differs from Compose")
+        if service["resources"]["pids"] != compose["services"][compose_id]["pids_limit"]:
+            findings.append(f"registries: {registry_id} PID limit differs from Compose")
         if service["volume_ids"] != EXPECTED_REGISTRY_VOLUMES[registry_id]:
             findings.append(f"registries: {registry_id} volume ownership differs from Compose")
         if service["backup_adapter_id"] not in backup_ids:

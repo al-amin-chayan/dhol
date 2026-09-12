@@ -22,7 +22,7 @@ services:
     resources:
       cpus: 1.5
       memory_mb: 1400
-      pids: 256
+      pids: 512
       logs: {driver: json-file, max_size_mb: 10, max_files: 3}
     monitoring_owner: platform-operations
     rollback_command: scripts/infra-apply --limit publish-1 --release PREVIOUS_REVIEWED_TAG

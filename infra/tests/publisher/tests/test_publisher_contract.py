@@ -17,6 +17,7 @@ SPEC.loader.exec_module(VALIDATOR)
 load_yaml = VALIDATOR.load_yaml
 memory_mebibytes = VALIDATOR.memory_mebibytes
 validate_compose = VALIDATOR.validate_compose
+validate_desired_state_registries = VALIDATOR.validate_desired_state_registries
 validate_root = VALIDATOR.validate_root
 
 
@@ -59,17 +60,38 @@ def test_temporal_healthcheck_uses_its_listening_service_address(compose: dict) 
     changed = deepcopy(compose)
     changed["services"]["temporal"]["healthcheck"]["test"][-1] = "127.0.0.1:7233"
     assert (
-        "temporal: health check must use the listening service address"
+        "temporal: health check must match Postiz TEMPORAL_ADDRESS"
         in validate_compose(changed)
     )
 
 
-def test_postiz_pid_limit_preserves_measured_process_headroom(compose: dict) -> None:
+def test_temporal_address_cannot_make_postiz_and_the_probe_agree_on_loopback(
+    compose: dict,
+) -> None:
+    changed = deepcopy(compose)
+    changed["services"]["postiz"]["environment"]["TEMPORAL_ADDRESS"] = "127.0.0.1:7233"
+    changed["services"]["temporal"]["healthcheck"]["test"][-1] = "127.0.0.1:7233"
+    assert (
+        "postiz: TEMPORAL_ADDRESS must target the Temporal service network"
+        in validate_compose(changed)
+    )
+
+
+def test_postiz_pid_limit_preserves_conservative_process_allowance(compose: dict) -> None:
     changed = deepcopy(compose)
     changed["services"]["postiz"]["pids_limit"] = 256
     assert (
-        "postiz: PID limit must preserve measured process headroom"
+        "postiz: PID limit must preserve the conservative process allowance"
         in validate_compose(changed)
+    )
+
+
+def test_registry_pid_budget_cannot_drift_from_compose(compose: dict) -> None:
+    changed = deepcopy(compose)
+    changed["services"]["postiz"]["pids_limit"] = 384
+    assert (
+        "registries: publisher PID limit differs from Compose"
+        in validate_desired_state_registries(ROOT, changed)
     )
 
 
@@ -136,6 +158,19 @@ def test_postiz_tmpfs_must_stay_within_256_mib(compose: dict) -> None:
     changed = deepcopy(compose)
     changed["services"]["postiz"]["tmpfs"] = ["/tmp:size=536870912,mode=1777"]
     assert "postiz: /tmp tmpfs must be exactly 256 MiB" in validate_compose(changed)
+
+
+def test_seven_day_canary_records_postiz_pid_headroom() -> None:
+    runbook = (ROOT / "docs/runbooks/publisher-operations.md").read_text(
+        encoding="utf-8"
+    )
+    section = runbook.split("## Seven-day canary and stop conditions", 1)[1].split(
+        "## Credential rotation", 1
+    )[0]
+    normalized = " ".join(section.split())
+    assert "docker stats --no-stream" in normalized
+    assert "{{.PIDs}}" in normalized
+    assert "stop admission at 410 PIDs" in normalized
 
 
 def test_decommission_is_explicit_and_preserves_retained_volumes() -> None:
