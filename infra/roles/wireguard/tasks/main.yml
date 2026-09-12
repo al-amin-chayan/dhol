@@ -217,24 +217,11 @@
 - name: Apply pending WireGuard configuration before the tunnel is relied upon
   ansible.builtin.meta: flush_handlers
 
-# A real interface restart can briefly invalidate the SSH route that carried
-# the handler itself. Discard the persistent control socket and prove a fresh
-# connection over the declared tunnel before the play advances to firewall or
-# SSH mutations.
-- name: Reset the administrative connection after a WireGuard restart
-  ansible.builtin.meta: reset_connection
-  when:
-    - not ansible_check_mode
-    - baseline_vpn.administration == 'tunnel'
-    - >-
-      (wireguard_runtime_configuration_changed | bool)
-      or (wireguard_key_restore_result.changed | default(false) | bool)
-
-- name: Wait for the tunnel administration path after a WireGuard restart
-  ansible.builtin.wait_for_connection:
-    connect_timeout: 5
-    sleep: 2
-    timeout: 120
+# `meta: reset_connection` does not accept a task-level conditional. Gate the
+# dynamic include instead so its reset and fresh probe run only after a real
+# interface restart on the tunnel-carried administration path.
+- name: Recover the administrative connection after a WireGuard restart
+  ansible.builtin.include_tasks: recover_connection.yml
   when:
     - not ansible_check_mode
     - baseline_vpn.administration == 'tunnel'
