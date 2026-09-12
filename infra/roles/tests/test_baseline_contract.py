@@ -257,6 +257,77 @@ def test_the_tunnel_is_established_before_any_administrative_path_can_close() ->
     assert "wireguard" in tunnel_task["when"]
 
 
+def test_comment_only_wireguard_adoption_does_not_restart_the_tunnel() -> None:
+    """Emergency comments may be adopted without dropping the control path."""
+
+    tasks = load_yaml(ROOT / "infra/roles/wireguard/tasks/main.yml")
+    assert isinstance(tasks, list)
+    by_name = {task["name"]: task for task in tasks}
+
+    normalization = by_name[
+        "Normalize effective WireGuard directives for restart classification"
+    ]["ansible.builtin.set_fact"]
+    for expression in normalization.values():
+        assert "reject('equalto', '')" in expression
+        assert "reject('match', '^#')" in expression
+
+    install = by_name["Install the WireGuard interface configuration"]
+    assert "notify" not in install
+    restart = by_name[
+        "Queue a restart only for effective WireGuard configuration changes"
+    ]
+    assert restart["notify"] == "Restart WireGuard"
+    assert "wireguard_runtime_configuration_changed | bool" in restart["when"]
+
+
+def test_wireguard_restart_recovers_tunnel_transport_before_play_continues() -> None:
+    tasks = load_yaml(ROOT / "infra/roles/wireguard/tasks/main.yml")
+    assert isinstance(tasks, list)
+    names = [task["name"] for task in tasks]
+    flush = names.index("Apply pending WireGuard configuration before the tunnel is relied upon")
+    recover = names.index("Recover the administrative connection after a WireGuard restart")
+    enable = names.index("Enable and start the WireGuard interface")
+    assert flush < recover < enable
+
+    recover_task = tasks[recover]
+    assert recover_task["ansible.builtin.include_tasks"] == "recover_connection.yml"
+    assert "not ansible_check_mode" in recover_task["when"]
+    assert not any("baseline_vpn.administration" in item for item in recover_task["when"])
+    assert any(
+        "wireguard_runtime_configuration_changed" in item
+        for item in recover_task["when"]
+    )
+
+    recovery = load_yaml(ROOT / "infra/roles/wireguard/tasks/recover_connection.yml")
+    assert isinstance(recovery, list)
+    assert [task["name"] for task in recovery] == [
+        "Reset the administrative connection after a WireGuard restart",
+        "Wait for the tunnel administration path after a WireGuard restart",
+    ]
+    assert recovery[0]["ansible.builtin.meta"] == "reset_connection"
+    assert recovery[1]["ansible.builtin.wait_for_connection"]["timeout"] == 120
+
+
+def test_wireguard_plan_binds_on_disk_and_running_public_keys() -> None:
+    tasks = load_yaml(ROOT / "infra/roles/wireguard/tasks/main.yml")
+    assert isinstance(tasks, list)
+    names = [task["name"] for task in tasks]
+    disk_assert = names.index("Require the on-disk key to match the reviewed identity")
+    install = names.index("Install the WireGuard interface configuration")
+    live_read = names.index("Read the running WireGuard public key")
+    live_assert = names.index("Require the running key to match the reviewed identity")
+    assert disk_assert < install < live_read < live_assert
+
+    read_task = tasks[live_read]
+    assert read_task["check_mode"] is False
+    assert read_task["ansible.builtin.command"]["argv"] == [
+        "wg",
+        "show",
+        "{{ baseline_vpn.interface }}",
+        "public-key",
+    ]
+
+
 def test_firewall_ssh_port_follows_the_active_ansible_connection() -> None:
     base_defaults = load_yaml(ROOT / "infra/roles/base/defaults/main.yml")
     firewall_defaults = load_yaml(ROOT / "infra/roles/firewall/defaults/main.yml")
