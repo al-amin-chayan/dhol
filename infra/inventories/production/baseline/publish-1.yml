@@ -28,10 +28,9 @@ admin:
   user: dholbeat-admin
   uid: 1100
   authorized_keys:
-    # Phase one installs and proves the durable key before phase two removes
-    # the WP-05A recovery key and closes public SSH.
+    # The emergency cutover proved this durable key over WireGuard before the
+    # retired WP-05A key and public SSH rules were removed.
     - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGRiShC/okfJwjMbckqbzl5FMoKEi58y6gHcwZJgiW45 dholbeat-publish-1-admin-2026-08-28
-    - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOgtvZDB2rf6L+kniaXqJk5S+FwZ1litgbMP/NWthMKo codex-wp05a-disposable-2026-08-21
 break_glass:
   method: provider-console
   owner: founder
@@ -41,7 +40,6 @@ ssh:
   port: 22
   allow_cidrs:
     - 10.99.0.0/24
-    - 160.22.21.217/32
 application_bindings: []
 managed_directories:
   - path: /home/dholbeat-admin
@@ -118,11 +116,12 @@ managed_directories:
     backup: {required: false, owner: platform-operations}
 vpn:
   mode: wireguard
-  administration: public
+  administration: tunnel
   interface: wg0
   listen_port: 51820
   subnet: 10.99.0.0/24
   host_address: 10.99.0.1/24
+  server_public_key: 5OU7xOLv/xhh49u46SW9MZBxjuy8MfVGg6o4nVyfiRw=
   peers:
     - id: founder-laptop
       public_key: a/MmsygtIlvISc785A3Cs6H2Y98EKjE9DKkYBw/LkxI=
