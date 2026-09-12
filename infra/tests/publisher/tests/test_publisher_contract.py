@@ -64,6 +64,15 @@ def test_temporal_healthcheck_uses_its_listening_service_address(compose: dict) 
     )
 
 
+def test_postiz_pid_limit_preserves_measured_process_headroom(compose: dict) -> None:
+    changed = deepcopy(compose)
+    changed["services"]["postiz"]["pids_limit"] = 256
+    assert (
+        "postiz: PID limit must preserve measured process headroom"
+        in validate_compose(changed)
+    )
+
+
 def test_snapshot_path_is_required(compose: dict) -> None:
     changed = deepcopy(compose)
     changed["services"]["temporal-elasticsearch"]["volumes"] = [

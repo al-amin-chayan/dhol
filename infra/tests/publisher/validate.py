@@ -112,6 +112,8 @@ def validate_compose(document: dict[str, Any]) -> list[str]:
         findings.append(f"compose: aggregate memory limit {total_memory} MiB exceeds 4608 MiB")
 
     postiz = services.get("postiz", {})
+    if postiz.get("pids_limit") != 512:
+        findings.append("postiz: PID limit must preserve measured process headroom")
     ports = postiz.get("ports", [])
     if len(ports) != 1 or not str(ports[0]).startswith("127.0.0.1:"):
         findings.append("postiz: the only published port must bind to loopback")
