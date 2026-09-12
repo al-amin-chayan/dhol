@@ -40,11 +40,14 @@ PUBLIC_KEY_BODY_RE = re.compile(
 )
 HIGH_ENTROPY_RE = re.compile(r"(?<![A-Za-z0-9+/=])[A-Za-z0-9+/]{48,}={0,2}(?![A-Za-z0-9+/=])")
 HOME_PATH_RE = re.compile(r"(?:/Users|/home)/[^\s\"',:]+")
+ANSIBLE_LOCAL_TEMP_ROOT = "/tmp/ansible-local"
 ANSIBLE_LOCAL_TEMP_RE = re.compile(
-    r"/tmp/ansible-local/ansible-local-[A-Za-z0-9._-]+/tmp[A-Za-z0-9._-]+"
+    rf"{re.escape(ANSIBLE_LOCAL_TEMP_ROOT)}/"
+    r"ansible-local-[A-Za-z0-9._-]+/tmp[A-Za-z0-9._-]+"
 )
 REDACTED = "<redacted>"
 NORMALIZED_ANSIBLE_TEMP = "<ansible-local-tmp>"
+TRANSCRIPT_NORMALIZATION = "redacted-ansible-local-temp-v1"
 
 
 def sha256_text(text: str) -> str:
@@ -349,6 +352,7 @@ def build_plan(arguments: argparse.Namespace) -> tuple[dict[str, Any], list[str]
             "failed_tasks": summary["failed_tasks"],
             "unreachable_tasks": summary["unreachable_tasks"],
             "diffs": summary["diffs"],
+            "transcript_normalization": TRANSCRIPT_NORMALIZATION,
             "transcript_sha256": sha256_text(normalized_transcript),
         },
         "cost": {
@@ -408,7 +412,7 @@ def main() -> None:
         return
 
     if arguments.command == "redact":
-        sys.stdout.write(redact(sys.stdin.read(), arguments.redact))
+        sys.stdout.write(normalize_transcript(redact(sys.stdin.read(), arguments.redact)))
         return
 
     plan, findings = build_plan(arguments)
