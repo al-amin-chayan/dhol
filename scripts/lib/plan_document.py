@@ -40,7 +40,11 @@ PUBLIC_KEY_BODY_RE = re.compile(
 )
 HIGH_ENTROPY_RE = re.compile(r"(?<![A-Za-z0-9+/=])[A-Za-z0-9+/]{48,}={0,2}(?![A-Za-z0-9+/=])")
 HOME_PATH_RE = re.compile(r"(?:/Users|/home)/[^\s\"',:]+")
+ANSIBLE_LOCAL_TEMP_RE = re.compile(
+    r"/tmp/ansible-local/ansible-local-[A-Za-z0-9._-]+/tmp[A-Za-z0-9._-]+"
+)
 REDACTED = "<redacted>"
+NORMALIZED_ANSIBLE_TEMP = "<ansible-local-tmp>"
 
 
 def sha256_text(text: str) -> str:
@@ -92,6 +96,12 @@ def redact(text: str, literals: list[str]) -> str:
     redacted = IPV6_RE.sub(_mask_v6, redacted)
     redacted = HIGH_ENTROPY_RE.sub(REDACTED, redacted)
     return redacted
+
+
+def normalize_transcript(text: str) -> str:
+    """Remove controller-generated paths that do not describe host state."""
+
+    return ANSIBLE_LOCAL_TEMP_RE.sub(NORMALIZED_ANSIBLE_TEMP, text)
 
 
 DIFF_START_RE = re.compile(r"^(?:--- before|\+\+\+ after|@@ )")
@@ -264,8 +274,8 @@ def build_plan(arguments: argparse.Namespace) -> tuple[dict[str, Any], list[str]
     root = arguments.root.resolve()
     baseline = load_yaml(root / f"infra/inventories/production/baseline/{arguments.limit}.yml")
     transcript = arguments.ansible_log.read_text(encoding="utf-8", errors="replace")
-    redacted_transcript = redact(transcript, arguments.redact)
-    summary = summarize_transcript(redacted_transcript)
+    normalized_transcript = normalize_transcript(redact(transcript, arguments.redact))
+    summary = summarize_transcript(normalized_transcript)
     stacks, findings = compose_scope(root, arguments.limit)
 
     compose_renders = {}
@@ -339,9 +349,7 @@ def build_plan(arguments: argparse.Namespace) -> tuple[dict[str, Any], list[str]
             "failed_tasks": summary["failed_tasks"],
             "unreachable_tasks": summary["unreachable_tasks"],
             "diffs": summary["diffs"],
-            "transcript_sha256": sha256_text(
-                arguments.ansible_log.read_text(encoding="utf-8", errors="replace")
-            ),
+            "transcript_sha256": sha256_text(normalized_transcript),
         },
         "cost": {
             "monthly_usd": baseline["provider"]["monthly_cost_usd"],

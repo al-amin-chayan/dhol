@@ -323,7 +323,7 @@ def build_arguments(root: Path, log: Path, contract: Path) -> types.SimpleNamesp
     )
 
 
-def test_plan_document_is_byte_stable_for_identical_inputs(tmp_path: Path) -> None:
+def test_plan_document_is_byte_stable_across_ansible_temp_paths(tmp_path: Path) -> None:
     import json
     import shutil
 
@@ -343,14 +343,29 @@ def test_plan_document_is_byte_stable_for_identical_inputs(tmp_path: Path) -> No
     baseline.write_text(yaml.safe_dump(source, sort_keys=True), encoding="utf-8")
 
     log = tmp_path / "check.log"
-    log.write_text(transcript(failed=False), encoding="utf-8")
+    stable_transcript = transcript(failed=False)
+    first_transcript = stable_transcript.replace(
+        "+++ after: /etc/systemd/journald.conf.d/60-dholbeat-bounds.conf",
+        "+++ after: /tmp/ansible-local/ansible-local-1abc123/tmpfirst/60-dholbeat-bounds.conf",
+    )
+    second_transcript = stable_transcript.replace(
+        "+++ after: /etc/systemd/journald.conf.d/60-dholbeat-bounds.conf",
+        "+++ after: /tmp/ansible-local/ansible-local-1xyz789/tmpsecond/60-dholbeat-bounds.conf",
+    )
+    log.write_text(first_transcript, encoding="utf-8")
     contract = tmp_path / "contract.json"
     contract.write_text(json.dumps({"schema_version": 1}), encoding="utf-8")
 
     first, findings = PLAN.build_plan(build_arguments(root, log, contract))
+    log.write_text(second_transcript, encoding="utf-8")
     second, _ = PLAN.build_plan(build_arguments(root, log, contract))
     assert findings == []
+    assert first_transcript != second_transcript
     assert yaml.safe_dump(first, sort_keys=True) == yaml.safe_dump(second, sort_keys=True)
+    assert first["ansible_run"]["transcript_sha256"] == second["ansible_run"]["transcript_sha256"]
+    assert first["ansible_run"]["diffs"][0]["hunk"][1].startswith(
+        "+++ after: <ansible-local-tmp>/"
+    )
     assert first["reviewed_input"]["rehearsal"] is False
     assert first["secrets"]["decrypted_to_disk"] is False
     assert first["planned_playbook"] == "playbooks/bootstrap.yml"
