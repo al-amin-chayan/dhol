@@ -72,8 +72,9 @@ def test_schema_inventory_is_versioned_and_complete() -> None:
     assert actual == expected
     for schema_path in sorted(actual):
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
-        assert "/v1/" in schema["$id"]
-        assert schema["properties"]["schema_version"]["const"] == 1
+        version = schema["properties"]["schema_version"]["const"]
+        assert f"/v{version}/" in schema["$id"]
+        assert isinstance(version, int) and version >= 1
 
 
 def test_schema_inventory_ignores_other_worktrees(tmp_path: Path) -> None:
@@ -117,7 +118,7 @@ def test_data_only_third_brand_bundle_is_valid_and_deterministic() -> None:
     assert workflows == {"workflow-alpha", "workflow-beta"}
     assert set(mappings) == {"publisher-alpha", "publisher-beta", "publisher-gamma"}
     assert mappings["publisher-gamma"]["brands"] == [
-        {"brand_id": "brand-gamma", "account_ids": ["fixture-gamma-social"]}
+        {"brand_id": "brand-gamma", "accounts": []}
     ]
     consumer_projects = {
         manifest["project_id"] for _, manifest in first_bundle.many("n8n-consumers")

@@ -1,10 +1,11 @@
-schema_version: 1
+schema_version: 2
+adapter: postiz-v2.23.0
 mapping_id: publisher-gamma
 project_id: project-gamma
 organization_id: fixture-org-gamma
-workspace_id: fixture-workspace-gamma
+workspace_id: fixture-org-gamma
 api_credential_id: secret-gamma-api
 approval: {required: true, binds_content_hash: true}
 brands:
   - brand_id: brand-gamma
-    account_ids: [fixture-gamma-social]
+    accounts: []

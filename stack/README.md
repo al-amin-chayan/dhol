@@ -3,8 +3,9 @@
 Docker Compose desired state is split by the approved two-host boundary:
 Paperclip, central n8n and per-project Hermes services belong on `core-1`; only
 the founder-selected publisher and its state services belong on `publish-1`.
-Postiz remains the default candidate, not a closed tool decision, and the two
-publisher stacks must never be deployed together.
+DG-01 selected Postiz `v2.23.0`; it is the only deployable publisher stack.
+Mixpost remains decision evidence only, and the two publisher stacks must never
+be deployed together.
 
 - `.env` files are forbidden in Git. Public templates may declare names only;
   runtime values are rendered from values-only `infra/secrets/**/*.sops.yml`

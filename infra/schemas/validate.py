@@ -1018,7 +1018,9 @@ def validate_cross_file(root: Path, bundle: Bundle, bundle_path: Path) -> list[s
 
     seen_organizations: dict[str, str] = {}
     seen_publisher_workspaces: dict[str, str] = {}
+    seen_publisher_credentials: dict[str, str] = {}
     seen_accounts: dict[str, str] = {}
+    seen_provider_grants: dict[str, str] = {}
     for mapping_id, mapping in publisher_mappings.items():
         credential_scope_errors(
             mapping_id,
@@ -1037,16 +1039,41 @@ def validate_cross_file(root: Path, bundle: Bundle, bundle_path: Path) -> list[s
                 findings.append(f"{mapping_id}: duplicate publisher {field} {value}")
             else:
                 seen[value] = mapping_id
+        credential_id = mapping["api_credential_id"]
+        if credential_id in seen_publisher_credentials:
+            findings.append(
+                f"{mapping_id}: publisher API credential {credential_id} is reused by "
+                f"{seen_publisher_credentials[credential_id]}"
+            )
+        else:
+            seen_publisher_credentials[credential_id] = mapping_id
+        if mapping["adapter"] == "postiz-v2.23.0" and mapping["workspace_id"] != mapping["organization_id"]:
+            findings.append(
+                f"{mapping_id}: Postiz workspace_id must equal its organization_id"
+            )
         for brand_mapping in mapping["brands"]:
             brand_id = brand_mapping["brand_id"]
             brand = require_reference(mapping_id, "brand_id", brand_id, brands, "brand", findings)
             if brand is not None and brand["project_id"] != mapping["project_id"]:
                 findings.append(f"{mapping_id}: publisher mapping and brand have different owners")
-            for account_id in brand_mapping["account_ids"]:
+            for account in brand_mapping["accounts"]:
+                account_id = account["account_id"]
                 if account_id in seen_accounts:
                     findings.append(f"{mapping_id}: publisher account {account_id} has duplicate ownership")
                 else:
                     seen_accounts[account_id] = mapping_id
+                if account["owner_project_id"] != mapping["project_id"]:
+                    findings.append(
+                        f"{mapping_id}: publisher account {account_id} belongs to another project"
+                    )
+                grant_id = account["provider_grant_id"]
+                if grant_id in seen_provider_grants:
+                    findings.append(
+                        f"{mapping_id}: provider grant {grant_id} is reused by "
+                        f"{seen_provider_grants[grant_id]}"
+                    )
+                else:
+                    seen_provider_grants[grant_id] = mapping_id
 
     release = bundle.one("release.yml")
     release_versions = release["schema_versions"]

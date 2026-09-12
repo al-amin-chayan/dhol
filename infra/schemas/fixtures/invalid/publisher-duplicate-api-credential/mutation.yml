@@ -1,0 +1,5 @@
+target: publisher-mappings/project-beta.yml
+operation: set
+path: [api_credential_id]
+value: secret-alpha-api
+expected_error: "publisher-beta: publisher API credential secret-alpha-api is reused by publisher-alpha"
