@@ -1,0 +1,13 @@
+PUBLISHER_MAIN_URL={{ publisher_main_url | to_json }}
+PUBLISHER_LOOPBACK_PORT={{ publisher_loopback_port | int }}
+PUBLISHER_BACKUP_STAGING={{ publisher_backup_staging | to_json }}
+POSTIZ_DISABLE_REGISTRATION={{ publisher_registration_disabled | bool | lower }}
+POSTIZ_JWT_SECRET={{ publisher_secret_values['platform-publisher-postiz-jwt'] | to_json }}
+POSTIZ_DB_PASSWORD={{ publisher_secret_values['platform-publisher-postiz-db-password'] | to_json }}
+POSTIZ_REDIS_PASSWORD={{ publisher_secret_values['platform-publisher-postiz-redis-password'] | to_json }}
+TEMPORAL_DB_PASSWORD={{ publisher_secret_values['platform-publisher-temporal-db-password'] | to_json }}
+PUBLISHER_MEDIA_ACCOUNT_ID={{ publisher_media_account_id | to_json }}
+PUBLISHER_MEDIA_ACCESS_KEY={{ publisher_secret_values['platform-publisher-media-access-key'] | to_json }}
+PUBLISHER_MEDIA_SECRET_ACCESS_KEY={{ publisher_secret_values['platform-publisher-media-secret-access-key'] | to_json }}
+PUBLISHER_MEDIA_BUCKET={{ publisher_media_bucket | to_json }}
+PUBLISHER_MEDIA_PUBLIC_URL={{ publisher_media_public_url | to_json }}

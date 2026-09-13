@@ -1,0 +1,15 @@
+---
+- name: Converge the founder-selected publisher only on publish-1
+  hosts: baseline_targets
+  become: true
+  gather_facts: false
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+    - name: Apply the publisher role only after its dependency gates are enabled
+      ansible.builtin.import_role:
+        name: publisher
+      when:
+        - dholbeat_host_role == 'publisher'
+        - publisher_enabled | default(false) | bool
+      tags: [publisher]

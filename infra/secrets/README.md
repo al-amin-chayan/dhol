@@ -134,6 +134,17 @@ Create new credentials for one host repository, prove snapshot and disposable
 restore access, update only that host, and revoke old after the rollback window.
 The source-escrow recovery root remains a separate password-manager root.
 
+## Publisher runtime credentials
+
+Follow the full [publisher credential rotation
+runbook](../../docs/runbooks/publisher-operations.md#credential-rotation). Keep
+the publisher frozen and rotate one JWT, database/cache, or public-media R2
+boundary at a time from a fresh restore-tested backup. Update only the matching
+catalog value in the complete `publisher.sops.yml` set, apply the reviewed
+exact-host plan, verify its declared consumers, then revoke the old value. A
+recipient private-key leak rotates every underlying value recoverable from
+historical ciphertext; re-encryption alone is not recovery.
+
 ## Monthly cost
 
 | Component | Monthly change |

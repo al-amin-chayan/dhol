@@ -1,0 +1,5 @@
+target: publisher-mappings/project-beta.yml
+operation: set
+path: [workspace_id]
+value: fixture-logical-workspace-beta
+expected_error: "publisher-beta: Postiz workspace_id must equal its organization_id"

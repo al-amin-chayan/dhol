@@ -95,6 +95,14 @@ def test_explicit_literals_are_redacted_even_when_they_look_ordinary() -> None:
     assert "publish-1.internal" not in PLAN.redact("host publish-1.internal", ["publish-1.internal"])
 
 
+def test_ansible_local_temp_prefix_matches_controller_config() -> None:
+    import configparser
+
+    config = configparser.ConfigParser()
+    config.read(ROOT / "infra/ansible.cfg")
+    assert config.get("defaults", "local_tmp") == PLAN.ANSIBLE_LOCAL_TEMP_ROOT
+
+
 def test_declared_allowlist_networks_survive_redaction() -> None:
     assert "203.0.113.0/24" in PLAN.redact("allow from 203.0.113.0/24", [])
 
@@ -323,9 +331,11 @@ def build_arguments(root: Path, log: Path, contract: Path) -> types.SimpleNamesp
     )
 
 
-def test_plan_document_is_byte_stable_for_identical_inputs(tmp_path: Path) -> None:
+def test_plan_document_is_byte_stable_across_ansible_temp_paths(tmp_path: Path) -> None:
     import json
     import shutil
+    import subprocess
+    import sys
 
     import yaml
 
@@ -343,14 +353,41 @@ def test_plan_document_is_byte_stable_for_identical_inputs(tmp_path: Path) -> No
     baseline.write_text(yaml.safe_dump(source, sort_keys=True), encoding="utf-8")
 
     log = tmp_path / "check.log"
-    log.write_text(transcript(failed=False), encoding="utf-8")
+    stable_transcript = transcript(failed=False)
+    first_transcript = stable_transcript.replace(
+        "+++ after: /etc/systemd/journald.conf.d/60-dholbeat-bounds.conf",
+        "+++ after: /tmp/ansible-local/ansible-local-1abc123/tmpfirst/60-dholbeat-bounds.conf",
+    )
+    second_transcript = stable_transcript.replace(
+        "+++ after: /etc/systemd/journald.conf.d/60-dholbeat-bounds.conf",
+        "+++ after: /tmp/ansible-local/ansible-local-1xyz789/tmpsecond/60-dholbeat-bounds.conf",
+    )
+    log.write_text(first_transcript, encoding="utf-8")
     contract = tmp_path / "contract.json"
     contract.write_text(json.dumps({"schema_version": 1}), encoding="utf-8")
 
     first, findings = PLAN.build_plan(build_arguments(root, log, contract))
+    scrubbed = subprocess.run(
+        [sys.executable, MODULE_PATH, "redact"],
+        input=second_transcript,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout
+    log.write_text(scrubbed, encoding="utf-8")
     second, _ = PLAN.build_plan(build_arguments(root, log, contract))
     assert findings == []
+    assert first_transcript != second_transcript
     assert yaml.safe_dump(first, sort_keys=True) == yaml.safe_dump(second, sort_keys=True)
+    assert first["ansible_run"]["transcript_sha256"] == second["ansible_run"]["transcript_sha256"]
+    assert second["ansible_run"]["transcript_sha256"] == PLAN.sha256_file(log)
+    assert second["ansible_run"]["transcript_normalization"] == (
+        "redacted-ansible-local-temp-v1"
+    )
+    assert "/tmp/ansible-local/" not in scrubbed
+    assert first["ansible_run"]["diffs"][0]["hunk"][1].startswith(
+        "+++ after: <ansible-local-tmp>/"
+    )
     assert first["reviewed_input"]["rehearsal"] is False
     assert first["secrets"]["decrypted_to_disk"] is False
     assert first["planned_playbook"] == "playbooks/bootstrap.yml"
