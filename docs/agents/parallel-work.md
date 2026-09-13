@@ -29,7 +29,8 @@ git rebase develop
 
 # 5. Cross-review: the OTHER model reviews this branch (see below)
 
-# 6. Merge the approved PR into develop with GitHub's squash method.
+# 6. Merge ordinary approved PRs into develop with GitHub's squash method.
+#    Promotion ancestry syncs require merge; see branch-workflow.md.
 #    Do not merge or push directly from the primary checkout.
 
 # 7. Remove the lane

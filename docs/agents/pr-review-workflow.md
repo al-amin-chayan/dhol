@@ -138,7 +138,11 @@ without a separate final human merge click.
 # routine branch -> develop
 scripts/github-app-gh pr merge <number> --repo al-amin-chayan/dhol --auto --squash
 
-# develop -> main promotion
+# graph-only main ancestry sync -> develop (never squash)
+scripts/promotion arm <number>
+
+# develop -> main promotion (preflight must report READY)
+scripts/promotion check
 scripts/github-app-gh pr merge <number> --repo al-amin-chayan/dhol --auto --merge
 ```
 

@@ -12,6 +12,8 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+import promotion_policy
+
 
 REVIEW_LABELS = {
     "review:requested",
@@ -268,7 +270,15 @@ def main() -> None:
     number = event_pull_request_number(event_path)
     pull = github_get(token, repository, f"pulls/{number}")
     reviews = github_get(token, repository, f"pulls/{number}/reviews?per_page=100")
+    get = lambda path: github_get(token, repository, path)
+    state = promotion_policy.snapshot(get)
+    policy_findings = promotion_policy.findings(pull, state, get)
     result = evaluate_pull_request(pull, reviews)
+    result = GateResult(
+        result.allowed and not policy_findings,
+        result.findings + tuple(policy_findings),
+        result.diagnostics,
+    )
     for diagnostic in result.diagnostics:
         print(f"cross-review note: {diagnostic}")
     if not result.allowed:

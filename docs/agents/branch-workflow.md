@@ -24,7 +24,9 @@ source for `main`.
 
 ## Main promotion
 
-Open a PR whose base is `main` and whose head is exactly `develop`. Run the
+Run `scripts/promotion check` against live GitHub before opening or reviewing
+a promotion. It must report READY. Open a PR whose base is `main` and whose
+head is exactly the printed `develop` SHA. Run the
 same founder-triggered cross-review and required checks, then use a merge
 commit. The founder starts one agent App to open or update the promotion PR and
 the other agent App to review it: the latest pusher/PR author and approving App
@@ -35,6 +37,63 @@ auto-merge with the merge-commit method. Main's ruleset allows only merge
 commits so `develop` remains an ancestor of `main`. Direct pushes, force
 pushes, deletion, feature-to-main PRs, stale-base merges, and unresolved review
 threads are blocked.
+
+## Mandatory synchronization after every promotion
+
+A merge-commit promotion creates a new `main` commit that `develop` does not
+contain. Main's strict up-to-date rule then blocks the next promotion as
+`BEHIND`. GitHub's Update branch button would write directly to protected
+`develop`; it is not a repair. Squashing a repair discards the `main` parent.
+Issue #54 selects repeatable, reviewed synchronization; it changes no ruleset.
+
+Immediately after **each** promotion, before further integration:
+
+1. Run `scripts/promotion prepare`. It reads live protected heads with the
+   acting App, fetches through the App Git wrapper, and creates a separate
+   `<agent>/sync-main-develop-<main-prefix>-<develop-prefix>` lane from that
+   exact `develop`.
+   A normal `git merge --no-ff` incorporates `main`; no `ours` strategy or
+   content-discarding shortcut is allowed. It verifies two ordered parents
+   (`develop`, `main`) and an identical first-parent tree. If content differs
+   or conflicts, stop the graph-only repair and reconcile the content in a
+   separate reviewed lane; never discard main-only content.
+2. In the printed lane, run `scripts/check`. Push its owned branch with
+   `scripts/github-app-git push https://github.com/al-amin-chayan/dhol.git HEAD`.
+   Open a ready PR into `develop` with `review:requested` and `area:tooling`.
+   Include the complete head SHA, both parents, zero-tree proof and checks.
+   Verify the PR author is the acting App's expected login.
+3. Run `scripts/promotion arm NUMBER`. This validates the live graph, pins the
+   exact head, selects **merge**, and verifies GitHub recorded that method and
+   the acting App. Never use the routine squash command for a sync PR.
+4. Publish the exact SHA and handoff, then stop. The founder starts the opposite
+   model's review. The author must never invoke, schedule or enqueue it.
+5. After the reviewed sync merges, run `scripts/promotion check` again. READY
+   confirms the repair retained `main` as an ancestor. Remove the merged lane
+   with the normal worktree helper. A later promotion repeats this sequence.
+
+The trusted Cross-review gate pauses ordinary `develop` integration while
+synchronization is pending and rejects a premature promotion. Reserved sync
+branches must be in this repository, have exactly the current protected heads
+as ordered parents, preserve the current `develop` tree, and have native
+**merge-commit** auto-merge enabled. Missing, squash or rebase methods fail
+closed. Changing either protected head requires rebuilding the sync from the
+new heads in a fresh lane and obtaining a new founder-triggered review; stale
+approval is never reused. The gate reruns when auto-merge is enabled/disabled
+or the PR base changes. A failed gate remains required; it cannot silently
+select squash.
+
+The read-only Promotion ancestry workflow runs on protected-branch pushes.
+Its failure immediately after a promotion is an actionable synchronization
+notice, not a deployment failure. It never writes branches, opens PRs, calls a
+model, approves or merges. The existing three required checks and both
+rulesets remain unchanged. If an old open PR's gate failed while sync was
+pending, rerun its Cross-review workflow after the sync; this does not replace
+its exact-head review.
+
+Before issue #54 closes, record a reviewed implementation merge, successful
+`scripts/check`, a graph-only synchronization merged with the required method,
+and a subsequent READY preflight/promotion. Confirm committed settings and
+live rulesets still agree. Monthly cost change: `$0`.
 
 ## Founder break glass
 

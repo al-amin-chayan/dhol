@@ -4,7 +4,16 @@ name: Cross-review
 on:
   pull_request:
     branches: [develop, main]
-    types: [opened, reopened, ready_for_review, synchronize, labeled, unlabeled]
+    types:
+      - opened
+      - reopened
+      - ready_for_review
+      - synchronize
+      - labeled
+      - unlabeled
+      - edited
+      - auto_merge_enabled
+      - auto_merge_disabled
 
 permissions:
   contents: read

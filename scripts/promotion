@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+"""Check promotion readiness, prepare a graph-only sync, or arm its merge."""
+
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "infra/controller"))
+import promotion_policy  # noqa: E402
+
+REPOSITORY = "al-amin-chayan/dhol"
+
+
+def run(*args: str, cwd: Path = ROOT) -> str:
+    return subprocess.run(args, cwd=cwd, check=True, text=True, capture_output=True).stdout.strip()
+
+
+def gh(*args: str) -> str:
+    return run(str(ROOT / "scripts/github-app-gh"), *args)
+
+
+def get(path: str) -> dict:
+    return json.loads(gh("api", f"repos/{REPOSITORY}/{path}"))
+
+
+def prepare(state: dict) -> None:
+    if state["synchronized"]:
+        print("No sync needed: main is already an ancestor of develop.")
+        return
+    agent = run(str(ROOT / "scripts/github-app-token.sh"), "--whoami")
+    slug = f"sync-main-develop-{state['main'][:12]}-{state['develop'][:12]}"
+    primary = Path(run("git", "worktree", "list", "--porcelain").splitlines()[0].removeprefix("worktree "))
+    run(str(ROOT / "scripts/github-app-git"), "fetch", f"https://github.com/{REPOSITORY}.git", "develop", "main")
+    print(run(str(ROOT / "scripts/new-worktree.sh"), "--name", slug, "--agent", agent, "--base", state["develop"]))
+    lane = primary / ".worktrees" / slug
+    print(run("git", "merge", "--no-ff", "-m", f"chore(governance): synchronize main promotion ancestry\n\nAgent: {agent}", state["main"], cwd=lane))
+    head = run("git", "rev-parse", "HEAD", cwd=lane)
+    parents = run("git", "show", "-s", "--format=%P", "HEAD", cwd=lane).split()
+    tree = run("git", "rev-parse", "HEAD^{tree}", cwd=lane)
+    base_tree = run("git", "rev-parse", f"{state['develop']}^{{tree}}", cwd=lane)
+    if parents != [state["develop"], state["main"]] or tree != base_tree:
+        raise ValueError(f"sync is not graph-only; inspect {lane} and reconcile content separately")
+    print(f"Prepared {lane} at {head}; no files changed.")
+    print("Run scripts/check there, publish a ready PR into develop, then scripts/promotion arm NUMBER.")
+    print("The founder must start the opposite-model review at that exact head.")
+
+
+def arm(number: int, state: dict) -> None:
+    pull = get(f"pulls/{number}")
+    if not promotion_policy.SYNC_REF.fullmatch(pull["head"]["ref"]):
+        raise ValueError("arm accepts only sync-main-develop-* PRs; routine PRs keep squash auto-merge")
+    errors = promotion_policy.findings(pull, state, get, require_merge_method=False)
+    if errors:
+        raise ValueError("; ".join(errors))
+    expected = run(str(ROOT / "scripts/github-app-token.sh"), "--expected-login")
+    if pull["user"]["login"] != expected:
+        raise ValueError(f"sync PR must be authored by the acting App {expected}")
+    gh("pr", "merge", str(number), "--repo", REPOSITORY, "--auto", "--merge", "--match-head-commit", pull["head"]["sha"])
+    recorded = get(f"pulls/{number}")
+    request = recorded.get("auto_merge") or {}
+    if request.get("merge_method") != "merge" or request.get("enabled_by", {}).get("login") != expected:
+        raise ValueError("GitHub did not record merge-commit auto-merge under the expected App")
+    print(f"Verified PR #{number}: merge-commit auto-merge enabled by {expected} at {pull['head']['sha']}.")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("check", help="read live ancestry before opening a promotion")
+    commands.add_parser("prepare", help="create an isolated graph-only sync lane; never push or request review")
+    merge = commands.add_parser("arm", help="enable and verify merge-commit auto-merge for a sync PR")
+    merge.add_argument("number", type=int)
+    args = parser.parse_args()
+    try:
+        state = promotion_policy.snapshot(get)
+        print(f"main={state['main']} develop={state['develop']}")
+        if args.command == "prepare":
+            prepare(state)
+        elif args.command == "arm":
+            arm(args.number, state)
+        elif not state["synchronized"]:
+            raise ValueError("NOT READY: run scripts/promotion prepare and merge its reviewed sync PR before promotion")
+        else:
+            print("READY: main is an ancestor of develop; open the promotion at the printed develop SHA.")
+    except (KeyError, ValueError, subprocess.CalledProcessError) as error:
+        if isinstance(error, subprocess.CalledProcessError):
+            print(error.stderr or error.stdout, file=sys.stderr)
+        raise SystemExit(str(error)) from error
+
+
+if __name__ == "__main__":
+    main()
