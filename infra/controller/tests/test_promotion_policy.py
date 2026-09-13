@@ -210,3 +210,29 @@ def test_review_gate_enforces_live_policy_even_with_valid_review(monkeypatch, tm
     with pytest.raises(SystemExit):
         review_gate.main()
     assert "integration paused" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("base,ref", [("main", "develop"), ("develop", "codex/sync-main-develop-test")])
+@pytest.mark.parametrize("null_side", ["head", "base", "both"])
+def test_null_repository_returns_actionable_finding(base, ref, null_side):
+    candidate = pull(ref, base)
+    for side in ("head", "base"):
+        if null_side in {side, "both"}:
+            candidate[side]["repo"] = None
+    ready = {**STATE, "synchronized": base == "main"}
+    candidate["head"]["sha"] = DEVELOP if base == "main" else HEAD
+    errors = policy.findings(candidate, ready, commits().__getitem__)
+    assert any("this repository" in error for error in errors)
+
+
+def test_arm_null_enabling_actor_fails_with_diagnostic(monkeypatch):
+    candidate = pull()
+    candidate["user"] = {"login": "chayan-codex[bot]"}
+    recorded = copy.deepcopy(candidate)
+    recorded["auto_merge"]["enabled_by"] = None
+    pulls = iter([candidate, recorded])
+    monkeypatch.setattr(CLI, "get", lambda path: next(pulls) if path == "pulls/54" else commits()[path])
+    monkeypatch.setattr(CLI, "run", lambda *args, **kwargs: "chayan-codex[bot]")
+    monkeypatch.setattr(CLI, "gh", lambda *args: "")
+    with pytest.raises(ValueError, match="expected App"):
+        CLI.arm(54, STATE)

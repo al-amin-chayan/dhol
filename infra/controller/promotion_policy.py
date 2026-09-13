@@ -34,11 +34,14 @@ def findings(
     head = pull["head"]["ref"]
     head_sha = pull["head"]["sha"]
     is_sync = SYNC_REF.fullmatch(head) is not None
+    head_repository = (pull["head"].get("repo") or {}).get("full_name")
+    base_repository = (pull["base"].get("repo") or {}).get("full_name")
+    same_repository = bool(head_repository) and head_repository == base_repository
     if base not in {"main", "develop"}:
         return ["unsupported promotion policy base"]
     if base == "main":
         errors = []
-        if pull["head"].get("repo", {}).get("full_name") != pull["base"].get("repo", {}).get("full_name"):
+        if not same_repository:
             errors.append("promotion must use this repository's develop branch")
         if head != "develop" or head_sha != state["develop"]:
             errors.append("promotion must use the exact current develop head")
@@ -53,7 +56,7 @@ def findings(
     errors = []
     if state["synchronized"]:
         errors.append("synchronization is unnecessary: main is already an ancestor of develop")
-    if pull["head"].get("repo", {}).get("full_name") != pull["base"].get("repo", {}).get("full_name"):
+    if not same_repository:
         errors.append("synchronization must use an agent-owned branch in this repository")
     commit = get(f"git/commits/{head_sha}")
     develop_commit = get(f"git/commits/{state['develop']}")
