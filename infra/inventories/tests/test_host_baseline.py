@@ -146,6 +146,30 @@ def test_an_empty_baseline_directory_is_valid_but_a_missing_one_is_not(tmp_path:
     assert HOST_BASELINE.validate_all(tmp_path) == []
 
 
+def test_production_publish_inventory_enables_only_its_declared_connector() -> None:
+    inventory = HOST_BASELINE.render_inventory(
+        ROOT, "publish-1", "203.0.113.20", "converged", "/tmp/id", "/tmp/known-hosts",
+    )
+    assert inventory["all"]["children"]["baseline_targets"]["hosts"]["publish-1"]["baseline_allow_cloudflared_quic"] is True
+
+
+def test_missing_manifest_never_enables_cloudflared_exception(tmp_path: Path) -> None:
+    assert HOST_BASELINE.declares_cloudflared(tmp_path, "publish-1", "publisher") is False
+
+
+@pytest.mark.parametrize("services,expected", [
+    ([], False), (["cloudflared-core"], False), (["publisher"], False),
+    (["cloudflared-publisher"], True),
+])
+def test_only_exact_host_role_connector_enables_exception(tmp_path, services, expected) -> None:
+    directory = tmp_path / "infra/inventories/production"
+    directory.mkdir(parents=True)
+    (directory / "hosts.yml").write_text(yaml.safe_dump({
+        "hosts": [{"id": "fixture-host", "service_ids": services}],
+    }))
+    assert HOST_BASELINE.declares_cloudflared(tmp_path, "fixture-host", "publisher") is expected
+
+
 @pytest.fixture()
 def rendering_root(tmp_path: Path) -> Path:
     """A minimal repository root carrying one synthetic host contract."""
