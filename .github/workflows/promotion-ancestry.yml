@@ -1,0 +1,41 @@
+---
+name: Promotion ancestry
+
+on:
+  push:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: promotion-ancestry
+  cancel-in-progress: true
+
+jobs:
+  ancestry:
+    name: Post-promotion ancestry notice
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out trusted governance from develop
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: develop
+          persist-credentials: false
+      - name: Detect the required synchronization immediately
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import os
+          import sys
+          sys.path.insert(0, "infra/controller")
+          from promotion_policy import snapshot
+          from review_gate import github_get
+          state = snapshot(lambda path: github_get(os.environ["GH_TOKEN"], os.environ["GITHUB_REPOSITORY"], path))
+          if not state["synchronized"]:
+              print("::error::Promotion needs a reviewed main-to-develop sync. Run scripts/promotion prepare; use merge commits.")
+              raise SystemExit(1)
+          print("main is an ancestor of develop; promotion ancestry is ready")
+          PY

@@ -454,6 +454,7 @@ def check_executable_entrypoints(root: Path) -> list[str]:
         "scripts/infra-plan",
         "scripts/infra-verify",
         "scripts/publisher-check",
+        "scripts/promotion",
         "scripts/wireguard-peer-config",
         "scripts/wireguard-server-key",
         "infra/controller/entrypoint.sh",
