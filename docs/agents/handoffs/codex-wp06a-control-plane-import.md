@@ -57,9 +57,12 @@ storage before later promotion. The currently down core connector also needs its
 later host lane. The live full founder/service-token/direct-IP positive matrix is
 not claimed: scoped sessions/IPs, deployed future services and disposable POST
 fixtures remain promotion requirements. Complete fixtures cover their contracts.
-The physical second-device password-manager retrieval gate still precedes future
-provider-issued production-secret encryption. Both existing local age recipients
-were successfully recovered; that is a separate proof.
+The founder removed the second-device validation requirement on 2026-09-13
+because no second device is available, after the shared-recipient recovery risk
+was explained. README §9/§10 records the waiver and authorization to retain the
+generated state key. Password-manager escrow and both distinct-recipient/MAC
+checks remain required. Both existing local age recipients were successfully
+verified; no successful second-device drill is claimed.
 
 ## Cost and rollback
 
@@ -76,7 +79,7 @@ a fresh real no-change plan. See the runbook for bootstrap and key rotation.
 Reviewer: Claude Code Baseline completed; founder-triggered Follow-up pending.
 Reviewed head: pending formal exact-head opposite-model verdict.
 
-## Baseline adjudication — 2026-09-13, before implementation fixes
+## Historical Baseline adjudication — 2026-09-13, before implementation fixes
 
 Reviewer: Claude Code
 Reviewed head: 897ef192ee43e588715625366807ec3b9719e74f
@@ -109,7 +112,7 @@ Reviewed head: 897ef192ee43e588715625366807ec3b9719e74f
 The separately noted webhook runtime packaging/concurrency remains WP-06C's
 planned-route promotion gate; no runtime is activated by this child package.
 
-## Baseline fix result
+## Historical Baseline fix result
 
 R1–R3 and S1–S5 are implemented. The finite live delegation drill returned HTTP
 403 for all three scope/expiry negatives after successful positive controls and
@@ -129,7 +132,7 @@ returns to draft with decision pending and native auto-merge cancelled, per the
 review workflow. After acknowledgment is recorded, publish the resulting exact
 head for a founder-triggered Claude Code Follow-up; the author does not start it.
 
-## Follow-up adjudication — before second fix edits
+## Historical Follow-up adjudication — before second fix edits
 
 Reviewer: Claude Code
 Reviewed head: 6b10410fe1dbb858a7da98df94113a956ec51ef8
@@ -150,7 +153,7 @@ Reviewed head: 6b10410fe1dbb858a7da98df94113a956ec51ef8
   the approved authority pair requires a separate reviewed source change. Existing
   immutable bucket-ID checks remain mandatory and the receipt binds both manifests.
 
-## Follow-up suggestion fix result
+## Historical Follow-up suggestion fix result
 
 N1 and N2 are implemented. The runbook documents namespace cleanup coupling. The
 restored root-name tripwire uses an independently committed declarative authority
@@ -168,3 +171,44 @@ R4 remains the sole required finding: explicit founder recovery-risk acknowledgm
 is pending. Keep draft/decision and native auto-merge disabled. Following acknowledgment,
 record it and hand the resulting exact head to the founder for a Claude Code Follow-up;
 the author does not invoke review or infer acknowledgment from a generic fix request.
+
+## Founder decision adjudication — 2026-09-13, before policy edits
+
+The founder explicitly instructed: "I don't have any second device so drop the
+second device validation plan." This follows the explanation that both ciphertext
+copies share the age recipients and total key loss requires re-import.
+
+- R4: accept the recovery diagnosis; resolve the founder requirement through this
+  explicit policy waiver. Remove the second-device validation gate from current
+  README and dependent runbooks, record the informed decision in §9/§10, retain
+  the generated state passphrase, and keep password-manager escrow and both
+  distinct-recipient/MAC checks mandatory. Do not claim the drill passed.
+- G1: already corrected. The accurate label was restored. This policy commit
+  creates a real new head, so review:requested is now the prescribed transition;
+  remove decision after the founder decision is recorded.
+- R1–R3, S1–S5, N1/N2: already-done, unchanged and independently verified.
+
+Historical adjudications/evidence above describe earlier decisions and are
+superseded by the new recorded policy for current requirements.
+
+## Current author disposition and review handoff
+
+R4's founder decision is now recorded in README §9/§10 and current recovery
+runbooks. The removed requirement is marked waived, not passed. Retaining the
+generated state key is explicitly authorized after the shared-key risk explanation;
+password-manager escrow, provider recovery logins and both distinct-recipient/MAC
+checks remain mandatory. No key, ciphertext, provider object or runtime code changed.
+
+G1's label correction was already applied; this new source commit now invalidates
+the old exact-head review and legitimately restores review:requested. Remove the
+decision label, keep the completed PR ready, and arm native auto-merge behind the
+formal opposite-model exact-head approval and CI. The founder starts Claude Code's
+next Follow-up on the published new head. The author does not invoke review.
+
+Policy-commit author verification: full scripts/check passed all 1,178 tests,
+including 197 Cloudflare tests, plus repository/branch/YAML/shell/schema/inventory/
+SOPS/secret/format/Ansible checks. The Cloudflare input digest remains
+6884a26ea43c44445caee230fe3408568c55f827deeeb1c9b2ce8a13dc248b08, matching
+the previously verified live receipt: no runtime, provider or secret input changed.
+The documentation propagation includes publisher-operations.md after checking the
+active brand lane has only brands/onboarding work; no overlapping edits were found.

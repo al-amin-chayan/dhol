@@ -39,9 +39,12 @@ verifies that:
 
 On 2026-08-17 the founder accepted a byte-identical NordPass
 download-and-restore round trip for both keys as satisfying the initial canary
-recovery gate. A retrieval drill from a second device remains deferred until a
-device is available and must pass before any provider-issued production secret
-is encrypted to these recipients.
+recovery gate. On 2026-09-13 the founder removed the second-device validation
+requirement because no second device is available, superseding that deferred gate.
+This is a policy waiver, not a successful drill. Password-manager escrow of both
+private keys and provider recovery logins, distinct-recipient checks and independent
+SOPS MAC/decryption verification remain mandatory before secret creation or apply.
+See README §9/§10 for the recorded decision and shared-recipient recovery risk.
 
 ## Encrypt and validate one set
 
@@ -152,13 +155,16 @@ The Cloudflare state passphrase is a generated controller-only recovery root in
 recipients must decrypt and verify its SOPS MAC before remote-state bootstrap.
 An identical ciphertext copy is stored in the private recovery bucket. This
 protects against losing the git copy, but both copies depend on the same two age
-recipients and do not protect against losing both private keys. The deferred
-second-device drill remains open. If all recipient keys are lost, the seven
-control-plane resources contain no unique application data: reconstruct state by
+recipients and do not protect against losing both private keys. The founder
+explicitly removed the second-device drill requirement and authorized retaining
+this generated state key on 2026-09-13 after that risk was explained. If all
+recipient keys are lost, the seven control-plane resources contain no unique
+application data: reconstruct state by
 reviewing new recipients and empty replacement backend coordinates, then
 re-importing the exact IDs in `infra/tofu/cloudflare/adoption.json`, following the
 immutable-bootstrap and import-only guards. Do not overwrite an existing primary
-state or interpret this fallback as permission to defer future provider-secret gates.
+state. This fallback applies to Cloudflare infrastructure state; service-specific
+credential rotation and backup/restore requirements still apply to other secrets.
 Use the [control-plane recovery procedure](../tofu/cloudflare/README.md#recovery-and-rotation)
 before replacing the key: preserve the encrypted original state and original
 key, prepare a separately recoverable replacement key, migrate in the bounded
@@ -169,9 +175,9 @@ provider/runtime credential; merely encrypting the same key again is insufficien
 ## Machine-route credentials
 
 These catalog entries describe future inputs; no production-issued value is encrypted or
-installed by WP-06A. Before promotion, complete the documented second-device recovery
-gate. Issue a dedicated n8n Cloudflare Service Auth token, restricted by an Access
-application to `publish.chayan.me/api/public/*`, and pair it with the independent
+installed by WP-06A. Before promotion, verify the password-manager recovery records
+and both approved recipients under the current recovery-account checklist. Issue a
+dedicated n8n Cloudflare Service Auth token, restricted by an Access application to `publish.chayan.me/api/public/*`, and pair it with the independent
 publisher application API key. Never admit `any_valid_service_token` or a whole-host
 machine bypass. Rotate both credentials after exposure, converge their scoped core-only
 secret file, verify the allowed public API and denied UI/wrong-token paths, then revoke
@@ -184,9 +190,9 @@ credential active only during the bounded rotation window.
 These scoped R2 pairs are declared for later backup promotion, with no provider-issued
 values in this lane. Each restic principal receives only its own private bucket pair;
 public-media credentials cannot read either backup bucket. After an exposure, issue a
-replacement restricted pair, encrypt under that host's SOPS set after the second-device
-recovery gate, verify a disposable backup and restore, converge the host-only file, and
-revoke the previous pair. Keep restic as the completed-object retention authority; a
+replacement restricted pair, verify password-manager recovery records and both
+approved recipients, encrypt under that host's SOPS set, verify a disposable backup
+and restore, converge the host-only file, and revoke the previous pair. Keep restic as the completed-object retention authority; a
 bucket lifecycle must never expire restic chunks or snapshots.
 
 ## Monthly cost

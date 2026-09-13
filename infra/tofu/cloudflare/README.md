@@ -41,9 +41,10 @@ Build the checksum-locked controller with `scripts/controller build`. Operator
 input files must be regular, mode 0600, outside every git checkout and outside
 GitHub identity directories. Both founder and break-glass age key exports are
 required; SOPS decrypts and verifies both recipients in memory. The existing
-password-manager recovery record remains the root authority. The outstanding
-physical second-device retrieval gate still applies before encrypting future
-provider-issued production credentials; local recipient checks do not replace it.
+password-manager recovery record remains the root authority. On 2026-09-13 the
+founder removed the second-device retrieval requirement because no second device
+is available, as recorded in README §9/§10. No successful drill is claimed; both
+recipient identities, SOPS MAC/decryption and password-manager escrow remain required.
 
 The private credential input contains only:
 
@@ -172,9 +173,10 @@ remain permanent. Credential roots are never pruning targets.
 Both primary and independent roots are private. Git also retains the SOPS
 passphrase ciphertext, and both age private keys remain in the password manager.
 The copied passphrase ciphertext protects against git loss only, not losing both age
-keys. The generated state key precedes the still-open second-device drill; founder
-acknowledgment of that risk is pending under Baseline R4. Complete that drill before
-future provider-secret encryption. Total age-key loss requires reviewed new recipients
+keys. On 2026-09-13 the founder removed the second-device validation gate after
+that shared-recipient risk was explained and authorized retaining this generated
+state key. This records the policy decision requested by Baseline R4; it does not
+claim a successful drill. Total age-key loss requires reviewed new recipients
 and empty replacement backend coordinates, then re-import using `adoption.json`;
 no unique application data resides in this control-plane state. Existing ciphertext
 must be preserved rather than overwritten.

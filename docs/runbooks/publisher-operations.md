@@ -26,8 +26,11 @@ may synthesize a receipt or use an empty placeholder to bypass one.
 3. Verify all three dependency receipts contain `host_id: publish-1`,
    `verified: true`, their exact gate ID, and a cross-reviewed 40-character
    `reviewed_head`.
-4. Complete the second-device age-key retrieval drill before creating the first
-   provider-issued R2 key. Generate the JWT and three database/cache passwords
+4. Verify the password-manager recovery records, both approved age recipients
+   and independent SOPS MAC/decryption checks before creating provider-issued
+   R2 keys, following `infra/secrets/README.md`. The founder removed the
+   second-device validation requirement on 2026-09-13 (README §9/§10).
+   Generate the JWT and three database/cache passwords
    locally with at least 32 URL-safe random characters. Never print them.
 5. Encrypt the complete `publisher` SOPS set in one process-memory flow. It
    includes every catalog key targeting `infra/secrets/publisher.sops.yml`, not
