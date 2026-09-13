@@ -1,49 +1,77 @@
-# Codex issue #12 initial implementation handoff
+# Codex issue #12 implementation handoff
 
-Lane: `codex/wp06a-control-plane-import`.
-Worktree: `.worktrees/wp06a-control-plane-import`.
-Base: `develop` at `4d8e738`.
+Lane: `codex/wp06a-control-plane-import`, worktree `.worktrees/wp06a-control-plane-import`.
+PR: https://github.com/al-amin-chayan/dhol/pull/67, target `develop`.
+The author publishes the full final SHA in the PR description and founder handoff;
+verify `git rev-parse HEAD` against that SHA before the founder-triggered Claude
+Code Baseline review. No author-triggered reviewer or review automation is used.
 
-## Scope and state
+## Outcome and scope
 
-Initial work only; issue #12 stays open. Claimed paths are
-`infra/tofu/cloudflare/`, route-verification tests in
-`infra/tests/tooling/test_cloudflare_control_plane.py`, the existing
-`infra/tests/tooling/test_plan_document.py` safety regression and this handoff.
-No shared route/domain declaration, host file or controller script was edited. The other
-active lanes touch inventory/playbooks/controller and separate runbooks.
+Seven existing DNS/tunnel/Access resources are imported into client-encrypted,
+natively locked R2 state, with a clean follow-up plan and verified independent
+snapshot. Root bucket IDs are immutable and outside their own state ownership.
+All declarations, finite bootstrap/adoption/recovery commands, provider checksums,
+route/probe contracts and recovery ciphertext are reproducible from git.
 
-Read-only Cloudflare MCP discovery identifies the two existing tunnel/DNS
-boundaries and Paperclip Access. A direct parent-zone delegation check passed
-against two `.me` servers. Non-secret IDs, absent objects and limits are in
-`infra/tofu/cloudflare/discovery-2026-09-13.md`.
+Owned paths expanded after repeated live-lane discovery to:
+`infra/tofu/cloudflare/`, `infra/services/domains.yml`, the secret catalog/runbook
+and new controller-only ciphertext, their policy regression, Cloudflare tooling
+tests, the existing plan-document regression, `scripts/cloudflare`, `scripts/check`,
+`infra-plan`/its document adapter, and this handoff. The adapter expansion is
+necessary because the previous gate rejected every host plan merely on the
+presence of an OpenTofu directory. No active lane owned these files; inventory
+baselines/playbooks, promotion governance, brand setup and shared README remained
+outside this lane. No core/publisher host configuration was mutated.
 
-The offline no-change guard checks reviewed resource/import IDs and rejects
-provider mutations, drift, incomplete/unknown/deferred changes and changed
-outputs. Human loopback ingress renders deterministically from existing
-schemas and rejects cross-host/project routes, public origins and shared
-credential references. Machine/path-scoped origins are explicitly unfinished
-and rejected; declaration validation is not live policy verification.
+## Evidence
 
-## Verification and remaining gates
+See `infra/tofu/cloudflare/evidence-2026-09-13.md` and the package recovery runbook.
+Author verification includes the exact locked provider, all offline checks, real
+provider imports/no-change plans, both recipient MAC recovery, clean-workspace
+native locking/encryption recovery, independent parent DNS delegation, live
+founder-policy validation and unauthenticated/wrong-founder/alternate-Host/path
+Access denial. The Cloudflare package has 192 tests, including mutation/source/state
+race refusal, two-stage bootstrap, bounded snapshot failures, route-negative
+fixtures and real loopback HTTP proxy behavior.
 
-Package tests run through the pinned controller and the canonical tooling
-suite: 41 package tests passed, and `scripts/check` passed with no Ansible
-lint warnings and a clean secret scan. A real offline built-in-provider OpenTofu smoke test caught that the
-locked version omits `complete`; the guard now checks the actual JSON interface
-and rejects other tool versions. The existing plan gate remains fail-closed
-when `infra/tofu/` exists. Its regression now exercises synthetic absent/present
-directories rather than assuming this work package can never begin. This
-narrow test-only expansion overlaps none of the discovered live lane files;
-no controller/script ownership is claimed.
+Provider plan errors/differences were diagnosed and corrected in source; no
+resource-changing plan was applied and no `ignore_changes` hides policy drift.
+The publisher's locally managed connector remains local. Two earlier failed
+*disposable* drill objects were decrypted, verified and removed; production state
+and its separate verified snapshot were preserved.
 
-No production backend exists to adopt in the default R2 jurisdiction. Issue
-#12 authorizes no provider resource creation/update/deletion. Backend bootstrap,
-recovery credentials/age recovery, provider lock/HCL/import implementation,
-no-change import receipt, locking/recovery drills and machine/live route probe
-matrix remain outstanding. See the package README for the complete list.
+## Production and founder gates
 
-No provider state write, apply or host change occurred. Monthly change: $0.
-Do not close #12 or describe this initial commit as an implementation-complete
-WP-06A package. The author does not trigger cross-review; the founder starts
-Claude Code when the reviewable head is published.
+Only two new private R2 roots and state/ciphertext writes occurred under the
+founder's full-implementation authorization. Existing Cloudflare resources are
+unchanged. The setup provider token is private, outside git and expires September
+14; it is excluded from committed SOPS and all evidence. The R2 delegator uses the
+existing founder-controlled administrative root from the local reference; do not
+revoke that existing root when retiring the temporary setup token. Operator
+recovery can issue a new account R2 root without changing pinned bucket IDs.
+
+`n8n`/`hooks` are planned and `publish` remains explicitly `existing-unprotected`;
+WP-06C must configure their Access/path/service-token overlays and private/public
+storage before later promotion. The currently down core connector also needs its
+later host lane. The live full founder/service-token/direct-IP positive matrix is
+not claimed: scoped sessions/IPs, deployed future services and disposable POST
+fixtures remain promotion requirements. Complete fixtures cover their contracts.
+The physical second-device password-manager retrieval gate still precedes future
+provider-issued production-secret encryption. Both existing local age recipients
+were successfully recovered; that is a separate proof.
+
+## Cost and rollback
+
+Software $0; two private state/recovery roots and bounded snapshots remain inside
+the approved R2 $0–1/month baseline. Future bucket declarations add no provisioned
+cost. No paid subscription was added.
+
+Reverting code preserves Cloudflare objects/state. Never `destroy`, overwrite an
+existing primary or remove an unidentified lock. The finite restore command
+checks a reviewed independent ciphertext digest, decrypts/checks provider IDs in
+memory and conditionally creates only an absent primary. Follow restoration with
+a fresh real no-change plan. See the runbook for bootstrap and key rotation.
+
+Reviewer: pending founder-triggered Claude Code Baseline review.
+Reviewed head: pending formal exact-head opposite-model verdict.

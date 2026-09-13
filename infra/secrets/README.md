@@ -145,6 +145,42 @@ exact-host plan, verify its declared consumers, then revoke the old value. A
 recipient private-key leak rotates every underlying value recoverable from
 historical ciphertext; re-encryption alone is not recovery.
 
+## OpenTofu state key
+
+The Cloudflare state passphrase is a generated controller-only recovery root in
+`cloudflare.sops.yml`, never a host credential or a Terraform output. Both age
+recipients must decrypt and verify its SOPS MAC before remote-state bootstrap.
+An independent encrypted copy is stored in the private recovery bucket.
+Use the [control-plane recovery procedure](../tofu/cloudflare/README.md#recovery-and-rotation)
+before replacing the key: preserve the encrypted original state and original
+key, prepare a separately recoverable replacement key, migrate in the bounded
+controller, and verify a clean-clone no-change plan before retiring the old key.
+Recipient compromise also requires rotating every historically exposed
+provider/runtime credential; merely encrypting the same key again is insufficient.
+
+## Machine-route credentials
+
+These catalog entries describe future inputs; no production-issued value is encrypted or
+installed by WP-06A. Before promotion, complete the documented second-device recovery
+gate. Issue a dedicated n8n Cloudflare Service Auth token, restricted by an Access
+application to `publish.chayan.me/api/public/*`, and pair it with the independent
+publisher application API key. Never admit `any_valid_service_token` or a whole-host
+machine bypass. Rotate both credentials after exposure, converge their scoped core-only
+secret file, verify the allowed public API and denied UI/wrong-token paths, then revoke
+the old pair. The Telegram secret belongs only in the core webhook proxy file; verify
+missing/invalid headers are rejected before n8n sees a request. Keep the previous
+credential active only during the bounded rotation window.
+
+## Backup bucket credentials
+
+These scoped R2 pairs are declared for later backup promotion, with no provider-issued
+values in this lane. Each restic principal receives only its own private bucket pair;
+public-media credentials cannot read either backup bucket. After an exposure, issue a
+replacement restricted pair, encrypt under that host's SOPS set after the second-device
+recovery gate, verify a disposable backup and restore, converge the host-only file, and
+revoke the previous pair. Keep restic as the completed-object retention authority; a
+bucket lifecycle must never expire restic chunks or snapshots.
+
 ## Monthly cost
 
 | Component | Monthly change |

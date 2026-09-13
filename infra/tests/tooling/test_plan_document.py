@@ -194,7 +194,7 @@ def test_opentofu_directory_keeps_host_apply_blocked_until_adapter_exists(tmp_pa
     (tmp_path / "infra/tofu/cloudflare").mkdir(parents=True)
     scope = PLAN.opentofu_scope(tmp_path)
     assert scope["state"] == "present"
-    assert "plan adapter before apply" in scope["reason"]
+    assert "fresh complete live no-change" in scope["reason"]
 
 
 def test_compose_stack_without_a_registry_owner_fails_closed(tmp_path: Path) -> None:
@@ -297,7 +297,7 @@ def test_committed_opentofu_always_fails_closed_until_an_adapter_exists(
     contract.write_text(json.dumps({"schema_version": 1}), encoding="utf-8")
 
     _, findings = PLAN.build_plan(build_arguments(root, log, contract))
-    assert any("no plan adapter is implemented" in finding for finding in findings)
+    assert any("no valid fresh complete live no-change receipt" in finding for finding in findings)
 
 
 def test_the_plan_document_carries_no_opentofu_digest_field() -> None:

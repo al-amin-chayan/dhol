@@ -89,3 +89,17 @@ not a checked-in provider response, plan or state snapshot. It establishes
 which facts need adoption verification. It does not establish code ownership,
 origin firewall protection, founder/service-token probe success, private
 bucket policy, backend encryption or application availability.
+
+## Adoption follow-up
+
+The earlier sections record the initial read-only snapshot. Under the founder's
+subsequent full-implementation authorization, two Dholbeat private state/recovery
+roots were provisioned and independently pinned; the seven adoption candidates
+were imported without changing provider resources. A fresh registrar/delegation
+and Access-policy check passed. The imported application currently preserves its
+existing identity-provider selection, launcher/automatic-redirect settings and
+cookie flags exactly; no security-setting change was bundled with import. The
+publisher local-config source was confirmed using the existing ignored host-lane
+snapshot, without contacting/modifying a host. See
+[evidence-2026-09-13.md](evidence-2026-09-13.md) for author verification and
+[README.md](README.md) for the explicit future promotion/recovery gates.

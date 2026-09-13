@@ -1,0 +1,19 @@
+schema_version: 1
+domain_id: platform-domain
+registrar: cloudflare
+registrar_account_id: 7512591000a1e57593bc784dad59bfc0
+registrar_owner: founder
+renewal_owner: founder
+recovery_account_id: dholbeat-cloudflare-recovery
+recovery_location: password-manager
+renewal_evidence:
+  observed_at: '2026-09-13'
+  source: cloudflare-registrar-api
+  expires_on: '2027-04-30T15:22:16.811Z'
+  auto_renew: true
+delegation_evidence:
+  observed_at: '2026-09-13'
+  independent_parent_servers: [199.253.59.1, 199.253.60.1]
+  expected_nameservers: [coby.ns.cloudflare.com, nia.ns.cloudflare.com]
+  result: exact-match
+  recursion: false

@@ -61,6 +61,7 @@ run_step "YAML lint" yamllint --config-file infra/controller/yamllint.yml "${yam
 run_step "shell lint" shellcheck \
   scripts/check \
   scripts/controller \
+  scripts/cloudflare \
   scripts/eof-marker.sh \
   scripts/github-app-gh \
   scripts/github-app-git \

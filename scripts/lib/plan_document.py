@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import ipaddress
 import json
 from pathlib import Path
@@ -269,7 +270,7 @@ def opentofu_scope(root: Path) -> dict[str, Any]:
         }
     return {
         "state": "present",
-        "reason": "committed OpenTofu declarations require the WP-06 plan adapter before apply",
+        "reason": "WP-06 requires a fresh complete live no-change Cloudflare receipt before host apply",
     }
 
 
@@ -297,11 +298,16 @@ def build_plan(arguments: argparse.Namespace) -> tuple[dict[str, Any], list[str]
 
     tofu = opentofu_scope(root)
     if tofu["state"] == "present":
-        findings.append(
-            "infra/tofu: committed OpenTofu declarations exist but no plan adapter is "
-            "implemented; the external-state delta cannot be bound, so this plan "
-            "authorizes nothing (WP-06)"
-        )
+        try:
+            receipt_path = getattr(arguments, "cloudflare_receipt", None)
+            if receipt_path is None:
+                raise ValueError("missing receipt")
+            spec = importlib.util.spec_from_file_location("cloudflare_receipt", root / "infra/tofu/cloudflare/receipt.py")
+            adapter = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(adapter)
+            tofu = adapter.normalize(root, json.loads(receipt_path.read_text()))
+        except (OSError, ValueError, TypeError, AttributeError, KeyError):
+            findings.append("infra/tofu: no valid fresh complete live no-change receipt; this plan authorizes nothing (WP-06)")
 
     plan = {
         "schema_version": 1,
@@ -389,6 +395,7 @@ def main() -> None:
     render.add_argument("--sops-canary", required=True)
     render.add_argument("--compose-render", action="append", default=[])
     render.add_argument("--redact", action="append", default=[])
+    render.add_argument("--cloudflare-receipt", type=Path)
 
     scope = subparsers.add_parser(
         "compose-scope", help="list the Compose stacks this host owns, failing on an unowned stack"
