@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Idempotently apply Dholbeat's develop-first GitHub repository policy."""
+"""Preview, check or idempotently apply Dholbeat's GitHub repository policy."""
 
 from __future__ import annotations
 
@@ -286,12 +286,85 @@ def apply(repository: str, configuration: dict[str, Any]) -> None:
     upsert_rulesets(token, repository, configuration["rulesets"])
 
 
+def check(repository: str, configuration: dict[str, Any]) -> bool:
+    """Compare managed policy using GET requests only; never repair drift."""
+    token = mint_token()
+    drift: list[str] = []
+
+    def compare(label: str, desired: Any, live: Any) -> None:
+        if desired == live:
+            print(f"unchanged: {label}")
+        else:
+            drift.append(label)
+            print(f"drift: {label}")
+            print(f"  desired: {json.dumps(desired, sort_keys=True)}")
+            print(f"  live: {json.dumps(live, sort_keys=True)}")
+
+    def records(path: str) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            batch = github_request(
+                token, repository, "GET", f"{path}?per_page=100&page={page}"
+            )
+            result.extend(batch)
+            if len(batch) < 100:
+                return result
+            page += 1
+
+    try:
+        github_request(token, repository, "GET", "git/ref/heads/develop")
+        print("unchanged: refs/heads/develop")
+    except GitHubApiError as error:
+        if error.status != 404:
+            raise
+        compare("refs/heads/develop", "present", "missing")
+
+    for label, key, path in (
+        ("repository settings", "repository_settings", ""),
+        ("Actions permissions", "actions_permissions", "actions/permissions"),
+    ):
+        desired = configuration[key]
+        live = github_request(token, repository, "GET", path)
+        compare(label, desired, {key: live.get(key) for key in desired})
+
+    labels = {item["name"]: item for item in records("labels")}
+    for desired in configuration["labels"]["labels"]:
+        live = labels.get(desired["name"])
+        compare(
+            f"label {desired['name']}",
+            normalized_label(desired),
+            None if live is None else normalized_label(live),
+        )
+    for old_name in configuration["labels"].get("renames", {}):
+        if old_name in labels:
+            compare(f"superseded label {old_name}", "absent", "present")
+
+    rulesets: dict[str, list[int]] = {}
+    for item in records("rulesets"):
+        rulesets.setdefault(item["name"], []).append(item["id"])
+    for desired in configuration["rulesets"]:
+        matches = rulesets.get(desired["name"], [])
+        if len(matches) != 1:
+            compare(f"{desired['name']} count", 1, len(matches))
+            continue
+        live = github_request(token, repository, "GET", f"rulesets/{matches[0]}")
+        compare(desired["name"], normalized_ruleset(desired), normalized_ruleset(live))
+
+    print(f"configuration check: {'DRIFT' if drift else 'MATCH'}")
+    return not drift
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", default=DEFAULT_REPOSITORY)
-    parser.add_argument("--apply", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--apply", action="store_true")
+    mode.add_argument("--check", action="store_true", help="read-only live comparison; exit 1 on drift")
     args = parser.parse_args()
     configuration = desired_configuration()
+    if args.check:
+        raise SystemExit(0 if check(args.repo, configuration) else 1)
     if not args.apply:
         print(json.dumps(configuration, indent=2, sort_keys=True))
         return

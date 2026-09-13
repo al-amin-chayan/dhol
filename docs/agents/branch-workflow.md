@@ -22,6 +22,13 @@ source for `main`.
    Develop deliberately does not require a mechanical base update: concurrent
    lanes do not consume a follow-up round merely because another PR merged.
 
+PR bodies use reference-only links such as `Refs #N` unless issue closure is
+intended. GitHub's closing-keyword parser ignores negation: never put
+`close/closes/closed/fix/fixes/fixed/resolve/resolves/resolved` adjacent to an issue
+reference in a disclaimer. Use wording such as "Issue #N remains pending until
+the acceptance evidence is recorded." Check the body's issue links before
+publishing; an issue's administrative state remains a founder decision.
+
 ## Main promotion
 
 Run `scripts/promotion check` against live GitHub before opening or reviewing
@@ -130,6 +137,24 @@ Preview the exact payload without network access:
 ```bash
 scripts/configure-github-rulesets.py
 ```
+
+Compare managed settings, Actions permissions, labels and both rulesets against
+live GitHub without changing anything:
+
+```bash
+scripts/configure-github-rulesets.py --check
+```
+
+This mode mints a fresh acting-App token, sends only GET requests and exits 1
+on drift (0 on a match). Missing `develop`, missing or duplicate managed
+rulesets, and superseded labels are drift; API/authentication failures fail
+the command. Unmanaged labels and rulesets are outside the comparison. Ruleset
+metadata and an empty `required_reviewers` list are normalized; approval-policy
+flags are compared explicitly. Both branches preserve the live
+`require_extra_approval_for_unattributed_changes: true` policy. Main's strict
+base flag remains `true`, and develop's remains `false`. Use this read-only
+comparison for promotion verification. Live convergence is a separate scoped
+operation; this check never creates a branch or repairs configuration.
 
 Apply it from a Codex or Claude Code session:
 

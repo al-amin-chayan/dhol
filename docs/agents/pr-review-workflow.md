@@ -98,6 +98,10 @@ new full SHA back to the founder. The author never starts the follow-up review.
 
 ## Formal GitHub review contract
 
+PR bodies follow the [issue-reference guidance](branch-workflow.md#routine-task):
+use `Refs #N` unless closure is intended, and keep closing verbs away from issue
+references even in negated disclaimers.
+
 The opposite agent submits a GitHub `REQUEST_CHANGES` review when any
 `blocker` or `required` finding is open and an `APPROVE` review only when none
 remain. It then uses its own App to replace the review-state label with
