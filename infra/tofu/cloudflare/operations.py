@@ -455,10 +455,7 @@ def take_snapshot(inputs, emit=True):
 
 
 def bootstrap(inputs):
-    api = root_api(inputs)
     config = yaml.safe_load((PACKAGE / "bootstrap.yml").read_text())["backend"]
-    existing = api.request("GET", f"/accounts/{ACCOUNT}/r2/buckets")["buckets"]
-    names = {bucket["name"] for bucket in existing}
     initial = config["authority"] == "initial-bootstrap"
     if config["authority"] not in {"immutable-bootstrap", "initial-bootstrap"}:
         raise OperationError("unknown bootstrap authority")
@@ -474,6 +471,18 @@ def bootstrap(inputs):
         raise OperationError(
             "bootstrap requires two distinct valid reviewed root names"
         )
+    approved = json.loads((PACKAGE / "bootstrap-roots.json").read_text())
+    if (
+        set(approved) != {"schema_version", "bucket", "recovery_bucket"}
+        or approved["schema_version"] != 1
+        or roots != (approved["bucket"], approved["recovery_bucket"])
+    ):
+        raise OperationError(
+            "bootstrap root names differ from the committed authority pair"
+        )
+    api = root_api(inputs)
+    existing = api.request("GET", f"/accounts/{ACCOUNT}/r2/buckets")["buckets"]
+    names = {bucket["name"] for bucket in existing}
     bindings = {}
     for name in (config["bucket"], config["recovery_bucket"]):
         if name not in names:

@@ -174,6 +174,9 @@ def test_bootstrap_is_two_stage_and_never_replaces_pinned_roots(
         backend["bucket_id"] = None
         backend["recovery_bucket_id"] = None
     (tmp_path / "bootstrap.yml").write_text(yaml.safe_dump(config))
+    (tmp_path / "bootstrap-roots.json").write_bytes(
+        (ops.PACKAGE / "bootstrap-roots.json").read_bytes()
+    )
     monkeypatch.setattr(ops, "PACKAGE", tmp_path)
     monkeypatch.setattr(ops, "EVIDENCE", tmp_path)
     calls = []
@@ -386,3 +389,34 @@ def test_verify_resolves_registered_domain_by_id_after_reordering(
     assert json.loads((tmp_path / "verify.json").read_text())[
         "independent_parent_delegation"
     ]
+
+
+@pytest.mark.parametrize("change", ["bucket", "recovery_bucket", "swap"])
+def test_initial_bootstrap_rejects_changed_root_names_before_provider_contact(
+    monkeypatch, tmp_path, change
+):
+    import yaml
+
+    config = yaml.safe_load((ops.PACKAGE / "bootstrap.yml").read_text())
+    roots = (ops.PACKAGE / "bootstrap-roots.json").read_bytes()
+    backend = config["backend"]
+    backend.update(
+        authority="initial-bootstrap", bucket_id=None, recovery_bucket_id=None
+    )
+    if change == "swap":
+        backend["bucket"], backend["recovery_bucket"] = (
+            backend["recovery_bucket"],
+            backend["bucket"],
+        )
+    else:
+        backend[change] = "unreviewed-valid-bucket"
+    (tmp_path / "bootstrap.yml").write_text(yaml.safe_dump(config))
+    (tmp_path / "bootstrap-roots.json").write_bytes(roots)
+    monkeypatch.setattr(ops, "PACKAGE", tmp_path)
+
+    def no_provider(inputs):
+        pytest.fail("unreviewed roots must be rejected before provider contact")
+
+    monkeypatch.setattr(ops, "root_api", no_provider)
+    with pytest.raises(ops.OperationError, match="committed authority pair"):
+        ops.bootstrap({})

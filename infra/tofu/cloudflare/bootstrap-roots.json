@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "bucket": "dholbeat-tfstate",
+  "recovery_bucket": "dholbeat-tfstate-recovery"
+}

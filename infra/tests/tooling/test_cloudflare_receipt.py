@@ -79,6 +79,7 @@ def test_invalid_receipt_never_authorizes_host_plan(receipt_tree, key, value):
     "path",
     [
         "infra/tofu/cloudflare/resources.tf",
+        "infra/tofu/cloudflare/bootstrap-roots.json",
         "infra/secrets/catalog.yml",
         "infra/secrets/cloudflare.sops.yml",
         "infra/services/domains.yml",

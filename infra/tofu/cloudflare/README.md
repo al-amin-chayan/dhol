@@ -240,9 +240,21 @@ cross-bucket recovery read, and a session expired one hour ago. Only this marker
 removed; the production state is never written. A crash can leave at most the one
 fixed marker (`drills/delegation-enforcement.probe`); a subsequent conditional create
 fails rather than assuming ownership. Remove that exact marker only after confirming
-no delegation drill is running. Other unknown drill objects remain fail-closed.
+no delegation drill is running. A stale marker also makes `clean-drills` reject
+the entire namespace, including unrelated, otherwise eligible disposable state,
+and counts toward `recovery-drill`'s inventory bound. Remove that exact marker
+through the R2 console after confirming no drill is running, then rerun cleanup.
+Other unknown drill objects remain fail-closed.
 
 The live author receipt proves provider enforcement, rather than merely the requested
 JWT claims. Backend retention uses the descriptor's limits, with absolute ceilings
 of 4 MiB per object and 20 snapshots. A partial pruning failure deletes the new
 candidate but cannot restore old snapshots whose deletion already succeeded.
+
+The descriptor's primary/recovery names must match the role-bound approved pair
+in `bootstrap-roots.json` before bootstrap contacts any provider API. This guard
+also applies to `initial-bootstrap`; editing the descriptor alone cannot create
+arbitrarily named roots. Changing that authority pair requires a separate reviewed
+source change, and immutable-mode bucket-ID checks still apply. Both manifests
+are included in the live receipt input digest. The runtime contains no literal
+account or bucket identities.

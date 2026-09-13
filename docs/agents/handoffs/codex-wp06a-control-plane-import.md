@@ -31,7 +31,7 @@ Author verification includes the exact locked provider, all offline checks, real
 provider imports/no-change plans, both recipient MAC recovery, clean-workspace
 native locking/encryption recovery, independent parent DNS delegation, live
 founder-policy validation and unauthenticated/wrong-founder/alternate-Host/path
-Access denial. The Cloudflare package has 193 tests, including mutation/source/state
+Access denial. The Cloudflare package has 197 tests, including mutation/source/state
 race refusal, two-stage bootstrap, bounded snapshot failures, route-negative
 fixtures and real loopback HTTP proxy behavior.
 
@@ -128,3 +128,43 @@ secret runbook and package recovery instructions now state this precisely. The P
 returns to draft with decision pending and native auto-merge cancelled, per the
 review workflow. After acknowledgment is recorded, publish the resulting exact
 head for a founder-triggered Claude Code Follow-up; the author does not start it.
+
+## Follow-up adjudication — before second fix edits
+
+Reviewer: Claude Code
+Reviewed head: 6b10410fe1dbb858a7da98df94113a956ec51ef8
+
+- R1–R3 and S1–S5: already-done; the Follow-up independently verified every fix,
+  193 controller tests, full scripts/check, source/receipt binding and parser ASTs.
+- R4: needs-founder, unchanged. The latest request to fix feedback is not an
+  explicit acknowledgment of the generated-key recovery risk. Keep draft/decision
+  and auto-merge disabled; do not manufacture founder acknowledgment.
+- N1: accept. The fixed delegation marker shares the drill namespace, so one stale
+  marker prevents clean_drills from removing otherwise eligible state and counts
+  toward recovery_drill's inventory bound. Document this coupling and the existing
+  explicit manual removal procedure; keep conservative cleanup ownership.
+- N2: accept. S1 removed the name-pair tripwire in initial-bootstrap mode. Restore
+  an exact role-bound name check against a separate committed bootstrap-roots.json
+  authority manifest, before any API request, preserving project-neutral runtime
+  code. A bootstrap.yml edit alone must not create arbitrary bucket names; changing
+  the approved authority pair requires a separate reviewed source change. Existing
+  immutable bucket-ID checks remain mandatory and the receipt binds both manifests.
+
+## Follow-up suggestion fix result
+
+N1 and N2 are implemented. The runbook documents namespace cleanup coupling. The
+restored root-name tripwire uses an independently committed declarative authority
+pair, preserving generic runtime code and immutable bucket-ID enforcement. Three
+negative tests prove changed/swapped initial names fail before provider contact;
+the receipt mutation test binds the added authority manifest.
+
+Verification: full scripts/check passed all 1,178 tests, including 197 Cloudflare,
+and all policy/lint/format/secret checks. A fresh locked-provider plan binds the
+current sources, reports seven resources and zero mutations, and preserves the
+production encrypted-state digest. Its canonical receipt normalization passed.
+Refreshed evidence is committed with this fix.
+
+R4 remains the sole required finding: explicit founder recovery-risk acknowledgment
+is pending. Keep draft/decision and native auto-merge disabled. Following acknowledgment,
+record it and hand the resulting exact head to the founder for a Claude Code Follow-up;
+the author does not invoke review or infer acknowledgment from a generic fix request.
