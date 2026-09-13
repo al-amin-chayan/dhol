@@ -2,6 +2,9 @@ schema_version: 1
 account_id: 7512591000a1e57593bc784dad59bfc0
 zone_id: 2c295efab57307e714b212bcab2d7c42
 zone_name: chayan.me
+founder_email: mail@chayan.me
+adopted_human_route_id: paperclip-admin
+founder_identity_provider_id: 12ad1207-ce57-447e-92b1-b53b44df5048
 backend:
   authority: immutable-bootstrap
   bucket: dholbeat-tfstate

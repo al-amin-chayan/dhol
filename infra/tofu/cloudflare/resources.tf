@@ -52,7 +52,7 @@ resource "cloudflare_zero_trust_access_policy" "founder" {
   account_id = local.bootstrap.account_id
   name       = "Only me"
   decision   = "allow"
-  include    = [{ email = { email = "mail@chayan.me" } }]
+  include    = [{ email = { email = local.bootstrap.founder_email } }]
   # The provider normalizes empty API rule sets to null on import.
   connection_rules = { rdp = {} }
   lifecycle { prevent_destroy = true }
@@ -69,7 +69,7 @@ resource "cloudflare_zero_trust_access_application" "team" {
   options_preflight_bypass   = false
   app_launcher_visible       = true
   auto_redirect_to_identity  = true
-  allowed_idps               = ["12ad1207-ce57-447e-92b1-b53b44df5048"]
+  allowed_idps               = [local.bootstrap.founder_identity_provider_id]
   destinations               = [{ type = "public", uri = local.routes["paperclip-admin"].hostname }]
   policies                   = [{ id = cloudflare_zero_trust_access_policy.founder.id, precedence = 1 }]
   lifecycle { prevent_destroy = true }

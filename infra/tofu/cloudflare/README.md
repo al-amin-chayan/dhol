@@ -69,7 +69,7 @@ scripts/cloudflare bootstrap \
 ```
 
 Use the same arguments with `validate`, `adopt`, `plan`, `verify`, `probe`,
-`recovery-drill`, `snapshot` or `clean-drills`. CI cannot invoke this entry point.
+`recovery-drill`, `delegation-drill`, `snapshot` or `clean-drills`. CI cannot invoke this entry point.
 The source and all inputs mount read-only. Provider binaries execute only from
 a bounded executable tmpfs cache; temporary backend metadata, encrypted plans
 and working directories disappear with the container. No local state becomes
@@ -122,9 +122,9 @@ scripts/controller exec python infra/tofu/cloudflare/edge.py --host publish-1
 ```
 
 Every manifest is validated completely before rendering either host. Every
-output ends with `http_status:404`. The older `control_plane.py render-ingress`
-is a strict adapter for the deployed version-1 service registry; it supports
-only human whole-host ingress. New/future routes use `edge.py`.
+output ends with `http_status:404`. `edge.py` is the sole ingress renderer.
+Its manifest supersedes the historical version-1 route registry; adopted and
+planned routes are explicitly distinguished.
 
 `verify` performs live policy/DNS/registrar checks and independent non-recursive
 DNS queries directly to both recorded `.me` parent servers, then proves the
@@ -166,9 +166,18 @@ it decrypts and verifies the exact disposable built-in resource before deletion.
 `snapshot` verifies the production envelope, conditionally uploads to the
 independent recovery bucket and reads it back before pruning. Each state object
 is bounded to 4 MiB; each snapshot prefix retains at most 20 entries. Failed
-candidates are removed without deleting previous snapshots or credential roots.
+candidates are removed; failures before verified pruning leave older snapshots
+untouched. If a later pruning DELETE fails, earlier successful old-snapshot deletions
+remain permanent. Credential roots are never pruning targets.
 Both primary and independent roots are private. Git also retains the SOPS
 passphrase ciphertext, and both age private keys remain in the password manager.
+The copied passphrase ciphertext protects against git loss only, not losing both age
+keys. The generated state key precedes the still-open second-device drill; founder
+acknowledgment of that risk is pending under Baseline R4. Complete that drill before
+future provider-secret encryption. Total age-key loss requires reviewed new recipients
+and empty replacement backend coordinates, then re-import using `adoption.json`;
+no unique application data resides in this control-plane state. Existing ciphertext
+must be preserved rather than overwritten.
 
 After primary-object loss, stop writers and choose a reviewed verified snapshot.
 Create a **non-secret** recovery request with `schema_version: 1`, `snapshot_key`,
@@ -215,3 +224,25 @@ Official references: [provider 5.24.0 source](https://github.com/cloudflare/terr
 [S3 native lockfile](https://opentofu.org/docs/language/settings/backends/s3/),
 [R2 temporary credentials](https://developers.cloudflare.com/r2/examples/authenticate-r2-temp-credentials/),
 [R2 S3 compatibility](https://developers.cloudflare.com/r2/api/s3/api/).
+
+### Delegation and recipient enforcement
+
+Every finite operation derives both operator key recipients with `age-keygen -y`,
+requires two distinct identities matching `.sops.yaml`, and emits only their SHA256
+fingerprints. Duplicate canonical input paths fail before controller startup;
+copied keys with identical contents fail the cryptographic identity check.
+
+Run `scripts/cloudflare delegation-drill` with the same three private input options
+and confirmation as `plan`. It confirms the production state and recovery credential
+objects exist, creates one conditional tiny non-secret marker under `drills/`, proves
+in-scope read/write, and requires HTTP 403 for an out-of-prefix production read, a
+cross-bucket recovery read, and a session expired one hour ago. Only this marker is
+removed; the production state is never written. A crash can leave at most the one
+fixed marker (`drills/delegation-enforcement.probe`); a subsequent conditional create
+fails rather than assuming ownership. Remove that exact marker only after confirming
+no delegation drill is running. Other unknown drill objects remain fail-closed.
+
+The live author receipt proves provider enforcement, rather than merely the requested
+JWT claims. Backend retention uses the descriptor's limits, with absolute ceilings
+of 4 MiB per object and 20 snapshots. A partial pruning failure deletes the new
+candidate but cannot restore old snapshots whose deletion already succeeded.

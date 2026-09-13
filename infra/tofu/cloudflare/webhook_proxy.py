@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Loopback-only, bounded Telegram webhook authentication proxy for future core ingress."""
+
 from __future__ import annotations
 
 import hmac
@@ -21,7 +22,11 @@ def authorize(method, path, token, expected):
         return 404
     if method != "POST":
         return 405
-    if not isinstance(token, str) or not expected or not hmac.compare_digest(token.encode(), expected.encode()):
+    if (
+        not isinstance(token, str)
+        or not expected
+        or not hmac.compare_digest(token.encode(), expected.encode())
+    ):
         return 401
     return 200
 
@@ -57,7 +62,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def handle_request(self):
         tokens = self.headers.get_all("X-Telegram-Bot-Api-Secret-Token", [])
-        result = authorize(self.command, self.path, tokens[0] if len(tokens) == 1 else None, self.secret)
+        result = authorize(
+            self.command,
+            self.path,
+            tokens[0] if len(tokens) == 1 else None,
+            self.secret,
+        )
         if result != 200:
             self.respond(result)
             return
@@ -69,7 +79,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         Handler.window_count += 1
         lengths = self.headers.get_all("Content-Length", [])
-        if self.headers.get_all("Transfer-Encoding") is not None or len(lengths) != 1 or not lengths[0].isdigit():
+        if (
+            self.headers.get_all("Transfer-Encoding") is not None
+            or len(lengths) != 1
+            or not lengths[0].isdigit()
+        ):
             self.respond(400)
             return
         length = int(lengths[0])
@@ -87,8 +101,12 @@ class Handler(BaseHTTPRequestHandler):
             if len(body) != length or not isinstance(document, dict):
                 self.respond(400)
                 return
-            request = urllib.request.Request(self.upstream + self.path, data=body,
-                                             headers={"Content-Type": "application/json"}, method="POST")
+            request = urllib.request.Request(
+                self.upstream + self.path,
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
             opener = urllib.request.build_opener(NoRedirect)
             try:
                 response = opener.open(request, timeout=5)
@@ -103,13 +121,17 @@ class Handler(BaseHTTPRequestHandler):
         except (OSError, ValueError):
             self.respond(502)
 
-    do_GET = do_HEAD = do_POST = do_PUT = do_PATCH = do_DELETE = do_OPTIONS = do_TRACE = do_CONNECT = handle_request
+    do_GET = do_HEAD = do_POST = do_PUT = do_PATCH = do_DELETE = do_OPTIONS = (
+        do_TRACE
+    ) = do_CONNECT = handle_request
 
 
 def main():
     Handler.secret = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
     if len(Handler.secret) < 32:
-        raise SystemExit("verifying proxy requires a scoped webhook secret of at least 32 characters")
+        raise SystemExit(
+            "verifying proxy requires a scoped webhook secret of at least 32 characters"
+        )
     # Neither bind address nor upstream can be changed to a public origin by environment input.
     with HTTPServer(("127.0.0.1", 5680), Handler) as server:
         server.serve_forever()

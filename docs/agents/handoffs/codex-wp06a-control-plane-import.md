@@ -4,7 +4,7 @@ Lane: `codex/wp06a-control-plane-import`, worktree `.worktrees/wp06a-control-pla
 PR: https://github.com/al-amin-chayan/dhol/pull/67, target `develop`.
 The author publishes the full final SHA in the PR description and founder handoff;
 verify `git rev-parse HEAD` against that SHA before the founder-triggered Claude
-Code Baseline review. No author-triggered reviewer or review automation is used.
+Code Follow-up review. No author-triggered reviewer or review automation is used.
 
 ## Outcome and scope
 
@@ -31,7 +31,7 @@ Author verification includes the exact locked provider, all offline checks, real
 provider imports/no-change plans, both recipient MAC recovery, clean-workspace
 native locking/encryption recovery, independent parent DNS delegation, live
 founder-policy validation and unauthenticated/wrong-founder/alternate-Host/path
-Access denial. The Cloudflare package has 192 tests, including mutation/source/state
+Access denial. The Cloudflare package has 193 tests, including mutation/source/state
 race refusal, two-stage bootstrap, bounded snapshot failures, route-negative
 fixtures and real loopback HTTP proxy behavior.
 
@@ -73,5 +73,58 @@ checks a reviewed independent ciphertext digest, decrypts/checks provider IDs in
 memory and conditionally creates only an absent primary. Follow restoration with
 a fresh real no-change plan. See the runbook for bootstrap and key rotation.
 
-Reviewer: pending founder-triggered Claude Code Baseline review.
+Reviewer: Claude Code Baseline completed; founder-triggered Follow-up pending.
 Reviewed head: pending formal exact-head opposite-model verdict.
+
+## Baseline adjudication — 2026-09-13, before implementation fixes
+
+Reviewer: Claude Code
+Reviewed head: 897ef192ee43e588715625366807ec3b9719e74f
+
+- R1: accept. Only operations.prepare calls the real edge renderer; the legacy
+  renderer has no production consumer and the old route registry is empty. Remove
+  the legacy renderer and state explicitly that the edge manifest supersedes it.
+  A reference sweep also proves index/validate_schema have no remaining consumer
+  after that removal, so those unused helpers are removed with it.
+- R2: accept. JWT payload tests prove requested scope, not provider enforcement.
+  Add a finite live drill with an in-scope positive control and explicit denied
+  reads outside the prefix, across buckets, and after expiration.
+- R3: accept. Two successful decryptions can currently use the same key. Reject
+  duplicate canonical inputs and require two distinct public recipients matching
+  the committed policy before decryption or any provider operation; record hashes.
+- R4: needs-founder. The generated key reading is literally within the existing
+  gate, but the founder must explicitly acknowledge proceeding before the second-
+  device drill. No acknowledgment is inferred from general implementation approval.
+  Clarify that the recovery ciphertext copy protects against git loss only; total
+  age-key loss requires re-import from adoption.json, which contains all seven IDs.
+- S1: accept. Account, zone, identity and backend bounds are duplicated in runtime
+  code. Use the reviewed declarative sources and retain explicit absolute bounds.
+- S2: accept. Production renderer YAML/OSError exceptions can leak source lines;
+  catch them with a value-free diagnostic and exercise malformed/missing inputs.
+- S3: accept. Successful old-object deletions cannot be rolled back after a later
+  prune failure. Correct the comment and test partial pruning and candidate cleanup.
+- S4: accept. Resolve the registrar domain by ID, as edge.validate already does.
+- S5: accept. Expand compressed security parser/probe code and use normal imports.
+
+The separately noted webhook runtime packaging/concurrency remains WP-06C's
+planned-route promotion gate; no runtime is activated by this child package.
+
+## Baseline fix result
+
+R1–R3 and S1–S5 are implemented. The finite live delegation drill returned HTTP
+403 for all three scope/expiry negatives after successful positive controls and
+removed its sole marker. Both actual recipient fingerprints match the existing
+policy. A fresh locked-provider plan proves seven resources, zero mutations and
+unchanged encrypted state; its source digest is recorded in the refreshed evidence.
+Live policy/registrar/parent delegation verification passed with the domain-by-ID
+lookup. Full scripts/check: 1,174 tests passed (193 Cloudflare), all lint/policy/
+format/secret checks passed. Style changes in delegation/proxy preserve semantics.
+
+R4 is still needs-founder: explicitly acknowledge that the generated OpenTofu state
+key may precede the second-device drill. Its copied ciphertext cannot recover loss
+of both age keys. All seven provider IDs remain committed, permitting a reviewed
+re-import into an empty replacement backend without application-data loss. The
+secret runbook and package recovery instructions now state this precisely. The PR
+returns to draft with decision pending and native auto-merge cancelled, per the
+review workflow. After acknowledgment is recorded, publish the resulting exact
+head for a founder-triggered Claude Code Follow-up; the author does not start it.

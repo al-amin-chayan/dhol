@@ -7,8 +7,8 @@ source "$SCRIPT_DIR/lib/common.sh"
 REPO_ROOT="$(dholbeat_repo_root "${BASH_SOURCE[0]}")"
 [ -z "${GITHUB_ACTIONS:-}${CI:-}" ] || dholbeat_die "Cloudflare operations are operator-only, never CI"
 case "${1:-}" in
-  discover|validate|bootstrap|adopt|plan|verify|recovery-drill|snapshot|probe|restore|clean-drills) operation="$1"; shift ;;
-  *) dholbeat_die "usage: scripts/cloudflare discover|validate|bootstrap|adopt|plan|verify|recovery-drill|snapshot|probe|restore|clean-drills --credentials PATH --founder-key PATH --break-glass-key PATH --confirm cloudflare-control-plane" ;;
+  discover|validate|bootstrap|adopt|plan|verify|recovery-drill|delegation-drill|snapshot|probe|restore|clean-drills) operation="$1"; shift ;;
+  *) dholbeat_die "usage: scripts/cloudflare discover|validate|bootstrap|adopt|plan|verify|recovery-drill|delegation-drill|snapshot|probe|restore|clean-drills --credentials PATH --founder-key PATH --break-glass-key PATH --confirm cloudflare-control-plane" ;;
 esac
 credentials=""; founder_key=""; break_glass_key=""; confirmation=""; recovery_request=""
 while [ "$#" -gt 0 ]; do
@@ -24,9 +24,14 @@ while [ "$#" -gt 0 ]; do
   shift 2
 done
 [ "$confirmation" = cloudflare-control-plane ] || dholbeat_die "requires --confirm cloudflare-control-plane"
+canonical_inputs=()
 for input in "$credentials" "$founder_key" "$break_glass_key"; do
   [ -f "$input" ] && [ -r "$input" ] && [ ! -L "$input" ] || dholbeat_die "requires regular readable operator input files"
   canonical="$(dholbeat_canonical_path "$input")"
+  for previous in "${canonical_inputs[@]+${canonical_inputs[@]}}"; do
+    [ "$canonical" != "$previous" ] || dholbeat_die "operator inputs must have distinct canonical paths"
+  done
+  canonical_inputs+=("$canonical")
   if git -C "$(dirname "$canonical")" rev-parse --show-toplevel >/dev/null 2>&1; then
     dholbeat_die "operator inputs must be outside every git checkout"
   fi

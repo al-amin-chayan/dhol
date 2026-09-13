@@ -1,4 +1,5 @@
 """Meaningful backend failure, scope, encryption and retention contracts."""
+
 import base64
 import importlib.util
 import json
@@ -8,14 +9,23 @@ import sys
 import pytest
 
 PACKAGE = Path(__file__).resolve().parents[2] / "tofu/cloudflare"
-spec = importlib.util.spec_from_file_location("dholbeat_r2_backend", PACKAGE / "backend.py")
+spec = importlib.util.spec_from_file_location(
+    "dholbeat_r2_backend", PACKAGE / "backend.py"
+)
 backend = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = backend
 spec.loader.exec_module(backend)
 
 
 def test_session_has_exact_bucket_prefix_and_one_hour_lifetime():
-    credentials = backend.session("account", "parent-id", "parent-secret", "state-bucket", ["cloudflare/"], now=100)
+    credentials = backend.session(
+        "account",
+        "parent-id",
+        "parent-secret",
+        "state-bucket",
+        ["cloudflare/"],
+        now=100,
+    )
     jwt = base64.b64decode(credentials["AWS_SESSION_TOKEN"])[4:]
     payload = json.loads(base64.urlsafe_b64decode(jwt.split(b".")[1] + b"=="))
     assert payload["bucket"] == "state-bucket"
@@ -26,9 +36,16 @@ def test_session_has_exact_bucket_prefix_and_one_hour_lifetime():
     assert "parent-secret" not in str(credentials)
 
 
-@pytest.mark.parametrize("data", [b"", b"invalid", b'{"resources": []}',
-                                  b'{"encryption_version":"v0","encrypted_data":"x","resources":[]}',
-                                  b"x" * (backend.MAX_STATE_BYTES + 1)])
+@pytest.mark.parametrize(
+    "data",
+    [
+        b"",
+        b"invalid",
+        b'{"resources": []}',
+        b'{"encryption_version":"v0","encrypted_data":"x","resources":[]}',
+        b"x" * (backend.MAX_STATE_BYTES + 1),
+    ],
+)
 def test_plaintext_and_oversized_state_is_rejected(data):
     with pytest.raises(backend.BackendError):
         backend.require_ciphertext(data)
@@ -59,11 +76,16 @@ CIPHER = b'{"encryption_version":"v0","encrypted_data":"cipher"}'
 
 
 def test_native_state_coordination_metadata_is_allowed():
-    backend.require_ciphertext(b'{"encryption_version":"v0","encrypted_data":"cipher","serial":1,"lineage":"public-id","meta":{}}')
+    backend.require_ciphertext(
+        b'{"encryption_version":"v0","encrypted_data":"cipher","serial":1,"lineage":"public-id","meta":{}}'
+    )
 
 
 def test_verified_copy_prunes_only_old_snapshots_and_preserves_credential_root():
-    existing = {f"snapshots/20260101T000000{i:06d}Z-{'a'*64}.tfstate": CIPHER for i in range(20)}
+    existing = {
+        f"snapshots/20260101T000000{i:06d}Z-{'a' * 64}.tfstate": CIPHER
+        for i in range(20)
+    }
     existing["recovery/cloudflare.sops.yml"] = b"ciphertext"
     recovery = Store(existing)
     receipt = backend.snapshot(Store({"state": CIPHER}), recovery, "state")
@@ -89,3 +111,27 @@ def test_unrecognized_object_prevents_pruning():
     assert len(recovery.deleted) == 1
     assert recovery.deleted[0].startswith("snapshots/")
     assert "snapshots/do-not-delete" not in recovery.deleted
+
+
+def test_partial_prune_failure_does_not_claim_to_restore_deleted_snapshots():
+    objects = {
+        f"snapshots/20260101T000000{i:06d}Z-{'a' * 64}.tfstate": CIPHER
+        for i in range(21)
+    }
+    original = sorted(objects)
+
+    class Partial(Store):
+        def request(self, method, key, body=b"", **kwargs):
+            if method == "DELETE" and key == original[1]:
+                raise backend.BackendError("simulated prune failure")
+            return super().request(method, key, body, **kwargs)
+
+    recovery = Partial(objects)
+    with pytest.raises(backend.BackendError, match="prune failure"):
+        backend.snapshot(Store({"state": CIPHER}), recovery, "state")
+    assert original[0] not in recovery.objects
+    assert original[1] in recovery.objects
+    assert set(recovery.objects) == set(original[1:])
+    assert (
+        len(recovery.deleted) == 2
+    )  # one old snapshot plus this invocation's candidate

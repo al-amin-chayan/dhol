@@ -150,7 +150,15 @@ historical ciphertext; re-encryption alone is not recovery.
 The Cloudflare state passphrase is a generated controller-only recovery root in
 `cloudflare.sops.yml`, never a host credential or a Terraform output. Both age
 recipients must decrypt and verify its SOPS MAC before remote-state bootstrap.
-An independent encrypted copy is stored in the private recovery bucket.
+An identical ciphertext copy is stored in the private recovery bucket. This
+protects against losing the git copy, but both copies depend on the same two age
+recipients and do not protect against losing both private keys. The deferred
+second-device drill remains open. If all recipient keys are lost, the seven
+control-plane resources contain no unique application data: reconstruct state by
+reviewing new recipients and empty replacement backend coordinates, then
+re-importing the exact IDs in `infra/tofu/cloudflare/adoption.json`, following the
+immutable-bootstrap and import-only guards. Do not overwrite an existing primary
+state or interpret this fallback as permission to defer future provider-secret gates.
 Use the [control-plane recovery procedure](../tofu/cloudflare/README.md#recovery-and-rotation)
 before replacing the key: preserve the encrypted original state and original
 key, prepare a separately recoverable replacement key, migrate in the bounded
