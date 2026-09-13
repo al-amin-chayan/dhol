@@ -201,6 +201,27 @@ including a loopback binding on a nonstandard port, which the public-listener
 probe deliberately ignores — and any `docker.socket` unit that activates a TCP
 endpoint behind an innocuous-looking `fd://`.
 
+The listener probe distinguishes the existing Cloudflare Tunnel daemon's
+ephemeral UDP client sockets from public service listeners. Cloudflare's QUIC
+connections use wildcard, unconnected UDP sockets even though the daemon
+initiates the tunnel outbound. Only a host whose inventory declares its own
+`cloudflared-<role>` service enables this classification. The probe requires an
+active systemd `cloudflared.service`, a root-protected unit and
+`/usr/bin/cloudflared` executable, root process credentials, the tunnel-run
+command shape, the same process start time/executable inode, and a matching
+root-owned unconnected UDP socket descriptor/inode inside the kernel ephemeral
+port range. A process name alone never qualifies. DNS-server mode, unknown or
+shared owners, missing inspection metadata, fixed-port UDP and public TCP
+listeners retain the strict protocol/port check.
+
+This is a trusted-daemon client-socket classification, not packet-level proof
+of the remote peer: `ss` does not expose a QUIC peer for these unconnected
+sockets. Default-deny ingress and the declared firewall rules remain separate
+mandatory checks; the probe does not add an inbound UDP rule or disable the
+tunnel. It does not validate Cloudflare routes, Access policies or provider
+credentials, which remain WP-06B acceptance gates. See Cloudflare's
+[outbound connection requirements](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/tunnel-with-firewall/).
+
 From here on, ordinary changes are: plan with `--stage converged`, review, tag,
 apply with `--stage converged`.
 

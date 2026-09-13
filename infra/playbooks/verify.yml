@@ -114,6 +114,9 @@
         cmd: >-
           files/verify_public_listeners.py
           --allow-public tcp/{{ base_ssh_port | int }}
+          {% if baseline_allow_cloudflared_quic | default(false) | bool %}
+          --allow-cloudflared-quic
+          {% endif %}
           {% if baseline_vpn is defined and baseline_vpn.mode | default('none') == 'wireguard' %}
           --allow-public udp/{{ baseline_vpn.listen_port | int }}
           {% endif %}

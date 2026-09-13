@@ -631,6 +631,12 @@ def manifest_hosts(root: Path) -> dict[str, dict[str, Any]]:
     return {host["id"]: host for host in manifest.get("hosts", []) if isinstance(host, dict)}
 
 
+def declares_cloudflared(root: Path, host_id: str, role: str) -> bool:
+    if not (root / "infra/inventories/production/hosts.yml").is_file():
+        return False
+    return f"cloudflared-{role}" in manifest_hosts(root).get(host_id, {}).get("service_ids", [])
+
+
 def validate_document(root: Path, document: Any, label: str) -> list[str]:
     """Validate one host baseline contract without consulting the manifest."""
 
@@ -757,6 +763,9 @@ def render_inventory(
         "baseline_break_glass": document["break_glass"],
         "baseline_ssh_allow_cidrs": list(ssh["allow_cidrs"]),
         "baseline_public_interface": document["expected_host"]["public_interface"],
+        # Only a host declaring its role's Cloudflare connector can opt in to
+        # the narrowly verified ephemeral-UDP client-socket classification.
+        "baseline_allow_cloudflared_quic": declares_cloudflared(root, host_id, document["host_role"]),
         "baseline_second_connection_host": second_connection_host,
         "baseline_second_connection_port": int(ssh["port"]),
         "baseline_second_connection_identity_file": admin_identity,
