@@ -28,6 +28,10 @@ case "${1:-}" in
 esac
 
 if [ "${1:-}" != "--inside-controller" ]; then
+  # The controller intentionally has no Git. Exercise its real semantics on the
+  # host before entering the pinned runtime, keeping CI's single entry point.
+  printf '\n==> real Git promotion and synchronization regression\n'
+  python3 "$SCRIPT_DIR/tests/promotion_graph.py"
   exec "$SCRIPT_DIR/controller" exec scripts/check --inside-controller
 fi
 

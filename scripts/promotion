@@ -63,7 +63,7 @@ def arm(number: int, state: dict) -> None:
     gh("pr", "merge", str(number), "--repo", REPOSITORY, "--auto", "--merge", "--match-head-commit", pull["head"]["sha"])
     recorded = get(f"pulls/{number}")
     request = recorded.get("auto_merge") or {}
-    if request.get("merge_method") != "merge" or request.get("enabled_by", {}).get("login") != expected:
+    if request.get("merge_method") != "merge" or (request.get("enabled_by") or {}).get("login") != expected:
         raise ValueError("GitHub did not record merge-commit auto-merge under the expected App")
     print(f"Verified PR #{number}: merge-commit auto-merge enabled by {expected} at {pull['head']['sha']}.")
 

@@ -35,6 +35,11 @@ def test_real_merge_repair_preserves_ancestry_and_squash_does_not(tmp_path):
     assert git(tmp_path, "rev-parse", f"{sync}^{{tree}}") == git(tmp_path, "rev-parse", f"{develop}^{{tree}}")
     git(tmp_path, "checkout", "develop")
     git(tmp_path, "merge", "--squash", "sync")
+    git(tmp_path, "commit", "--allow-empty", "-m", "squashed sync")
+    squashed = git(tmp_path, "rev-parse", "HEAD")
+    assert squashed != develop
+    assert git(tmp_path, "show", "-s", "--format=%P", squashed).split() == [develop]
+    assert git(tmp_path, "rev-parse", f"{squashed}^{{tree}}") == git(tmp_path, "rev-parse", f"{develop}^{{tree}}")
     assert subprocess.run(["git", "merge-base", "--is-ancestor", main, "HEAD"], cwd=tmp_path).returncode == 1
     git(tmp_path, "merge", "--no-ff", "sync", "-m", "reviewed sync merge")
     git(tmp_path, "merge-base", "--is-ancestor", main, "develop")
