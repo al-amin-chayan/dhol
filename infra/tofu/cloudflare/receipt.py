@@ -51,12 +51,21 @@ def normalize(root: Path, receipt: dict, now: float | None = None) -> dict:
     ]
     if packages != {"cloudflare"} or unknown_files:
         raise ValueError("unadapted OpenTofu package")
+    routing_enabled = receipt.get("routing_enabled", False)
+    from routing import footprint
+
+    count = len(expected)
+    if routing_enabled:
+        manifest = yaml.safe_load((root / "infra/tofu/cloudflare/routes.yml").read_text())
+        bootstrap = yaml.safe_load((root / "infra/tofu/cloudflare/bootstrap.yml").read_text())
+        count += len(footprint(manifest, bootstrap, ""))
     if (
         receipt.get("schema_version") != 1
         or receipt.get("package") != "cloudflare"
         or receipt.get("provider_mutations") != 0
         or receipt.get("imported") is not False
-        or receipt.get("resource_count") != len(expected)
+        or type(routing_enabled) is not bool
+        or receipt.get("resource_count") != count
         or not expected
         or receipt.get("opentofu_version") != "1.12.5"
         or receipt.get("provider_version") != "5.24.0"
@@ -98,4 +107,4 @@ def normalize(root: Path, receipt: dict, now: float | None = None) -> dict:
         "backend_bucket",
         "backend_key",
     )
-    return {"state": "verified-no-change", **{key: receipt[key] for key in keys}}
+    return {"state": "verified-no-change", "routing_enabled": routing_enabled, **{key: receipt[key] for key in keys}}

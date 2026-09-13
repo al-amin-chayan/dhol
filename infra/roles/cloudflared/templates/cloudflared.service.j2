@@ -1,0 +1,24 @@
+[Unit]
+Description=Dholbeat publish-1 Cloudflare Tunnel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+EnvironmentFile=/etc/dholbeat/cloudflared.env
+ExecStart=/usr/bin/cloudflared --config /etc/dholbeat/cloudflared.yml tunnel run
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+UMask=0077
+NoNewPrivileges=true
+ProtectHome=true
+ProtectSystem=strict
+PrivateTmp=true
+MemoryMax=256M
+CPUQuota=100%
+
+[Install]
+WantedBy=multi-user.target

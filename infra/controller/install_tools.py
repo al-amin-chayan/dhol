@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import bz2
 import hashlib
 import os
 from pathlib import Path, PurePosixPath
@@ -84,6 +85,12 @@ def write_executable(source, target: Path) -> None:
 def install_binary_artifact(spec: dict, artifact_path: Path) -> None:
     archive_format = spec["format"]
     installs = spec["install"]
+    if archive_format == "bz2":
+        if len(installs) != 1 or installs[0].get("archive_path") is not None:
+            fail("bz2 artifacts must declare one null archive_path")
+        with bz2.open(artifact_path, "rb") as source:
+            write_executable(source, checked_install_path(installs[0]["install_path"]))
+        return
     if archive_format == "binary":
         if len(installs) != 1 or installs[0].get("archive_path") is not None:
             fail("raw binary artifacts must declare one null archive_path")
@@ -164,4 +171,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

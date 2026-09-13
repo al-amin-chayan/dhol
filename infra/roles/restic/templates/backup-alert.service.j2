@@ -1,0 +1,10 @@
+[Unit]
+Description=Record actionable Dholbeat backup failure
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/logger -p daemon.err "DHOLBEAT_BACKUP_ALERT host=publish-1: encrypted backup missing, failed, stale or oversized; inspect systemctl status dholbeat-backup.service and run the backup-recovery runbook before deployment"
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true

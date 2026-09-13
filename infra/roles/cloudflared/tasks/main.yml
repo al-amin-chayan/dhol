@@ -1,0 +1,84 @@
+---
+- name: Require the independent publisher tunnel and live Access audiences
+  ansible.builtin.assert:
+    that:
+      - dholbeat_host_id == 'publish-1'
+      - dholbeat_host_role == 'publisher'
+      - cloudflared_manifest.tunnel == cloudflared_tunnel_id
+      - cloudflared_manifest.ingress | length == 2
+      - cloudflared_manifest.ingress[0].hostname == 'publish.chayan.me'
+      - cloudflared_manifest.ingress[0].service == 'http://127.0.0.1:5000'
+      - cloudflared_manifest.ingress[1].service == 'http_status:404'
+      - cloudflared_live_plan.routing_enabled is sameas true
+      - cloudflared_live_plan.provider_mutations == 0
+      - cloudflared_access_audiences | length == 2
+      - cloudflared_access_audiences | unique | length == 2
+      - cloudflared_access_team_name is match('^[a-z0-9-]+$')
+      - cloudflared_secret_values['platform-publisher-tunnel-token'] is match('^[A-Za-z0-9+/=_-]+$')
+    quiet: true
+    fail_msg: Refusing tunnel adoption because host ingress, Access, or token is invalid.
+  no_log: true
+
+- name: Install the checksum-pinned existing connector version
+  ansible.builtin.get_url:
+    url: "{{ cloudflared_binary_url }}"
+    checksum: "sha256:{{ cloudflared_binary_sha256 }}"
+    dest: /usr/bin/cloudflared
+    owner: root
+    group: root
+    mode: "0755"
+  notify: Restart the publisher connector
+
+- name: Render the host-only local ingress configuration
+  ansible.builtin.template:
+    src: cloudflared.yml.j2
+    dest: /etc/dholbeat/cloudflared.yml
+    owner: root
+    group: root
+    mode: "0600"
+  notify: Restart the publisher connector
+
+- name: Render the tunnel credential without exposing it in argv or diffs
+  ansible.builtin.template:
+    src: cloudflared.env.j2
+    dest: /etc/dholbeat/cloudflared.env
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+  notify: Restart the publisher connector
+
+- name: Install the bounded publisher connector service
+  ansible.builtin.template:
+    src: cloudflared.service.j2
+    dest: /etc/systemd/system/cloudflared.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart the publisher connector
+
+- name: Validate the rendered ingress without changing the tunnel
+  ansible.builtin.command:
+    argv: [/usr/bin/cloudflared, --config, /etc/dholbeat/cloudflared.yml, tunnel, ingress, validate]
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Restart only the publisher connector after the reviewed local changes
+  ansible.builtin.meta: flush_handlers
+
+- name: Keep the isolated publisher connector enabled
+  ansible.builtin.systemd_service:
+    name: cloudflared.service
+    enabled: true
+    state: started
+
+- name: Prove the connector has live outbound-only connections
+  ansible.builtin.uri:
+    url: http://127.0.0.1:20241/metrics
+    return_content: true
+  register: cloudflared_metrics
+  until: cloudflared_metrics.status == 200 and cloudflared_metrics.content is search('cloudflared_tunnel_ha_connections 4')
+  retries: 12
+  delay: 5
+  when: not ansible_check_mode

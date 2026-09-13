@@ -1,0 +1,23 @@
+---
+- name: Converge only the reviewed publish-1 tunnel and backup foundation
+  hosts: baseline_targets
+  become: true
+  gather_facts: false
+  serial: 1
+  any_errors_fatal: true
+  tasks:
+    - name: Install the host-owned publisher tunnel boundary
+      ansible.builtin.import_role:
+        name: cloudflared
+      when:
+        - dholbeat_host_role == 'publisher'
+        - cloudflared_enabled | default(false) | bool
+      tags: [cloudflared]
+
+    - name: Install the isolated private backup foundation
+      ansible.builtin.import_role:
+        name: restic
+      when:
+        - dholbeat_host_role == 'publisher'
+        - restic_enabled | default(false) | bool
+      tags: [restic]

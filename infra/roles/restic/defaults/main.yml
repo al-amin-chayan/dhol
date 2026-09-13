@@ -1,0 +1,13 @@
+---
+restic_enabled: false
+restic_publisher_adapter_enabled: "{{ publisher_enabled | default(false) }}"
+restic_account_id: 7512591000a1e57593bc784dad59bfc0
+restic_repository: "s3:https://{{ restic_account_id }}.r2.cloudflarestorage.com/dholbeat-publisher-backups/state"
+restic_secret_values: "{{ (lookup('community.sops.sops', playbook_dir ~ '/../secrets/publisher-backups.sops.yml') | from_yaml)['values'] }}"
+restic_media_values: "{{ (lookup('community.sops.sops', playbook_dir ~ '/../secrets/publisher-media.sops.yml') | from_yaml)['values'] }}"
+restic_staging: /var/lib/dholbeat/restic/staging
+restic_restore_root: /var/lib/dholbeat/restic/restores
+restic_status_file: /var/lib/dholbeat/restic/status.json
+restic_repository_id_file: /etc/dholbeat/restic-repository-id
+restic_retained_paths: "{{ ['/etc/dholbeat-release', '/etc/dholbeat/receipts'] + (['/opt/dholbeat/publisher/compose.yml', '/opt/dholbeat/publisher/.env'] if restic_publisher_adapter_enabled | bool else []) }}"
+restic_timer_enabled: false

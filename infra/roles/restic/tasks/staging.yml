@@ -1,0 +1,102 @@
+---
+- name: Inspect the bounded publisher dump image
+  ansible.builtin.stat:
+    path: /var/lib/dholbeat/restic/application.img
+    follow: false
+  register: restic_image
+
+- name: Require scratch capacity before reserving the new two-GB image
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -c
+      - >-
+        import shutil;
+        assert shutil.disk_usage('/var/lib/dholbeat').free >= 10737418240
+  changed_when: false
+  check_mode: false
+  when: not restic_image.stat.exists
+
+- name: Refuse a modified or linked existing dump image
+  ansible.builtin.assert:
+    that:
+      - not restic_image.stat.exists or restic_image.stat.isreg
+      - not restic_image.stat.exists or restic_image.stat.size == 2147483648
+    quiet: true
+
+- name: Create a fixed-size scratch image only when absent
+  ansible.builtin.command:
+    argv: [/usr/bin/fallocate, --length=2147483648, /var/lib/dholbeat/restic/application.img]
+    creates: /var/lib/dholbeat/restic/application.img
+
+- name: Format only the newly created disposable scratch image
+  ansible.builtin.command:
+    argv: [/usr/sbin/mkfs.ext4, -F, -E, nodiscard, -m, "0", -L, DHOLBEAT_DUMPS, /var/lib/dholbeat/restic/application.img]
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - not restic_image.stat.exists
+
+- name: Protect the bounded scratch image
+  ansible.builtin.file:
+    path: /var/lib/dholbeat/restic/application.img
+    owner: root
+    group: root
+    mode: "0600"
+  when: not ansible_check_mode or restic_image.stat.exists
+
+- name: Inspect the new dump mountpoint
+  ansible.builtin.stat:
+    path: /var/lib/dholbeat/restic/application
+    follow: false
+  register: restic_mountpoint
+
+- name: Create the new private dump mountpoint only when absent
+  ansible.builtin.file:
+    path: /var/lib/dholbeat/restic/application
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  when:
+    - not ansible_check_mode
+    - not restic_mountpoint.stat.exists
+
+- name: Install the reproducible bounded dump mount
+  ansible.builtin.template:
+    src: application.mount.j2
+    dest: /etc/systemd/system/var-lib-dholbeat-restic-application.mount
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Mount only the new fixed-size publisher dump filesystem
+  ansible.builtin.systemd_service:
+    name: var-lib-dholbeat-restic-application.mount
+    daemon_reload: true
+    enabled: true
+    state: started
+  when: not ansible_check_mode
+
+- name: Give the selected Elasticsearch UID access to its snapshot mount
+  ansible.builtin.file:
+    path: /var/lib/dholbeat/restic/application
+    state: directory
+    owner: "1000"
+    group: root
+    mode: "0770"
+  when: not ansible_check_mode
+
+- name: Verify the mounted filesystem and fixed capacity
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -c
+      - >-
+        import os, pathlib;
+        p=pathlib.Path('/var/lib/dholbeat/restic/application');
+        s=os.statvfs(p);
+        assert p.is_mount() and s.f_blocks*s.f_frsize <= 2147483648;
+        assert pathlib.Path('/var/lib/dholbeat/restic/application.img').stat().st_blocks*512 >= 2147483648
+  changed_when: false
+  when: not ansible_check_mode

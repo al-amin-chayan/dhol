@@ -1,0 +1,14 @@
+{{ {
+  'schema_version': 1,
+  'host_id': dholbeat_host_id,
+  'account_id': restic_account_id,
+  'repository': restic_repository,
+  'repository_id_file': restic_repository_id_file,
+  'staging': restic_staging,
+  'restore_root': restic_restore_root,
+  'publisher_staging': '/var/lib/dholbeat/restic/application',
+  'status': restic_status_file,
+  'lock': '/run/lock/dholbeat-publisher.lock',
+  'retained_paths': restic_retained_paths,
+  'publisher_enabled': restic_publisher_adapter_enabled | bool
+} | to_nice_json }}

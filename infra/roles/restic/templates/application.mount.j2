@@ -1,0 +1,13 @@
+[Unit]
+Description=Two-GB bounded ephemeral publisher dump filesystem
+Before=docker.service dholbeat-backup.service
+
+[Mount]
+What=/var/lib/dholbeat/restic/application.img
+Where=/var/lib/dholbeat/restic/application
+Type=ext4
+Options=loop,nosuid,nodev,noexec
+TimeoutSec=60
+
+[Install]
+WantedBy=multi-user.target
