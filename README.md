@@ -230,11 +230,16 @@ requires a fresh founder cost decision. See the linked IaC plan for thresholds.
 - [ ] Approval bot: custom Telegram bot vs Hermes gateway
 - [ ] Per-brand X usage (worth $2–3/mo per brand?)
 - [ ] Media archival: purge-only vs B2 push
-- [ ] Run a second-device break-glass retrieval drill for the two Dholbeat age
-      keys (public-recipient SHA-256 fingerprints `32a10a74…0f849` and
-      `bed909c0…a969b`). Deferred 2026-08-17 until a device is available; this
-      drill is required before the first provider-issued production secret is
-      encrypted to these recipients.
+- [x] ~~Second-device age-key retrieval drill~~ → requirement removed by the
+      founder on 2026-09-13 because no second device is available. This is a
+      policy waiver, not a completed drill. Continue with the current two age
+      recipients (`32a10a74…0f849`, `bed909c0…a969b`) and the controller-generated
+      OpenTofu state passphrase. Both git and R2 ciphertext copies depend on the
+      same private keys; losing both requires reconstructing the seven-resource
+      Cloudflare state from `infra/tofu/cloudflare/adoption.json` into a reviewed
+      empty replacement backend. Password-manager escrow of both private keys
+      and provider recovery logins, distinct-recipient checks and SOPS MAC
+      recovery verification remain required.
 
 ## 10. Change log
 
@@ -265,3 +270,4 @@ requires a fresh founder cost decision. See the linked IaC plan for thresholds.
 | 2026-08-28 | Issue #45: the founder retained the already-purchased WP-05A Linux6GB service as canonical `publish-1`, superseding the 2026-08-22 cancellation instruction. PR #51 commits its production baseline and stages WireGuard phase one with a new durable administrator key beside the temporary WP-05A recovery key; phase two must prove the new key and remove the old one before closing public SSH. The provider-console root shell was exercised for host-key verification and SSH recovery. The same PR fixes the offline controller's missing stdin attachment, which made successful live Ansible runs produce zero-byte redacted logs and therefore no authorizing plan digest; pre-fix evidence failed closed and the post-fix live rehearsal is populated. Live convergence and tunnel-only administration remain separately reviewed production gates. Monthly change `$0`; the retained host remains the approved `$7/month` line. |
 | 2026-09-12 | Issue #55 adopts the founder-authorized 2026-09-09 emergency `publish-1` WireGuard cutover as desired state: SSH is tunnel-only on `10.99.0.0/24`, the proved live server public key is pinned, and only the durable administrator key remains. The live cutover already removed both operator-IP rules and negatively proved public SSH from two sources; the reviewed release must preserve that identity and must not reopen public SSH. Server/private-peer key escrow and byte-identical retrieval remain a founder action before redundant laptop recovery copies are deleted. Monthly change `$0`; `wireguard-tools` adds approximately 330 KB on the existing host. |
 | 2026-09-13 | Issue #54's reviewed promotion policy requires a reviewed graph-only main-to-develop synchronization after every promotion; `scripts/promotion` supplies live preflight, isolated normal-merge preparation and verified merge-method arming, while the read-only Promotion ancestry workflow reports pending synchronization. Issue #69 scopes that notice's concurrency per branch, adds reference-only PR-body guidance and a read-only GitHub configuration check, and commits the existing live extra-approval policy without changing either strict-base flag. No live ruleset changed. Monthly cost change `$0`. |
+| 2026-09-13 | Founder removed the second-device age-key validation requirement because no second device is available, after the shared-recipient recovery risk was explained. This supersedes the 2026-08-17 second-device gate for generated and provider-issued secrets; no successful second-device drill is claimed. The founder authorized retaining the controller-generated OpenTofu state passphrase under the current two recipients. Neither the git nor R2 ciphertext copy can recover the passphrase if both private keys are lost; the Cloudflare-state fallback is reviewed re-import from `infra/tofu/cloudflare/adoption.json` into an empty replacement backend. Password-manager escrow, provider recovery logins, distinct-recipient and SOPS MAC verification remain required. Monthly change `$0`. |

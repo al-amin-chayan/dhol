@@ -1,0 +1,109 @@
+schema_version: 1
+# Edge declarations include future routes without claiming undeployed runtime services exist.
+# Provider IDs are independently recorded in adoption.json, never invented for planned resources.
+tunnels:
+  - id: dba0c2c4-cca2-4876-8482-aa55ec36b18f
+    name: paperclip-vps
+    host_id: core-1
+    config_source: cloudflare
+    credential_ref: platform-core-tunnel-token
+  - id: 55d6ce3a-7abb-452b-b819-f2feb2fa2a58
+    name: dholbeat-publish-1
+    host_id: publish-1
+    config_source: local
+    credential_ref: platform-publisher-tunnel-token
+routes:
+  - id: paperclip-admin
+    hostname: team.chayan.me
+    service_id: paperclip
+    host_id: core-1
+    status: adopted
+    origin: http://localhost:3100
+    path: /
+    caller: human
+    access: founder-only
+    methods: [GET, HEAD, POST, PUT, PATCH, DELETE]
+    application_auth: paperclip-session
+    data_classification: confidential
+    retention_owner: founder
+  - id: n8n-admin
+    hostname: n8n.chayan.me
+    service_id: n8n
+    host_id: core-1
+    status: planned
+    origin: http://127.0.0.1:5678
+    path: /
+    caller: human
+    access: founder-only
+    methods: [GET, HEAD, POST, PUT, PATCH, DELETE]
+    application_auth: n8n-owner-session
+    data_classification: confidential
+    retention_owner: founder
+  - id: approval-webhooks
+    hostname: hooks.chayan.me
+    service_id: n8n
+    host_id: core-1
+    status: planned
+    origin: http://127.0.0.1:5680
+    path: /webhook/*
+    caller: machine
+    access: path-only-machine-exception
+    methods: [POST]
+    application_auth: telegram-secret-token-verifying-proxy
+    webhook_secret_ref: platform-telegram-webhook-secret
+    rate_limit: {requests: 60, period_seconds: 60}
+    data_classification: pii
+    retention_owner: founder
+  - id: publisher-admin-api
+    hostname: publish.chayan.me
+    service_id: publisher
+    host_id: publish-1
+    status: existing-unprotected
+    origin: http://127.0.0.1:5000
+    path: /
+    caller: human
+    access: founder-only
+    methods: [GET, HEAD, POST, PUT, PATCH, DELETE]
+    application_auth: postiz-session-and-public-api-key
+    machine_path: /api/public/*
+    machine_access: n8n-service-auth
+    machine_policy:
+      decision: non_identity
+      principal_id: n8n
+      application_hostname: publish.chayan.me
+      application_path: /api/public/*
+      allow_any_service_token: false
+      client_id_ref: platform-n8n-publisher-access-client-id
+      client_secret_ref: platform-n8n-publisher-access-client-secret
+      application_key_ref: platform-n8n-publisher-api-key
+    data_classification: confidential
+    retention_owner: founder
+buckets:
+  - id: core-backups
+    name: dholbeat-core-backups
+    host_id: core-1
+    principal_id: restic-core
+    credential_refs: [platform-core-backup-access-key, platform-core-backup-secret-access-key]
+    status: planned
+    public: false
+    retention_authority: restic-forget-prune
+    object_expiry_days: null
+  - id: publisher-backups
+    name: dholbeat-publisher-backups
+    host_id: publish-1
+    principal_id: restic-publisher
+    credential_refs: [platform-publisher-backup-access-key, platform-publisher-backup-secret-access-key]
+    status: planned
+    public: false
+    retention_authority: restic-forget-prune
+    object_expiry_days: null
+  - id: publisher-media
+    name: dholbeat-publisher-media
+    host_id: publish-1
+    principal_id: publisher
+    credential_refs: [platform-publisher-media-access-key, platform-publisher-media-secret-access-key]
+    status: planned
+    public: true
+    public_hostname: media.chayan.me
+    retention_authority: r2-lifecycle
+    object_expiry_days: 7

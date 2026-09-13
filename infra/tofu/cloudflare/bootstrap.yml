@@ -1,0 +1,24 @@
+schema_version: 1
+account_id: 7512591000a1e57593bc784dad59bfc0
+zone_id: 2c295efab57307e714b212bcab2d7c42
+zone_name: chayan.me
+founder_email: mail@chayan.me
+adopted_human_route_id: paperclip-admin
+founder_identity_provider_id: 12ad1207-ce57-447e-92b1-b53b44df5048
+backend:
+  authority: immutable-bootstrap
+  bucket: dholbeat-tfstate
+  bucket_id: 096f263ca30f4890b73b5b176de5b954
+  recovery_bucket: dholbeat-tfstate-recovery
+  recovery_bucket_id: 23d7c7e41abe47b6800f1b2bd0c00c8b
+  key: cloudflare/production.tfstate
+  region: auto
+  jurisdiction: default
+  public: false
+  encryption: pbkdf2-aes-gcm-enforced
+  locking: s3-native-conditional-lockfile
+  snapshot_count: 20
+  max_state_bytes: 4194304
+  recovery_account_id: dholbeat-cloudflare-recovery
+  parent_credential_location: password-manager
+  deletion_policy: forbidden

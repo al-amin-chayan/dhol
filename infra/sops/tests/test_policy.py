@@ -169,6 +169,7 @@ def test_leaked_recipient_rotates_every_affected_value_without_plaintext(tmp_pat
     assert findings == []
     assert plan["affected_sops_files"] == [
         "infra/secrets/canary.sops.yml",
+        "infra/secrets/cloudflare.sops.yml",
         "infra/secrets/core.sops.yml",
         "infra/secrets/publisher.sops.yml",
     ]

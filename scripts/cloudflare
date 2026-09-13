@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Networked, finite control-plane entry point. Secrets never become shell values.
+set -euo pipefail
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+# shellcheck source=scripts/lib/common.sh
+source "$SCRIPT_DIR/lib/common.sh"
+REPO_ROOT="$(dholbeat_repo_root "${BASH_SOURCE[0]}")"
+[ -z "${GITHUB_ACTIONS:-}${CI:-}" ] || dholbeat_die "Cloudflare operations are operator-only, never CI"
+case "${1:-}" in
+  discover|validate|bootstrap|adopt|plan|verify|recovery-drill|delegation-drill|snapshot|probe|restore|clean-drills) operation="$1"; shift ;;
+  *) dholbeat_die "usage: scripts/cloudflare discover|validate|bootstrap|adopt|plan|verify|recovery-drill|delegation-drill|snapshot|probe|restore|clean-drills --credentials PATH --founder-key PATH --break-glass-key PATH --confirm cloudflare-control-plane" ;;
+esac
+credentials=""; founder_key=""; break_glass_key=""; confirmation=""; recovery_request=""
+while [ "$#" -gt 0 ]; do
+  [ "$#" -ge 2 ] || dholbeat_die "every Cloudflare option requires a value"
+  case "$1" in
+    --credentials) credentials="$2" ;;
+    --founder-key) founder_key="$2" ;;
+    --break-glass-key) break_glass_key="$2" ;;
+    --confirm) confirmation="$2" ;;
+    --recovery-request) recovery_request="$2" ;;
+    *) dholbeat_die "unexpected Cloudflare option" ;;
+  esac
+  shift 2
+done
+[ "$confirmation" = cloudflare-control-plane ] || dholbeat_die "requires --confirm cloudflare-control-plane"
+canonical_inputs=()
+for input in "$credentials" "$founder_key" "$break_glass_key"; do
+  [ -f "$input" ] && [ -r "$input" ] && [ ! -L "$input" ] || dholbeat_die "requires regular readable operator input files"
+  canonical="$(dholbeat_canonical_path "$input")"
+  for previous in "${canonical_inputs[@]+${canonical_inputs[@]}}"; do
+    [ "$canonical" != "$previous" ] || dholbeat_die "operator inputs must have distinct canonical paths"
+  done
+  canonical_inputs+=("$canonical")
+  if git -C "$(dirname "$canonical")" rev-parse --show-toplevel >/dev/null 2>&1; then
+    dholbeat_die "operator inputs must be outside every git checkout"
+  fi
+  case "$(uname -s)" in
+    Darwin) permissions="$(stat -f %Lp "$canonical")" ;;
+    *) permissions="$(stat -c %a "$canonical")" ;;
+  esac
+  [ "$permissions" = 600 ] || dholbeat_die "operator inputs require mode 0600"
+  case "$canonical" in
+    "$REPO_ROOT"|"$REPO_ROOT"/*|*/github-agent-apps/*|*/github-app/*)
+      dholbeat_die "operator secrets must be outside git and must not be GitHub identities" ;;
+  esac
+done
+RECOVERY_MOUNTS=()
+if [ "$operation" = restore ]; then
+  [ -f "$recovery_request" ] && [ -r "$recovery_request" ] && [ ! -L "$recovery_request" ] || dholbeat_die "restore requires a reviewed regular recovery request"
+  RECOVERY_MOUNTS=(--volume "$(dholbeat_canonical_path "$recovery_request"):/run/recovery-request.json:ro")
+elif [ -n "$recovery_request" ]; then
+  dholbeat_die "recovery requests are accepted only by restore"
+fi
+digest="$("$SCRIPT_DIR/controller" digest)"
+image_id="$(printf '%s\n' "$digest" | awk -F= '$1 == "image_id" {print $2}')"
+[ -n "$image_id" ] || dholbeat_die "locked controller image unavailable"
+[ ! -L "$REPO_ROOT/.artifacts" ] && [ ! -L "$REPO_ROOT/.artifacts/cloudflare" ] || dholbeat_die "refuses symlinked output directory"
+mkdir -p "$REPO_ROOT/.artifacts/cloudflare"
+docker run --rm --read-only --network bridge --cap-drop ALL \
+  --security-opt no-new-privileges --env DHOLBEAT_IN_CONTROLLER=1 \
+  --env TF_PLUGIN_CACHE_DIR=/providers \
+  --env REPO_ROOT=/workspace --env SOPS_AGE_KEY_FILE=/run/founder.age \
+  --tmpfs /tmp:rw,nosuid,nodev,size=536870912 \
+  --tmpfs /providers:rw,nosuid,nodev,exec,size=402653184 \
+  --volume "$REPO_ROOT:/workspace:ro" \
+  --volume "$credentials:/run/bootstrap.env:ro" \
+  --volume "$founder_key:/run/founder.age:ro" \
+  --volume "$break_glass_key:/run/break-glass.age:ro" \
+  --volume "$REPO_ROOT/.artifacts/cloudflare:/evidence:rw" \
+  ${RECOVERY_MOUNTS[@]+"${RECOVERY_MOUNTS[@]}"} \
+  --workdir /workspace "$image_id" python infra/tofu/cloudflare/operations.py "$operation"

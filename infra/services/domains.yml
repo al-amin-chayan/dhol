@@ -1,2 +1,7 @@
 schema_version: 1
-domains: []
+domains:
+  - id: platform-domain
+    name: chayan.me
+    registrar_owner: founder
+    expected_nameservers: [coby.ns.cloudflare.com, nia.ns.cloudflare.com]
+    renewal_owner: founder
