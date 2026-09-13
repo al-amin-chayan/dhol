@@ -183,10 +183,18 @@ publish-1                  : ok=0    changed=0    unreachable=1    failed=0    s
     assert any("unreachable" in finding for finding in findings)
 
 
-def test_opentofu_scope_is_explicitly_absent_until_its_own_work_package() -> None:
-    scope = PLAN.opentofu_scope(ROOT)
+def test_opentofu_scope_is_absent_without_control_plane_directory(tmp_path: Path) -> None:
+    scope = PLAN.opentofu_scope(tmp_path)
     assert scope["state"] == "absent"
     assert "WP-06" in scope["reason"]
+
+
+def test_opentofu_directory_keeps_host_apply_blocked_until_adapter_exists(tmp_path: Path) -> None:
+    # Even offline WP-06A tooling must not silently bypass the original gate.
+    (tmp_path / "infra/tofu/cloudflare").mkdir(parents=True)
+    scope = PLAN.opentofu_scope(tmp_path)
+    assert scope["state"] == "present"
+    assert "plan adapter before apply" in scope["reason"]
 
 
 def test_compose_stack_without_a_registry_owner_fails_closed(tmp_path: Path) -> None:
