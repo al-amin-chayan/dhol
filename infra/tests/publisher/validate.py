@@ -302,8 +302,8 @@ def validate_desired_state_registries(root: Path, compose: dict[str, Any]) -> li
     }:
         findings.append("registries: retained publisher state classification is incomplete")
     staging = volume_records.get("publisher-backup-staging", {})
-    if staging.get("classification") != "ephemeral" or staging.get("size_limit_mb") != 4096:
-        findings.append("registries: publisher backup staging must be ephemeral and 4096 MiB")
+    if staging.get("classification") != "ephemeral" or staging.get("size_limit_mb") != 2048:
+        findings.append("registries: publisher backup staging must be ephemeral and 2048 MiB")
 
     enabled = publisher_vars.get("publisher_enabled")
     blockers = set(publisher_vars.get("publisher_activation_blockers", []))

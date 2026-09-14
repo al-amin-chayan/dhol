@@ -1,0 +1,10 @@
+---
+cloudflared_enabled: false
+cloudflared_tunnel_id: 55d6ce3a-7abb-452b-b819-f2feb2fa2a58
+cloudflared_binary_url: https://github.com/cloudflare/cloudflared/releases/download/2026.8.2/cloudflared-linux-amd64
+cloudflared_binary_sha256: fcfb02b575a52ca1af2e3267af4e1517bcdeb30ac48c834c69abaed3c0576ad2
+cloudflared_secret_values: "{{ (lookup('community.sops.sops', playbook_dir ~ '/../secrets/publisher-tunnel.sops.yml') | from_yaml)['values'] }}"
+cloudflared_manifest: "{{ lookup('pipe', 'python /workspace/infra/tofu/cloudflare/edge.py --host publish-1') | from_json }}"
+cloudflared_live_plan: "{{ lookup('pipe', 'python /workspace/infra/tofu/cloudflare/routing_verify.py --receipt-only') | from_json }}"
+cloudflared_access_audiences: "{{ cloudflared_live_plan['publisher_access_audiences'] }}"
+cloudflared_access_team_name: "{{ cloudflared_live_plan['access_team_name'] }}"

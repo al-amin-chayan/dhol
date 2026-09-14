@@ -1,0 +1,26 @@
+[Unit]
+Description=Dholbeat encrypted application-state backup
+After=network-online.target docker.service var-lib-dholbeat-restic-application.mount
+Requires=var-lib-dholbeat-restic-application.mount
+Wants=network-online.target
+OnFailure=dholbeat-backup-alert.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+EnvironmentFile=/etc/dholbeat/restic.env
+ExecStart=/usr/local/sbin/dholbeat-backup backup
+UMask=0077
+TimeoutStartSec=2h
+Nice=10
+IOSchedulingClass=idle
+# The dump adapter needs Docker, whose Unix socket is a root capability.
+# DockerDB processes run under their own existing Compose memory limits.
+MemoryMax=256M
+CPUQuota=50%
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/dholbeat /etc/dholbeat /run/lock

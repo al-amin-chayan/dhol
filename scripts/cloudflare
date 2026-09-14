@@ -7,10 +7,11 @@ source "$SCRIPT_DIR/lib/common.sh"
 REPO_ROOT="$(dholbeat_repo_root "${BASH_SOURCE[0]}")"
 [ -z "${GITHUB_ACTIONS:-}${CI:-}" ] || dholbeat_die "Cloudflare operations are operator-only, never CI"
 case "${1:-}" in
-  discover|validate|bootstrap|adopt|plan|verify|recovery-drill|delegation-drill|snapshot|probe|restore|clean-drills) operation="$1"; shift ;;
+  discover|validate|bootstrap|adopt|plan|verify|recovery-drill|delegation-drill|snapshot|probe|restore|clean-drills|routing-plan|routing-apply|routing-verify|credential-plan-access|credential-plan-storage|credential-issue-access|credential-issue-storage) operation="$1"; shift ;;
   *) dholbeat_die "usage: scripts/cloudflare discover|validate|bootstrap|adopt|plan|verify|recovery-drill|delegation-drill|snapshot|probe|restore|clean-drills --credentials PATH --founder-key PATH --break-glass-key PATH --confirm cloudflare-control-plane" ;;
 esac
 credentials=""; founder_key=""; break_glass_key=""; confirmation=""; recovery_request=""
+approved_digest=""; release_tag=""; review_pr=""
 while [ "$#" -gt 0 ]; do
   [ "$#" -ge 2 ] || dholbeat_die "every Cloudflare option requires a value"
   case "$1" in
@@ -19,11 +20,25 @@ while [ "$#" -gt 0 ]; do
     --break-glass-key) break_glass_key="$2" ;;
     --confirm) confirmation="$2" ;;
     --recovery-request) recovery_request="$2" ;;
+    --approved-digest) approved_digest="$2" ;;
+    --release) release_tag="$2" ;;
+    --review-pr) review_pr="$2" ;;
     *) dholbeat_die "unexpected Cloudflare option" ;;
   esac
   shift 2
 done
 [ "$confirmation" = cloudflare-control-plane ] || dholbeat_die "requires --confirm cloudflare-control-plane"
+REVIEWED_HEAD=""
+if [[ "$operation" = routing-apply || "$operation" = credential-issue-* ]]; then
+  [ -t 0 ] || dholbeat_die "credential issuance and routing apply require interactive founder confirmation"
+  [[ "$approved_digest" =~ ^[a-f0-9]{64}$ ]] || dholbeat_die "mutation requires an exact approved digest"
+  REVIEWED_HEAD="$(python3 "$SCRIPT_DIR/lib/operator_release.py" --release "$release_tag" --review-pr "$review_pr")"
+  printf 'Run %s at %s with digest %s? Type the full digest: ' "$operation" "$REVIEWED_HEAD" "$approved_digest"
+  IFS= read -r answer
+  [ "$answer" = "$approved_digest" ] || dholbeat_die "founder confirmation did not match the exact plan"
+elif [ -n "$approved_digest$release_tag$review_pr" ]; then
+  dholbeat_die "release and approval options are accepted only by credential issuance or routing apply"
+fi
 canonical_inputs=()
 for input in "$credentials" "$founder_key" "$break_glass_key"; do
   [ -f "$input" ] && [ -r "$input" ] && [ ! -L "$input" ] || dholbeat_die "requires regular readable operator input files"
@@ -61,6 +76,7 @@ docker run --rm --read-only --network bridge --cap-drop ALL \
   --security-opt no-new-privileges --env DHOLBEAT_IN_CONTROLLER=1 \
   --env TF_PLUGIN_CACHE_DIR=/providers \
   --env REPO_ROOT=/workspace --env SOPS_AGE_KEY_FILE=/run/founder.age \
+  --env "DHOLBEAT_APPROVED_ROUTING_DIGEST=$approved_digest" --env "DHOLBEAT_REVIEWED_HEAD=$REVIEWED_HEAD" \
   --tmpfs /tmp:rw,nosuid,nodev,size=536870912 \
   --tmpfs /providers:rw,nosuid,nodev,exec,size=402653184 \
   --volume "$REPO_ROOT:/workspace:ro" \

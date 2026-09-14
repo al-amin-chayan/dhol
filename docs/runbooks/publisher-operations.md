@@ -32,12 +32,15 @@ may synthesize a receipt or use an empty placeholder to bypass one.
    second-device validation requirement on 2026-09-13 (README §9/§10).
    Generate the JWT and three database/cache passwords
    locally with at least 32 URL-safe random characters. Never print them.
-5. Encrypt the complete `publisher` SOPS set in one process-memory flow. It
-   includes every catalog key targeting `infra/secrets/publisher.sops.yml`, not
-   merely the six keys added by WP-13. Do not commit a partial or invented set.
-6. Fill only the non-secret R2 account ID, bucket name, and public media URL in
-   `group_vars/publisher.yml`. Verify the media credential cannot access either
-   private restic repository and the bucket has the reviewed expiry lifecycle.
+5. Encrypt the complete `publisher` SOPS set (the four application values) in
+   one process-memory flow. Public-media credentials have their own complete
+   `publisher-media` set. The role combines only these six runtime values;
+   backup, tunnel and n8n Access credentials remain separate. Do not commit
+   a partial or invented set. See [boundary rollout](publisher-boundaries.md).
+6. Inspect the committed non-secret R2 account ID, bucket name, and public media
+   URL in `infra/roles/publisher/defaults/main.yml`. Verify the media credential
+   cannot access any private backup/source repository and the bucket has the
+   reviewed expiry lifecycle.
 7. Change `publisher_enabled` to `true` and remove only blockers backed by the
    receipts. Prepare an annotated, cross-reviewed release and inspect:
 
@@ -183,7 +186,9 @@ it cannot be discarded until a later exact live behavior drill proves that safe.
 The adapter restores Redis after the copy and restarts the two senders only when
 the global kill switch was not already active. WP-07 must write the verified
 directory directly to encrypted restic, then purge that exact staging child;
-staging has a 4 GiB bound and one-day maximum age. Copying live PostgreSQL or
+staging has a 2 GiB filesystem bound and one-day maximum age. The encrypted
+runner purges on success/failure and refuses interrupted staging; follow
+[backup recovery](backup-recovery.md). Copying live PostgreSQL or
 Elasticsearch directories is forbidden.
 
 ## Disposable restore

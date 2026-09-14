@@ -6,16 +6,18 @@ publisher_main_url: https://publish.chayan.me
 publisher_loopback_port: 5000
 publisher_project_directory: /opt/dholbeat/publisher
 publisher_state_directory: /var/lib/dholbeat/publisher
-publisher_backup_staging: /var/lib/dholbeat/publisher/backup-staging
+publisher_backup_staging: /var/lib/dholbeat/restic/application
 publisher_compose_file: "{{ publisher_project_directory }}/compose.yml"
 publisher_restore_compose_file: "{{ publisher_project_directory }}/compose.restore.yml"
 publisher_runtime_env_file: "{{ publisher_project_directory }}/.env"
 publisher_kill_switch_marker: "{{ publisher_state_directory }}/kill-switch.json"
 publisher_docker_cli: /usr/local/sbin/dholbeat-publisher-docker
-publisher_secret_values: {}
-publisher_media_account_id: ""
-publisher_media_bucket: ""
-publisher_media_public_url: ""
+publisher_secret_values: >-
+  {{ ((lookup('community.sops.sops', playbook_dir ~ '/../secrets/publisher.sops.yml') | from_yaml)['values'])
+     | combine((lookup('community.sops.sops', playbook_dir ~ '/../secrets/publisher-media.sops.yml') | from_yaml)['values']) }}
+publisher_media_account_id: 7512591000a1e57593bc784dad59bfc0
+publisher_media_bucket: dholbeat-publisher-media
+publisher_media_public_url: https://media.chayan.me
 publisher_required_dependency_receipts:
   wp05d-publish1: /etc/dholbeat/receipts/wp05d-publish1.yml
   wp06b-publish1: /etc/dholbeat/receipts/wp06b-publish1.yml

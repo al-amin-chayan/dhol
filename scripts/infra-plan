@@ -319,6 +319,11 @@ ANSIBLE_ARGS+=(
   "$PLANNED_PLAYBOOK"
 )
 
+# Refresh before the role consumes Access audiences, not only after Ansible.
+if [ -d "$REPO_ROOT/infra/tofu" ]; then
+  dholbeat_refresh_cloudflare "$TEMP_ROOT/cloudflare-before.json"
+fi
+
 printf '\n==> %s against %s\n' "$PLAN_KIND" "$LIMIT"
 set +e
 "$SCRIPT_DIR/controller" exec-ssh \
@@ -362,12 +367,8 @@ CLOUDFLARE_RECEIPT_ARGS=()
 # Always execute the real pinned provider against remote state. An operator-
 # supplied receipt is never a substitute for this live read-only plan.
 if [ -d "$REPO_ROOT/infra/tofu" ]; then
-  "$SCRIPT_DIR/cloudflare" plan \
-    --credentials "${DHOLBEAT_CLOUDFLARE_CREDENTIAL_FILE:-$HOME/.config/dholbeat/cloudflare/operator.env}" \
-    --founder-key "${SOPS_AGE_KEY_FILE:-$HOME/.config/dholbeat/age/founder.age}" \
-    --break-glass-key "${DHOLBEAT_BREAK_GLASS_KEY_FILE:-$HOME/.config/dholbeat/age/break-glass.age}" \
-    --confirm cloudflare-control-plane \
-    || dholbeat_die "WP-06 live Cloudflare plan failed; no host plan is authorized"
+  dholbeat_refresh_cloudflare "$ARTIFACT_ROOT/cloudflare-authority.json"
+  dholbeat_compare_cloudflare "$TEMP_ROOT/cloudflare-before.json" "$ARTIFACT_ROOT/cloudflare-authority.json"
   install -m 0600 "$REPO_ROOT/.artifacts/cloudflare/plan.json" "$ARTIFACT_ROOT/cloudflare-receipt.json"
   CLOUDFLARE_RECEIPT_ARGS=(--cloudflare-receipt "/workspace/.artifacts/$ARTIFACT_NAME/cloudflare-receipt.json")
 fi

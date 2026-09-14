@@ -209,6 +209,7 @@ def validate(manifest: dict, inventory: dict, domains: dict, registrar: dict):
     media_hosts = set()
     bucket_ids = set()
     principals = set()
+    source_escrow = False
     for bucket in manifest["buckets"]:
         required_bucket = {
             "id",
@@ -227,6 +228,13 @@ def validate(manifest: dict, inventory: dict, domains: dict, registrar: dict):
         )
         require(bucket["id"] not in bucket_ids, "duplicate bucket ID")
         bucket_ids.add(bucket["id"])
+        controller_bucket = bucket['id'] == 'source-escrow'
+        if controller_bucket:
+            require(bucket['host_id'] is None and bucket['principal_id'] == 'infra-controller'
+                    and bucket['name'] == 'dholbeat-source-escrow'
+                    and bucket['credential_refs'] == ['platform-source-escrow-access-key', 'platform-source-escrow-secret-access-key'],
+                    'source escrow must have its dedicated controller-only boundary')
+            source_escrow = True
         require(
             bucket["name"] not in bucket_names
             and bucket["principal_id"] not in principals,
@@ -245,11 +253,15 @@ def validate(manifest: dict, inventory: dict, domains: dict, registrar: dict):
                 and secret.get("target", {}).get("host_id") == bucket["host_id"],
                 "cross-principal bucket credential",
             )
+            if controller_bucket:
+                require(secret.get('target') == {'kind': 'controller-memory'}
+                        and secret.get('allowed_service_ids') == [], 'source credential must not reach a host service')
         bucket_credentials.update(bucket["credential_refs"])
         bucket_names.add(bucket["name"])
         principals.add(bucket["principal_id"])
         require(
-            bucket["principal_id"] in hosts[bucket["host_id"]]["service_ids"],
+            controller_bucket or (bucket['host_id'] in hosts
+                                  and bucket["principal_id"] in hosts[bucket["host_id"]]["service_ids"]),
             "cross-host bucket owner",
         )
         require(
@@ -261,7 +273,8 @@ def validate(manifest: dict, inventory: dict, domains: dict, registrar: dict):
                 bucket["host_id"] not in backup_hosts,
                 "duplicate private backup boundary",
             )
-            backup_hosts.add(bucket["host_id"])
+            if not controller_bucket:
+                backup_hosts.add(bucket["host_id"])
             require(
                 bucket["public"] is False
                 and bucket["object_expiry_days"] is None
@@ -281,7 +294,7 @@ def validate(manifest: dict, inventory: dict, domains: dict, registrar: dict):
                 "unbounded public media retention",
             )
     require(
-        backup_hosts == set(hosts)
+        source_escrow and backup_hosts == set(hosts)
         and media_hosts
         == {host_id for host_id, host in hosts.items() if host["role"] == "publisher"},
         "backup or public media coverage is incomplete",

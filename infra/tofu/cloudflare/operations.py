@@ -319,6 +319,12 @@ def plan(inputs, adopt=False):
         directory = Path(temporary)
         expected = prepare(directory)
         initialize(directory, env, config["key"])
+        from routing_operations import active, enable
+        from routing import guard
+
+        desired = enable(inputs, env) if active(directory, env) else {}
+        if adopt and desired:
+            raise OperationError("adoption is unavailable after publisher routing activation")
         run(["tofu", "validate"], directory, env)
         if adopt:
             imports = "\n".join(
@@ -364,7 +370,10 @@ def plan(inputs, adopt=False):
             run(["tofu", "show", "-json", str(binary)], directory, env).stdout
         )
         try:
-            no_change_plan(document, expected)
+            if desired:
+                guard(document, expected, desired)
+            else:
+                no_change_plan(document, expected)
         except ValueError as error:
             print(json.dumps({"guard_rejection": str(error)}))
             for change in document.get("resource_changes", []):
@@ -414,7 +423,8 @@ def plan(inputs, adopt=False):
             "schema_version": 1,
             "package": "cloudflare",
             "provider_mutations": 0,
-            "resource_count": len(expected),
+            "resource_count": len(expected) + len(desired),
+            "routing_enabled": bool(desired),
             "provider_version": "5.24.0",
             "opentofu_version": "1.12.5",
             "encrypted_plan_sha256": digest(binary.read_bytes()),
@@ -424,6 +434,22 @@ def plan(inputs, adopt=False):
             "backend_bucket": config["bucket"],
             "backend_key": config["key"],
         }
+        if desired:
+            organization = Cloudflare(inputs['CLOUDFLARE_API_TOKEN']).request(
+                'GET', f'/accounts/{ACCOUNT}/access/organizations'
+            )
+            auth_domain = organization.get('auth_domain', '')
+            if not re.fullmatch(r'[a-z0-9-]+\.cloudflareaccess\.com', auth_domain):
+                raise OperationError('Access organization auth domain is invalid')
+            receipt['access_team_name'] = auth_domain.split('.')[0]
+            receipt["publisher_access_audiences"] = [
+                item["change"]["after"]["aud"]
+                for item in document["resource_changes"]
+                if item["address"] in {
+                    "cloudflare_zero_trust_access_application.publisher_ui[0]",
+                    "cloudflare_zero_trust_access_application.publisher_api[0]",
+                }
+            ]
         raw_state = storage.request("GET", config["key"])
         require_ciphertext(raw_state)
         if not adopt and raw_state != previous_state:
@@ -796,6 +822,8 @@ def credentials(path: Path) -> dict[str, str]:
         "PUBLISHER_API_KEY",
         "PROBE_CORE_1_IP",
         "PROBE_PUBLISH_1_IP",
+        "MEDIA_PROBE_PATH",
+        "MEDIA_PROBE_SHA256",
     }
     allowed |= {
         "FOUNDER_ACCESS_JWT_" + identifier.replace("-", "_").upper()
@@ -1148,6 +1176,13 @@ def main():
             "bootstrap",
             "adopt",
             "plan",
+            "routing-plan",
+            "routing-apply",
+            "routing-verify",
+            "credential-plan-access",
+            "credential-plan-storage",
+            "credential-issue-access",
+            "credential-issue-storage",
             "verify",
             "recovery-drill",
             "delegation-drill",
@@ -1177,6 +1212,22 @@ def main():
         plan(inputs, adopt=True)
     elif args.operation == "plan":
         plan(inputs)
+    elif args.operation in {"routing-plan", "routing-apply"}:
+        import routing_operations
+
+        routing_operations.plan(inputs, apply=args.operation == "routing-apply")
+    elif args.operation == 'routing-verify':
+        import routing_verify
+
+        routing_verify.verify(inputs)
+    elif args.operation.startswith("credential-"):
+        import credential_operations
+
+        stage = args.operation.rsplit("-", 1)[1]
+        if args.operation.startswith("credential-plan-"):
+            credential_operations.plan(stage)
+        else:
+            credential_operations.issue(inputs, stage)
     elif args.operation == "snapshot":
         take_snapshot(inputs)
     elif args.operation == "verify":

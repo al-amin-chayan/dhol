@@ -76,6 +76,8 @@ def repo_copy(tmp_path: Path, *, with_ciphertext: bool = True) -> Path:
     (root / "infra/secrets").mkdir(parents=True)
     shutil.copy2(REPO_ROOT / "infra/secrets/README.md", root / "infra/secrets/README.md")
     shutil.copy2(REPO_ROOT / "infra/secrets/catalog.yml", root / "infra/secrets/catalog.yml")
+    (root / 'docs/runbooks').mkdir(parents=True)
+    shutil.copy2(REPO_ROOT / 'docs/runbooks/backup-recovery.md', root / 'docs/runbooks/backup-recovery.md')
     write_policy(root, [RECIPIENT_ONE, RECIPIENT_TWO])
     if with_ciphertext:
         catalog = load_yaml(root / "infra/secrets/catalog.yml")
@@ -167,12 +169,7 @@ def test_leaked_recipient_rotates_every_affected_value_without_plaintext(tmp_pat
     expected_ids = sorted(secret["id"] for secret in catalog["secrets"])
     plan, findings = build_rotation_plan(root, RECIPIENT_ONE)
     assert findings == []
-    assert plan["affected_sops_files"] == [
-        "infra/secrets/canary.sops.yml",
-        "infra/secrets/cloudflare.sops.yml",
-        "infra/secrets/core.sops.yml",
-        "infra/secrets/publisher.sops.yml",
-    ]
+    assert plan["affected_sops_files"] == sorted({secret['sops_file'] for secret in catalog['secrets']})
     assert plan["underlying_secret_ids_to_rotate"] == expected_ids
     assert plan["scope"] == "current-working-tree"
     assert plan["historical_ciphertext_review_required"] is True

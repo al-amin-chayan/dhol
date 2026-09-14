@@ -125,6 +125,26 @@ def test_complete_separate_bucket_and_machine_credentials(mutation):
         edge.validate(*docs)
 
 
+@pytest.mark.parametrize("mutation", [
+    {"host_id": "publish-1"}, {"principal_id": "publisher"}, {"public": True},
+    {"object_expiry_days": 7}, {"name": "dholbeat-publisher-backups"},
+    {"credential_refs": ["platform-publisher-backup-access-key", "platform-publisher-backup-secret-access-key"]},
+])
+def test_source_bucket_cannot_cross_host_or_credential_boundary(mutation):
+    docs = copy.deepcopy(edge.documents())
+    source = next(bucket for bucket in docs[0]["buckets"] if bucket["id"] == "source-escrow")
+    source.update(mutation)
+    with pytest.raises(edge.ContractError):
+        edge.validate(*docs)
+
+
+def test_source_bucket_requires_controller_catalog_target_and_complete_coverage():
+    docs = copy.deepcopy(edge.documents())
+    docs[0]["buckets"] = [b for b in docs[0]["buckets"] if b["id"] != "source-escrow"]
+    with pytest.raises(edge.ContractError):
+        edge.validate(*docs)
+
+
 @pytest.mark.parametrize("malformed", [True, False])
 def test_renderer_cli_suppresses_yaml_source_and_missing_file_diagnostics(
     tmp_path, malformed

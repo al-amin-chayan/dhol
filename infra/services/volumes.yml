@@ -51,9 +51,9 @@ volumes:
   - id: publisher-backup-staging
     service_id: publisher-temporal-visibility
     owner_project_id: platform
-    mount_path: /var/lib/dholbeat/publisher/backup-staging
+    mount_path: /var/lib/dholbeat/restic/application
     classification: ephemeral
     data_classification: confidential
-    size_limit_mb: 4096
+    size_limit_mb: 2048
     backup_adapter_id: null
     retention: {max_age_days: 1, purge_events: [restic-snapshot-complete, backup-failed], owner: platform}

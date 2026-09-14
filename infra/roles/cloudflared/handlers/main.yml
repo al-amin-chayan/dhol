@@ -1,0 +1,7 @@
+---
+- name: Restart the publisher connector
+  ansible.builtin.systemd_service:
+    name: cloudflared.service
+    daemon_reload: true
+    state: restarted
+  when: not ansible_check_mode
