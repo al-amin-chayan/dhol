@@ -6,6 +6,58 @@ the private core/publisher backup and independent source-escrow buckets, and the
 bucket/domain/lifecycle. Core routes, the team UI, and unrelated zone objects
 must remain no-change. This lane does not activate unrelated n8n/webhook paths.
 
+### Computed observations after the initial create
+
+The 2026-09-14 create completed its provider changes, but its final guard rejected
+three read-only observations: R2 domain ownership/TLS became active; attaching
+the founder policy to both approved publisher applications changed `app_count`
+from 1 to 3; attaching the new machine policy to the API changed its count from
+0 to 1. The original command did not emit a successful apply receipt. See the
+[redacted diagnostic](../evidence/publisher-routing-create-2026-09-14.json).
+
+The routing guard rejects drift by default. Only the publisher routing/native
+capture callers explicitly opt into `allow_observations=True`, which recognizes
+these precise convergence transitions in an entirely no-change plan.
+Drift records must match the current resource exactly,
+preserve identity and every other attribute, and contain no unknown, imported,
+moved, duplicate or unrelated object. Count changes beyond those reviewed
+attachments, domain failure/deactivation, selector changes and all other drift
+still require separate review. The standalone seven-object adoption guard
+continues to reject every drift record. Cloudflare's locked provider declares
+[`app_count`](https://raw.githubusercontent.com/cloudflare/terraform-provider-cloudflare/v5.24.0/docs/resources/zero_trust_access_policy.md)
+and domain
+[`status`](https://raw.githubusercontent.com/cloudflare/terraform-provider-cloudflare/v5.24.0/docs/resources/r2_custom_domain.md)
+read-only.
+
+Do not rerun the old creation digest after this failure. Preserve a fresh
+encrypted state snapshot, promote this fix through opposite-model review, and
+run a fresh `scripts/cloudflare plan` on that reviewed release. It must prove
+the complete twenty-three-object no-change profile before preparing a host
+apply. A successful read-only check on an author branch validates the fix; it
+does not replace the reviewed production receipt or the required route probes.
+The saved diagnostic is not a WP-06B gate or an issue-closure receipt.
+
+The native host-planning capture also reads `/accounts/{account_id}/access/organizations`
+to obtain the current Access authentication domain. Its operator API token must
+have `Access: Organizations, Identity Providers, and Groups Read` in addition
+to the existing routing reads. The old bootstrap API token returned HTTP 403
+at this endpoint after the candidate routing guard passed. An independent MCP
+read succeeded, but cannot replace that mandatory native capture. Grant the
+missing read access through a prepared, founder-approved temporary verifier
+token; keep it outside Git and production hosts, and revoke it after rollout.
+The founder approved that prepared token on 2026-09-14. Its independent metadata
+and organization read passed; a fresh native capture on the author branch then
+proved all twenty-three resources and captured both real Access audiences.
+Reviewed promotion and a fresh production capture are still required.
+
+Any exception during native apply or its post-apply plan/guard/snapshot now
+emits `routing-apply-rejected` before re-raising. It records the exact approval,
+whether the apply command completed, planned actions, available public resource
+identities, a pre-apply snapshot, and a best-effort post-failure encrypted
+snapshot. If snapshotting also fails, its exception class is recorded without
+provider output. Failure is never converted to success. The original
+2026-09-14 incident predates this machine record and remains a one-off narrative.
+
 ## Review and exact-plan sequence
 
 1. Run `scripts/check` and `scripts/cloudflare validate` with the existing
@@ -34,8 +86,13 @@ must remain no-change. This lane does not activate unrelated n8n/webhook paths.
    native plan must be no-change and a new encrypted recovery snapshot is saved.
 5. Run `credential-plan-storage`, review the four bucket-only object-write
    credentials, then confirm `credential-issue-storage` with its digest/release/PR.
-   This retrieves the existing publisher tunnel token and immediately encrypts
-   each issued root into a separate complete secret set. If escrow fails, only
+   This first retrieves and encrypts the existing publisher tunnel token, then
+   immediately encrypts each issued bucket root into a separate complete secret
+   set. Tunnel-token retrieval requires `Cloudflare Tunnel Write` (or the
+   equivalent cloudflared connector Write scope), even though it is a GET;
+   [Cloudflare documents these secret-read permissions](https://developers.cloudflare.com/api/resources/zero_trust/subresources/tunnels/subresources/cloudflared/subresources/token/methods/get/).
+   Proving this lookup before creating keys prevents a late partial issuance
+   when the management token has only connector Read. If escrow fails, only
    the newly issued unescrowed credential is revoked. Earlier successfully
    escrowed credentials remain recoverable; inspect partial receipts before retry.
    A token-management credential able to inspect account permission groups and
