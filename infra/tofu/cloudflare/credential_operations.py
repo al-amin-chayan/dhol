@@ -99,8 +99,13 @@ def issue(inputs, stage):
         request = document["requests"][0]
         token = api.request(request["method"], request["path"], request["body"])
         try:
-            if token.get("duration") != request["body"]["duration"] or token.get("enabled", True) is not True:
-                raise op.OperationError("issued service token does not match the approved non-expiring lifetime")
+            duration = token.get("duration", "<missing>")
+            enabled = token.get("enabled", "<missing>")
+            if duration != request["body"]["duration"] or enabled is not True:
+                raise op.OperationError(
+                    "issued service token does not match the approved non-expiring lifetime: "
+                    f"observed duration={duration!r} enabled={enabled!r}; "
+                    f"expected duration={request['body']['duration']!r} enabled=True")
             value["values"].update({"platform-n8n-publisher-access-client-id": token["client_id"],
                                     "platform-n8n-publisher-access-client-secret": token["client_secret"]})
             store("publisher-access", value)

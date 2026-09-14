@@ -151,6 +151,7 @@ def test_monthly_plan_approval_does_not_authorize_nonexpiring_issuance(monkeypat
 
 @pytest.mark.parametrize("duration,enabled,accepted", [
     ("forever", True, True), ("720h", True, False), (None, True, False), ("forever", False, False),
+    ("<missing>", True, False), ("forever", None, False), ("forever", "<missing>", False),
 ])
 def test_issuance_verifies_lifetime_and_revokes_unaccepted_token(monkeypatch, duration, enabled, accepted):
     monkeypatch.setattr(credentials.op, "recipient_checks", lambda: {})
@@ -166,8 +167,12 @@ def test_issuance_verifies_lifetime_and_revokes_unaccepted_token(monkeypatch, du
             if method == "GET":
                 return []
             if method == "POST":
-                return {"id": TOKEN, "client_id": "fixture-client", "client_secret": "fixture-secret",
-                        "duration": duration, "enabled": enabled}
+                token = {"id": TOKEN, "client_id": "fixture-client", "client_secret": "fixture-secret"}
+                if duration != "<missing>":
+                    token["duration"] = duration
+                if enabled != "<missing>":
+                    token["enabled"] = enabled
+                return token
             assert method == "DELETE" and path.endswith("/" + TOKEN)
 
     monkeypatch.setattr(credentials.op, "Cloudflare", lambda _: API())
@@ -181,8 +186,11 @@ def test_issuance_verifies_lifetime_and_revokes_unaccepted_token(monkeypatch, du
         assert receipts[0][1]["ciphertext_mac_recovery"] is True
         assert [v[0] for v in calls] == ["GET", "POST"]
     else:
-        with pytest.raises(credentials.op.OperationError, match="non-expiring lifetime"):
+        with pytest.raises(credentials.op.OperationError, match="non-expiring lifetime") as rejection:
             credentials.issue({"CLOUDFLARE_API_TOKEN": "fixture-management"}, "access")
+        assert f"observed duration={duration!r} enabled={enabled!r}" in str(rejection.value)
+        assert "expected duration='forever' enabled=True" in str(rejection.value)
+        assert "fixture-secret" not in str(rejection.value)
         assert not stored and not receipts
         assert [v[0] for v in calls] == ["GET", "POST", "DELETE"]
     assert calls[1][2] == {"name": SERVICE_NAME, "duration": "forever"}
