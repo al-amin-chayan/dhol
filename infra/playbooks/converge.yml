@@ -1,0 +1,6 @@
+---
+# The host plan and apply share every runtime role. The final release receipt
+# is written only by site.yml after a reviewed, founder-confirmed apply.
+- ansible.builtin.import_playbook: bootstrap.yml
+- ansible.builtin.import_playbook: publisher-boundaries.yml
+- ansible.builtin.import_playbook: publisher.yml

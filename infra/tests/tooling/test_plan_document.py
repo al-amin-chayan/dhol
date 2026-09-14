@@ -339,6 +339,58 @@ def build_arguments(root: Path, log: Path, contract: Path) -> types.SimpleNamesp
     )
 
 
+def test_fresh_host_plan_process_binds_publisher_routing_receipt(tmp_path: Path) -> None:
+    """No pytest sys.path or cached Cloudflare imports can satisfy this regression."""
+    import json
+    import shutil
+    import subprocess
+    import sys
+    import time
+
+    root = tmp_path / "repo"
+    shutil.copytree(ROOT / "infra", root / "infra", ignore=shutil.ignore_patterns("__pycache__"))
+    for name in ("toolchain.lock.yml", ".sops.yaml"):
+        shutil.copyfile(ROOT / name, root / name)
+    log = tmp_path / "check.log"
+    log.write_text(transcript(failed=False))
+    contract = tmp_path / "contract.json"
+    contract.write_text('{"schema_version":1}')
+    receipt_path = tmp_path / "routing-receipt.json"
+    adapter = ROOT / "infra/tofu/cloudflare/receipt.py"
+    digest_script = (
+        "import sys; from pathlib import Path; "
+        f"sys.path.insert(0, {str(adapter.parent)!r}); "
+        "from receipt import input_digest; print(input_digest(Path(sys.argv[1])))"
+    )
+    digest = subprocess.check_output([sys.executable, "-c", digest_script, str(root)], text=True).strip()
+    receipt = {
+        "schema_version": 1, "package": "cloudflare", "provider_mutations": 0,
+        "imported": False, "routing_enabled": True, "resource_count": 23,
+        "provider_version": "5.24.0", "opentofu_version": "1.12.5",
+        "inputs_sha256": digest, "observed_epoch": time.time(),
+        "encrypted_plan_sha256": "a" * 64, "encrypted_state_sha256": "b" * 64,
+        "backend_bucket": "dholbeat-tfstate", "backend_key": "cloudflare/production.tfstate",
+        "publisher_access_audiences": ["c" * 64, "d" * 64], "access_team_name": "dholbeat",
+    }
+    receipt_path.write_text(json.dumps(receipt))
+    arguments = build_arguments(root, log, contract)
+    arguments.limit = "publish-1"
+    arguments.cloudflare_receipt = receipt_path
+    payload = {k: str(v) if isinstance(v, Path) else v for k, v in vars(arguments).items()}
+    script = (
+        "import importlib.util,json,sys; from pathlib import Path; from types import SimpleNamespace; "
+        "spec=importlib.util.spec_from_file_location('plan',sys.argv[1]); "
+        "m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); "
+        "d=json.loads(sys.argv[2]); "
+        "d.update({k:Path(d[k]) for k in ('root','contract','ansible_log','cloudflare_receipt')}); "
+        "p,f=m.build_plan(SimpleNamespace(**d)); "
+        "assert not any('no valid fresh' in v for v in f), f; "
+        "assert p['opentofu']['resource_count']==23; "
+        "assert p['opentofu']['state']=='verified-no-change'"
+    )
+    subprocess.run([sys.executable, "-c", script, str(MODULE_PATH), json.dumps(payload)], cwd=tmp_path, check=True)
+
+
 def test_plan_document_is_byte_stable_across_ansible_temp_paths(tmp_path: Path) -> None:
     import json
     import shutil

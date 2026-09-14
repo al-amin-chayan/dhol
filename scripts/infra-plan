@@ -117,7 +117,7 @@ done
 [ -n "$KNOWN_HOSTS_FILE" ] || dholbeat_die "--known-hosts-file is required; host keys are never auto-trusted"
 case "$STAGE" in
   bootstrap) PLAN_KIND=bootstrap-preflight; PLANNED_PLAYBOOK="playbooks/preflight.yml" ;;
-  converged) PLAN_KIND=check-diff; PLANNED_PLAYBOOK="playbooks/bootstrap.yml" ;;
+  converged) PLAN_KIND=check-diff; PLANNED_PLAYBOOK="playbooks/converge.yml" ;;
   *) dholbeat_die "--stage must be bootstrap or converged" ;;
 esac
 case "$ARTIFACT_SUFFIX" in
