@@ -77,6 +77,8 @@ provider output. Failure is never converted to success. The original
    Copy ciphertext into the corresponding reviewed secret lane and independently
    escrow the credential in the password manager. Existing same-name tokens
    fail closed rather than silently replacing secrets.
+   Prepare plaintext exports only temporarily, outside Git with mode `0600`;
+   their destruction after verified password-manager retrieval is mandatory.
 4. Run `routing-plan`. The plan permits only creation of the sixteen declared
    publisher resources; all seven imported objects remain unchanged. The
    approval digest binds source input hashes, current encrypted state,
@@ -104,6 +106,19 @@ provider output. Failure is never converted to success. The original
    application secrets stay in `publisher.sops.yml`; the role combines just
    those four values with its two media credentials. Founder/break-glass age
    private keys and independent provider recovery roots stay outside Git.
+   Save the six recovery sets and independent source-root configuration in
+   the password manager, download them into a private temporary directory,
+   and verify byte-identical retrieval. Only after that succeeds, delete the
+   operator plaintext JSON exports, temporary source-root `.env`, verification
+   downloads, temporary editor copies and any generated plaintext residue
+   under `.artifacts/cloudflare`. Preserve committed SOPS ciphertext and
+   unrelated age/provider/operator inputs. For later operations, re-export
+   only the required private inputs temporarily and delete them after use.
+   Record the completed save/readback/cleanup categories without secret values.
+   Current status (2026-09-14): Access and tunnel uploads completed; the other
+   four storage sets and source-root configuration remain unsaved. Byte-identical
+   retrieval and plaintext destruction are not yet completed. Do not rely on
+   backups or claim recovery acceptance from a partial upload.
 7. On the reviewed production checkout, regenerate `scripts/cloudflare plan`
    after routing apply. It detects the managed profile, proves the complete
    twenty-three-object no-change inventory and captures real Access audiences/team
