@@ -23,8 +23,8 @@ def roots(path, initializing=False):
             result[key] = value.strip().strip("\"'")
     if set(result) != ROOT_KEYS or not all(result.values()):
         raise ValueError("independent escrow roots incomplete")
-    if result['RESTIC_REPOSITORY'] != 's3:https://7512591000a1e57593bc784dad59bfc0.r2.cloudflarestorage.com/dholbeat-publisher-backups/source':
-        raise ValueError("source escrow must use the private publisher source prefix")
+    if result['RESTIC_REPOSITORY'] != 's3:https://7512591000a1e57593bc784dad59bfc0.r2.cloudflarestorage.com/dholbeat-source-escrow/source':
+        raise ValueError("source escrow must use its dedicated private controller bucket")
     if not re.fullmatch(r"[a-f0-9]{64}", result["SOURCE_ESCROW_REPOSITORY_ID"]) and not (
             initializing and result["SOURCE_ESCROW_REPOSITORY_ID"] == "new"):
         raise ValueError("source-escrow root must pin the initialized repository identity")

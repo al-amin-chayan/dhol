@@ -17,9 +17,12 @@ from probes import access_denied, request, run_live
 from receipt import normalize
 
 
-def receipt():
+def receipt(*, host_role=False):
     value = json.loads((op.ROOT / '.artifacts/cloudflare/plan.json').read_text())
-    normalize(op.ROOT, value)
+    # Operator entry points always perform a fresh native capture before host
+    # planning/application and compare this stable authority across confirmation.
+    # The role binds source/state/Access, without timing the founder's response.
+    normalize(op.ROOT, value, max_age=None if host_role else 300)
     require(value.get('routing_enabled') is True, 'publisher routing has not been applied')
     audiences = value.get('publisher_access_audiences', [])
     require(len(audiences) == len(set(audiences)) == 2
@@ -41,7 +44,7 @@ def probes(manifest, inputs):
     for path, kind in (('/', 'service-token-at-ui'), ('/__disposable-invalid-path-probe', 'service-token-outside-api')):
         require(access_denied(request(route['hostname'], path, headers)), 'service token escapes its API path')
         outcomes[kind] = 'denied'
-    for bucket in ('dholbeat-core-backups', 'dholbeat-publisher-backups'):
+    for bucket in (b['name'] for b in manifest['buckets'] if not b['public']):
         response = request(op.ACCOUNT + '.r2.cloudflarestorage.com', '/' + bucket + '/__disposable-private-object')
         require(response.status == 403, 'backup bucket anonymous read denial was not proven')
         outcomes[bucket + '-anonymous'] = 'denied'
@@ -73,7 +76,7 @@ def verify(inputs):
     bound = receipt()
     manifest = op.documents()[0]
     api = op.Cloudflare(inputs['CLOUDFLARE_API_TOKEN'])
-    for bucket in ('dholbeat-core-backups', 'dholbeat-publisher-backups'):
+    for bucket in (b['name'] for b in manifest['buckets'] if not b['public']):
         result = api.request('GET', f'/accounts/{op.ACCOUNT}/r2/buckets/{bucket}/domains/custom')
         require(isinstance(result, dict) and result.get('domains') == [], 'backup bucket has an unknown or custom public domain')
     outcomes = probes(manifest, inputs)
@@ -88,4 +91,4 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--receipt-only', action='store_true', required=True)
     parser.parse_args()
-    print(json.dumps(receipt(), sort_keys=True))
+    print(json.dumps(receipt(host_role=True), sort_keys=True))

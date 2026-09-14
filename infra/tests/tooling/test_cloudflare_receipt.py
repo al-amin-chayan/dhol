@@ -54,6 +54,37 @@ def test_valid_receipt_has_stable_external_delta(receipt_tree):
     assert first == second and first["state"] == "verified-no-change"
 
 
+def test_host_role_accepts_review_delay_but_operator_capture_requires_freshness(receipt_tree):
+    root, receipt = receipt_tree
+    approved = normalize(root, receipt, now=1100)
+    assert normalize(root, receipt, now=4600, max_age=None) == approved
+    with pytest.raises(ValueError, match="stale"):
+        normalize(root, receipt, now=4600)
+    refreshed = {**receipt, "observed_epoch": 4600, "encrypted_plan_sha256": "c" * 64}
+    assert normalize(root, refreshed, now=4601) == approved
+    assert normalize(root, {**refreshed, "encrypted_state_sha256": "d" * 64}, now=4601) != approved
+
+
+@pytest.mark.parametrize("observed", [0, -1, True, float("nan"), float("inf"), 2000])
+def test_host_role_never_accepts_invalid_or_future_observation(receipt_tree, observed):
+    root, receipt = receipt_tree
+    with pytest.raises(ValueError):
+        normalize(root, {**receipt, "observed_epoch": observed}, now=1100, max_age=None)
+
+
+def test_routing_authority_binds_both_live_audiences_and_team(receipt_tree):
+    root, receipt = receipt_tree
+    active = {**receipt, "routing_enabled": True, "resource_count": 23,
+              "publisher_access_audiences": ["c" * 64, "d" * 64], "access_team_name": "dholbeat"}
+    approved = normalize(root, active, now=1100)
+    assert normalize(root, {**active, "publisher_access_audiences": list(reversed(active["publisher_access_audiences"]))}, now=1100) == approved
+    for changed in ({"publisher_access_audiences": ["c" * 64, "e" * 64]}, {"access_team_name": "different-team"}):
+        assert normalize(root, {**active, **changed}, now=1100) != approved
+    for invalid in ({"publisher_access_audiences": ["c" * 64] * 2}, {"publisher_access_audiences": []}, {"access_team_name": "https://foreign.test"}):
+        with pytest.raises(ValueError):
+            normalize(root, {**active, **invalid}, now=1100)
+
+
 @pytest.mark.parametrize(
     "key,value",
     [

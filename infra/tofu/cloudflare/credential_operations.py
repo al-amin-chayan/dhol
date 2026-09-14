@@ -23,7 +23,7 @@ def blueprint(stage):
             for name, bucket in (("dholbeat-restic-core", "dholbeat-core-backups"),
                 ("dholbeat-restic-publisher", "dholbeat-publisher-backups"),
                 ("dholbeat-publisher-media", "dholbeat-publisher-media"),
-                ("dholbeat-source-escrow", "dholbeat-publisher-backups"))]
+                ("dholbeat-source-escrow", "dholbeat-source-escrow"))]
     else:
         raise op.OperationError("unknown credential stage")
     return {"schema_version": 1, "document_type": "cloudflare-credential-plan", "stage": stage,

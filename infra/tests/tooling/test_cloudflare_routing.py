@@ -113,12 +113,21 @@ def test_credentials_plan_is_deterministic_and_bucket_only():
     assert first == credentials.blueprint("storage")
     assert first["secrets_in_opentofu"] is False
     assert len({v["name"] for v in first["requests"]}) == 4
+    assert len({tuple(v["resources"]) for v in first["requests"]}) == 4
+    assert any("dholbeat-source-escrow" in json.dumps(v["resources"]) for v in first["requests"])
     for request in first["requests"]:
         assert request["permission_group"] == "Workers R2 Storage Bucket Item Write"
         assert len(request["resources"]) == 1
         assert "bucket.*" not in json.dumps(request)
     access = credentials.blueprint("access")
     assert access["requests"][0]["body"] == {"name": SERVICE_NAME, "duration": "720h"}
+
+
+def test_dedicated_source_bucket_has_private_domain_and_restic_retention():
+    assert len(DESIRED) == 16 and len(ADOPTION) + len(DESIRED) == 23
+    assert DESIRED['cloudflare_r2_managed_domain.runtime["source-escrow"]']["enabled"] is False
+    lifecycle = DESIRED['cloudflare_r2_bucket_lifecycle.private_backups["source-escrow"]']
+    assert "delete_objects_transition" not in json.dumps(lifecycle)
 
 
 def test_credential_issuance_cannot_run_without_exact_release_and_approval(monkeypatch):

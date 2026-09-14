@@ -15,6 +15,25 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def private_identity(raw):
+    path = Path(raw).expanduser()
+    identity = path.resolve()
+    if any(part in {'github-agent-apps', 'github-app'} for part in identity.parts):
+        raise ValueError('GitHub App identities cannot be used for server access')
+    if path.is_symlink() or not identity.is_file() or identity.stat().st_mode & 0o777 != 0o600:
+        raise ValueError('SSH identity requires a regular mode-0600 file')
+    if identity.is_relative_to(ROOT):
+        raise ValueError('SSH identities must remain outside the checkout')
+    # Walk resolved ancestors: regular checkouts, linked worktrees (.git file),
+    # and bare repositories are excluded without relying on ambient Git env.
+    for parent in identity.parents:
+        if ((parent / '.git').exists() or (parent / '.git').is_symlink()
+                or ((parent / 'HEAD').is_file() and (parent / 'objects').is_dir()
+                    and (parent / 'config').is_file())):
+            raise ValueError('SSH identities must remain outside every Git checkout')
+    return identity
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=['init', 'backup', 'status', 'restore-disposable'])
@@ -33,13 +52,7 @@ def main():
         address = ipaddress.ip_address(args.address)
         if address not in ipaddress.ip_network('10.99.0.0/24'):
             raise ValueError('publish-1 administration must use its WireGuard subnet')
-        identity = Path(args.identity_file).expanduser().resolve()
-        if any(part in {'github-agent-apps', 'github-app'} for part in identity.parts):
-            raise ValueError('GitHub App identities cannot be used for server access')
-        if Path(args.identity_file).is_symlink() or not identity.is_file() or identity.stat().st_mode & 0o777 != 0o600:
-            raise ValueError('SSH identity requires a regular mode-0600 file')
-        if identity.is_relative_to(ROOT.parent.parent):
-            raise ValueError('SSH identities must remain outside the checkout')
+        identity = private_identity(args.identity_file)
         if os.environ.get('CI') or os.environ.get('GITHUB_ACTIONS'):
             raise ValueError('backup operations are operator-only')
         if args.command == 'init':

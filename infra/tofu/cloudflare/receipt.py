@@ -1,7 +1,9 @@
 """Pure, deterministic binding of the finite operator's live no-change receipt."""
 
+import argparse
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 import time
@@ -37,7 +39,7 @@ def input_digest(root: Path) -> str:
     return digestor.hexdigest()
 
 
-def normalize(root: Path, receipt: dict, now: float | None = None) -> dict:
+def normalize(root: Path, receipt: dict, now: float | None = None, *, max_age: float | None = 300) -> dict:
     expected = json.loads((root / "infra/tofu/cloudflare/adoption.json").read_text())
     packages = {
         p.name
@@ -75,10 +77,10 @@ def normalize(root: Path, receipt: dict, now: float | None = None) -> dict:
     observed = receipt.get("observed_epoch")
     age = (
         (time.time() if now is None else now) - observed
-        if isinstance(observed, (int, float))
+        if type(observed) in (int, float) and observed > 0 and math.isfinite(observed)
         else -1
     )
-    if not 0 <= age <= 300:
+    if age < 0 or (max_age is not None and age > max_age):
         raise ValueError("live no-change receipt is stale or future-dated")
     for key in ("encrypted_plan_sha256", "encrypted_state_sha256"):
         if not isinstance(receipt.get(key), str) or not re.fullmatch(
@@ -107,4 +109,21 @@ def normalize(root: Path, receipt: dict, now: float | None = None) -> dict:
         "backend_bucket",
         "backend_key",
     )
-    return {"state": "verified-no-change", "routing_enabled": routing_enabled, **{key: receipt[key] for key in keys}}
+    result = {"state": "verified-no-change", "routing_enabled": routing_enabled, **{key: receipt[key] for key in keys}}
+    if routing_enabled:
+        audiences = receipt.get('publisher_access_audiences')
+        team = receipt.get('access_team_name')
+        if (not isinstance(audiences, list) or len(audiences) != 2
+                or any(not isinstance(v, str) or not re.fullmatch('[a-f0-9]{64}', v) for v in audiences)
+                or len(set(audiences)) != 2 or not isinstance(team, str) or not re.fullmatch('[a-z0-9-]+', team)):
+            raise ValueError('live publisher Access authority is missing')
+        result.update(publisher_access_audiences=sorted(audiences), access_team_name=team)
+    return result
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--root', type=Path, required=True)
+    parser.add_argument('--receipt', type=Path, required=True)
+    args = parser.parse_args()
+    print(json.dumps(normalize(args.root, json.loads(args.receipt.read_text())), sort_keys=True))

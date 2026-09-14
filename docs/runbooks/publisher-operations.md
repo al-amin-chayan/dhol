@@ -37,9 +37,10 @@ may synthesize a receipt or use an empty placeholder to bypass one.
    `publisher-media` set. The role combines only these six runtime values;
    backup, tunnel and n8n Access credentials remain separate. Do not commit
    a partial or invented set. See [boundary rollout](publisher-boundaries.md).
-6. Fill only the non-secret R2 account ID, bucket name, and public media URL in
-   `group_vars/publisher.yml`. Verify the media credential cannot access either
-   private restic repository and the bucket has the reviewed expiry lifecycle.
+6. Inspect the committed non-secret R2 account ID, bucket name, and public media
+   URL in `infra/roles/publisher/defaults/main.yml`. Verify the media credential
+   cannot access any private backup/source repository and the bucket has the
+   reviewed expiry lifecycle.
 7. Change `publisher_enabled` to `true` and remove only blockers backed by the
    receipts. Prepare an annotated, cross-reviewed release and inspect:
 

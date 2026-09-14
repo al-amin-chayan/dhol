@@ -28,6 +28,48 @@ def module(name, relative):
 
 b = module("backup_foundation", "infra/roles/restic/files/backup.py")
 escrow = module("source_escrow_foundation", "scripts/lib/source_escrow.py")
+operator = module("backup_operator_foundation", "scripts/lib/backup_operator.py")
+
+
+@pytest.mark.parametrize("worktree", [False, True])
+def test_backup_identity_accepts_home_ssh_from_primary_and_worktree(tmp_path, monkeypatch, worktree):
+    home = tmp_path / "home"
+    checkout = home / "Projects/dholbeat"
+    root = checkout / ".worktrees/publish-routing-backups" if worktree else checkout
+    root.mkdir(parents=True)
+    key = home / ".ssh/publish-1"
+    key.parent.mkdir()
+    key.write_text("credential-free-key-fixture")
+    key.chmod(0o600)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setattr(operator, "ROOT", root)
+    assert operator.private_identity("~/.ssh/publish-1") == key
+
+
+@pytest.mark.parametrize("kind", ["checkout", "other-git", "linked-worktree", "bare-git", "app", "symlink", "mode"])
+def test_backup_identity_rejects_checkout_app_symlink_and_insecure_keys(tmp_path, monkeypatch, kind):
+    checkout = tmp_path / "repo"
+    checkout.mkdir()
+    monkeypatch.setattr(operator, "ROOT", checkout)
+    directory = checkout if kind == "checkout" else tmp_path / ("github-agent-apps" if kind == "app" else "keys")
+    directory.mkdir(exist_ok=True)
+    key = directory / "fixture-key"
+    key.write_text("credential-free-key-fixture")
+    key.chmod(0o644 if kind == "mode" else 0o600)
+    if kind == "other-git":
+        (directory / ".git").mkdir()
+    if kind == "linked-worktree":
+        (directory / ".git").write_text("gitdir: /outside/shared/repo\n")
+    if kind == "bare-git":
+        (directory / "HEAD").write_text("ref: refs/heads/develop\n")
+        (directory / "config").write_text("[core]\n bare = true\n")
+        (directory / "objects").mkdir()
+    if kind == "symlink":
+        link = directory / "link"
+        link.symlink_to(key)
+        key = link
+    with pytest.raises(ValueError):
+        operator.private_identity(str(key))
 
 
 @pytest.fixture
@@ -262,6 +304,18 @@ def test_source_roots_cannot_be_public_media_or_sops_dependency(tmp_path):
     path.write_text("RESTIC_REPOSITORY=s3:https://" + "a" * 32 + ".r2.cloudflarestorage.com/dholbeat-publisher-media/source\n"
         "RESTIC_PASSWORD=fixture\nAWS_ACCESS_KEY_ID=fixture\nAWS_SECRET_ACCESS_KEY=fixture\nSOURCE_ESCROW_REPOSITORY_ID=" + "a" * 64 + "\n")
     with pytest.raises(ValueError):
+        escrow.roots(path)
+
+
+def test_source_roots_require_dedicated_controller_bucket(tmp_path):
+    path = tmp_path / "roots"
+    def write(bucket):
+        path.write_text("RESTIC_REPOSITORY=s3:https://7512591000a1e57593bc784dad59bfc0.r2.cloudflarestorage.com/" + bucket + "/source\n"
+            "RESTIC_PASSWORD=fixture\nAWS_ACCESS_KEY_ID=fixture\nAWS_SECRET_ACCESS_KEY=fixture\nSOURCE_ESCROW_REPOSITORY_ID=" + "a" * 64 + "\n")
+    write("dholbeat-source-escrow")
+    assert escrow.roots(path)["RESTIC_REPOSITORY"].endswith("/dholbeat-source-escrow/source")
+    write("dholbeat-publisher-backups")
+    with pytest.raises(ValueError, match="dedicated"):
         escrow.roots(path)
 
 

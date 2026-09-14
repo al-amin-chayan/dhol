@@ -107,3 +107,12 @@ buckets:
     public_hostname: media.chayan.me
     retention_authority: r2-lifecycle
     object_expiry_days: 7
+  - id: source-escrow
+    name: dholbeat-source-escrow
+    host_id: null
+    principal_id: infra-controller
+    credential_refs: [platform-source-escrow-access-key, platform-source-escrow-secret-access-key]
+    status: planned
+    public: false
+    retention_authority: restic-forget-prune
+    object_expiry_days: null

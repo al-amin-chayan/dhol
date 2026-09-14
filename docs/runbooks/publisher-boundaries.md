@@ -2,7 +2,7 @@
 
 WP-06A (#12/PR67) adopted the existing Cloudflare zone, tunnels, DNS and team
 Access configuration without changes. WP-06B adds only publisher UI/API Access,
-the private core/publisher backup buckets, and the public publisher media
+the private core/publisher backup and independent source-escrow buckets, and the public publisher media
 bucket/domain/lifecycle. Core routes, the team UI, and unrelated zone objects
 must remain no-change. This lane does not activate unrelated n8n/webhook paths.
 
@@ -25,7 +25,7 @@ must remain no-change. This lane does not activate unrelated n8n/webhook paths.
    Copy ciphertext into the corresponding reviewed secret lane and independently
    escrow the credential in the password manager. Existing same-name tokens
    fail closed rather than silently replacing secrets.
-4. Run `routing-plan`. The plan permits only creation of the thirteen declared
+4. Run `routing-plan`. The plan permits only creation of the sixteen declared
    publisher resources; all seven imported objects remain unchanged. The
    approval digest binds source input hashes, current encrypted state,
    service-token identity and complete new configuration. Confirm exactly that
@@ -49,7 +49,7 @@ must remain no-change. This lane does not activate unrelated n8n/webhook paths.
    private keys and independent provider recovery roots stay outside Git.
 7. On the reviewed production checkout, regenerate `scripts/cloudflare plan`
    after routing apply. It detects the managed profile, proves the complete
-   twenty-object no-change inventory and captures real Access audiences/team
+   twenty-three-object no-change inventory and captures real Access audiences/team
    name. Set `cloudflared_enabled: true` through a reviewed publisher-only
    inventory change. Generate the exact `infra-plan --limit publish-1`, then
    obtain founder confirmation before `infra-apply`. The host role requires
@@ -72,7 +72,7 @@ expose backup/config objects. An empty media bucket's 404 is not an object
 delivery/lifecycle proof. Missing sessions, missing app key or undeployed route
 must be recorded as incomplete, never accepted.
 
-Record the exact release, reviewed source head, provider plan digest, twenty
+Record the exact release, reviewed source head, provider plan digest, twenty-three
 resource IDs, connector count, route results, parent-delegation/auto-renew
 verification, state lock/drill and remote encrypted recovery receipts. Existing
 WP-06A verification remains available through `verify`, `recovery-drill` and
@@ -96,6 +96,16 @@ expiry, escrow the new secret immediately, update only the API policy/client,
 prove positive/negative probes, then revoke the old dedicated token. A rotation
 changes an existing selector and requires a separate explicit plan; do not
 weaken the create-only guard to bypass review.
+
+`infra-plan` refreshes the real provider plan before Ansible and again afterward,
+requiring identical normalized source, encrypted-state and Access authority.
+Operator capture/render requires an observation no older than five minutes.
+`infra-apply` repeats that host plan, compares its byte-identical digest to the
+approved plan, and refreshes again immediately after founder confirmation.
+Changes to source/state/Access invalidate approval; capture time and encrypted
+plan randomness do not. The role validates the captured source/state/Access
+authority without timing the founder's response, so confirmation can take longer
+than five minutes. A stale artifact cannot replace the mandatory live captures.
 
 All added software is free. R2 has usage costs, documented with bounded
 retention in [backup recovery](backup-recovery.md); no new subscription is

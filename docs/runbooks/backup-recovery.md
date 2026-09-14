@@ -97,13 +97,16 @@ retain repository credentials, identities and snapshots for recovery.
 Source recovery must not need SOPS from the bundle it is trying to download.
 Store provider recovery login, source bucket credential, restic password, full
 repository URL/ID and snapshot receipts in the password manager. The dedicated
-source credential is bucket-scoped to `dholbeat-publisher-backups`; `/source`
-uses a distinct restic password/identity from `/state`. R2 bucket credentials do
-not enforce prefix IAM isolation. Neither backup credential is mounted into
-Postiz; its public-media credential cannot read the backup bucket.
+source credential is bucket-scoped to `dholbeat-source-escrow`; `/source` uses a
+distinct restic password/identity from either host's `/state` repository. The
+source bucket is controller-owned and has no host-file credential target.
+R2 bucket scope separates the blast radius: neither host backup credential can
+access source escrow, and the source credential cannot access host backups.
+Neither backup/source credential is mounted into Postiz; its public-media
+credential cannot read any private bucket.
 
 Export a regular mode-0600 file outside every Git checkout containing
-`RESTIC_REPOSITORY` (private publisher bucket `/source`), `RESTIC_PASSWORD`,
+`RESTIC_REPOSITORY` (dedicated private source bucket `/source`), `RESTIC_PASSWORD`,
 `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and
 `SOURCE_ESCROW_REPOSITORY_ID`. Set the last field to `new` only for a proven
 absent repository. `scripts/repository-bundle init --root-file <export>
