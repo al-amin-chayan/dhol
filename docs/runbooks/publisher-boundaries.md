@@ -6,6 +6,44 @@ the private core/publisher backup and independent source-escrow buckets, and the
 bucket/domain/lifecycle. Core routes, the team UI, and unrelated zone objects
 must remain no-change. This lane does not activate unrelated n8n/webhook paths.
 
+### Computed observations after the initial create
+
+The 2026-09-14 create completed its provider changes, but its final guard rejected
+three read-only observations: R2 domain ownership/TLS became active; attaching
+the founder policy to both approved publisher applications changed `app_count`
+from 1 to 3; attaching the new machine policy to the API changed its count from
+0 to 1. The original command did not emit a successful apply receipt. See the
+[redacted diagnostic](../evidence/publisher-routing-create-2026-09-14.json).
+
+The routing guard recognizes only these precise convergence transitions in an
+entirely no-change plan. Drift records must match the current resource exactly,
+preserve identity and every other attribute, and contain no unknown, imported,
+moved, duplicate or unrelated object. Count changes beyond those reviewed
+attachments, domain failure/deactivation, selector changes and all other drift
+still require separate review. The standalone seven-object adoption guard
+continues to reject every drift record. Cloudflare's locked provider declares
+[`app_count`](https://raw.githubusercontent.com/cloudflare/terraform-provider-cloudflare/v5.24.0/docs/resources/zero_trust_access_policy.md)
+and domain
+[`status`](https://raw.githubusercontent.com/cloudflare/terraform-provider-cloudflare/v5.24.0/docs/resources/r2_custom_domain.md)
+read-only.
+
+Do not rerun the old creation digest after this failure. Preserve a fresh
+encrypted state snapshot, promote this fix through opposite-model review, and
+run a fresh `scripts/cloudflare plan` on that reviewed release. It must prove
+the complete twenty-three-object no-change profile before preparing a host
+apply. A successful read-only check on an author branch validates the fix; it
+does not replace the reviewed production receipt or the required route probes.
+The saved diagnostic is not a WP-06B gate or an issue-closure receipt.
+
+The native host-planning capture also reads `/accounts/{account_id}/access/organizations`
+to obtain the current Access authentication domain. Its operator API token must
+have `Access: Organizations, Identity Providers, and Groups Read` in addition
+to the existing routing reads. The old bootstrap API token returned HTTP 403
+at this endpoint after the candidate routing guard passed. An independent MCP
+read succeeded, but cannot replace that mandatory native capture. Grant the
+missing read access through a prepared, founder-approved temporary verifier
+token; keep it outside Git and production hosts, and revoke it after rollout.
+
 ## Review and exact-plan sequence
 
 1. Run `scripts/check` and `scripts/cloudflare validate` with the existing

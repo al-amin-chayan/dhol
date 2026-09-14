@@ -1,0 +1,252 @@
+{
+  "guard_failure": "resource drift requires separate review",
+  "resource_metadata": [
+    {
+      "address": "cloudflare_dns_record.publish",
+      "actions": [
+        "no-op"
+      ],
+      "mismatched_selector_keys": []
+    },
+    {
+      "address": "cloudflare_dns_record.team",
+      "actions": [
+        "no-op"
+      ],
+      "mismatched_selector_keys": []
+    },
+    {
+      "address": "cloudflare_r2_bucket.runtime[\"core-backups\"]",
+      "actions": [
+        "no-op"
+      ],
+      "mismatched_selector_keys": []
+    },
+    {
+      "address": "cloudflare_r2_bucket.runtime[\"publisher-backups\"]",
+      "actions": [
+        "no-op"
+      ],
+      "mismatched_selector_keys": []
+    },
+    {
+      "address": "cloudflare_r2_bucket.runtime[\"publisher-media\"]",
+      "actions": [
+        "no-op"
+      ],
+      "mismatched_selector_keys": []
+    },
+    {
+      "address": "cloudflare_r2_bucket.runtime[\"source-escrow\"]",
+      "actions": [
+        "no-op"
+      ],
+      "mismatched_selector_keys": []
+    },
+    {
+      "address": "cloudflare_r2_bucket_lifecycle.private_backups[\"core-backups\"]",
+      "actions": [
+        "no-op"
+      ],
+      "mismatched_selector_keys": []
+    },
+    {
+      "address": "cloudflare_r2_bucket_lifecycle.private_backups[\"publisher-backups\"]",
+      "actions": [
+        "no-op"
+      ],
+      "mismatched_selector_keys": []
+    },
+    {
+      "address": "cloudflare_r2_bucket_lifecycle.private_backups[\"source-escrow\"]",
+      "actions": [
+        "no-op"
+      ],
+      "mismatched_selector_keys": []
+    },
+    {
+      "address": "cloudflare_r2_bucket_lifecycle.publisher_media[0]",
+      "actions": [
+        "no-op"
+      ],
+      "mismatched_selector_keys": []
+    },
+    {
+      "address": "cloudflare_r2_custom_domain.publisher_media[0]",
+      "actions": [
+        "no-op"
+      ],
+      "mismatched_selector_keys": []
+    },
+    {
+      "address": "cloudflare_r2_managed_domain.runtime[\"core-backups\"]",
+      "actions": [
+        "no-op"
+      ],
+      "mismatched_selector_keys": []
+    },
+    {
+      "address": "cloudflare_r2_managed_domain.runtime[\"publisher-backups\"]",
+      "actions": [
+        "no-op"
+      ],
+      "mismatched_selector_keys": []
+    },
+    {
+      "address": "cloudflare_r2_managed_domain.runtime[\"publisher-media\"]",
+      "actions": [
+        "no-op"
+      ],
+      "mismatched_selector_keys": []
+    },
+    {
+      "address": "cloudflare_r2_managed_domain.runtime[\"source-escrow\"]",
+      "actions": [
+        "no-op"
+      ],
+      "mismatched_selector_keys": []
+    },
+    {
+      "address": "cloudflare_zero_trust_access_application.publisher_api[0]",
+      "actions": [
+        "no-op"
+      ],
+      "mismatched_selector_keys": []
+    },
+    {
+      "address": "cloudflare_zero_trust_access_application.publisher_ui[0]",
+      "actions": [
+        "no-op"
+      ],
+      "mismatched_selector_keys": []
+    },
+    {
+      "address": "cloudflare_zero_trust_access_application.team",
+      "actions": [
+        "no-op"
+      ],
+      "mismatched_selector_keys": []
+    },
+    {
+      "address": "cloudflare_zero_trust_access_policy.founder",
+      "actions": [
+        "no-op"
+      ],
+      "mismatched_selector_keys": []
+    },
+    {
+      "address": "cloudflare_zero_trust_access_policy.publisher_machine[0]",
+      "actions": [
+        "no-op"
+      ],
+      "mismatched_selector_keys": []
+    },
+    {
+      "address": "cloudflare_zero_trust_tunnel_cloudflared.core",
+      "actions": [
+        "no-op"
+      ],
+      "mismatched_selector_keys": []
+    },
+    {
+      "address": "cloudflare_zero_trust_tunnel_cloudflared.publisher",
+      "actions": [
+        "no-op"
+      ],
+      "mismatched_selector_keys": []
+    },
+    {
+      "address": "cloudflare_zero_trust_tunnel_cloudflared_config.core",
+      "actions": [
+        "no-op"
+      ],
+      "mismatched_selector_keys": []
+    }
+  ],
+  "drift_metadata": [
+    {
+      "address": "cloudflare_r2_custom_domain.publisher_media[0]",
+      "actions": [
+        "update"
+      ],
+      "changed_keys": [
+        "status"
+      ],
+      "before": {
+        "status": {
+          "ownership": "pending",
+          "ssl": "initializing"
+        }
+      },
+      "after": {
+        "status": {
+          "ownership": "active",
+          "ssl": "active"
+        }
+      }
+    },
+    {
+      "address": "cloudflare_zero_trust_access_policy.founder",
+      "actions": [
+        "update"
+      ],
+      "changed_keys": [
+        "app_count"
+      ],
+      "before": {
+        "app_count": 1
+      },
+      "after": {
+        "app_count": 3
+      }
+    },
+    {
+      "address": "cloudflare_zero_trust_access_policy.publisher_machine[0]",
+      "actions": [
+        "update"
+      ],
+      "changed_keys": [
+        "app_count"
+      ],
+      "before": {
+        "app_count": 0
+      },
+      "after": {
+        "app_count": 1
+      }
+    }
+  ],
+  "schema_version": 1,
+  "receipt_type": "publisher-routing-create-diagnostic",
+  "release": "infra-prod-20260914-2",
+  "promotion_pr": 75,
+  "reviewed_source_head": "514d3c760f8c5fe96edf842b0deeb9800efaa707",
+  "operation_head": "694606629d0a146d4809945c410376fec96b732a",
+  "approved_digest": "9aed910a2399758d1b9df7a741de7d4c05131237ca082da266a6914e4a393dce",
+  "apply_status": "provider-creations-complete-post-apply-guard-rejected",
+  "provider_plan_actions": "23-no-op",
+  "configured_selector_mismatches": 0,
+  "recovery_snapshot": {
+    "bytes": 25278,
+    "recipient_fingerprints": {
+      "break-glass": "bed909c0be9e83ff6c22ecc7b819c938adcf269490ac620eb623ddf7162a969b",
+      "founder": "32a10a745e289748ad266b05e6589a0dd0dcabf9c6c4005d8890f5eb29d0f849"
+    },
+    "retention_count": 20,
+    "sha256": "1f913d9b1f34a515dac0b67bd924c8ae8a324de01cf988e7b77e7f37ffa63dc6",
+    "snapshot_key": "snapshots/20260914T142738456279Z-1f913d9b1f34a515dac0b67bd924c8ae8a324de01cf988e7b77e7f37ffa63dc6.tfstate"
+  },
+  "issue_acceptance": false,
+  "host_activation": false,
+  "canary_started": false,
+  "author_branch_readonly_plan": {
+    "production_acceptance": false,
+    "observed_epoch": 1789396370.667941,
+    "inputs_sha256": "1c97e8fa3d7b6f0170a4b376c73b636abc3e637242bfb8baf0b98e91ebd6475a",
+    "encrypted_state_sha256": "1f913d9b1f34a515dac0b67bd924c8ae8a324de01cf988e7b77e7f37ffa63dc6",
+    "resource_count": 23,
+    "provider_actions": "all-no-op",
+    "guard_passed": true
+  },
+  "host_capture_blocker": "operator token lacks Access organization read permission; /access/organizations returned HTTP 403; MCP independent read succeeded"
+}

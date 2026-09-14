@@ -31,7 +31,7 @@ from backend import (
     session,
     snapshot,
 )
-from control_plane import no_change_plan
+from control_plane import ContractError, no_change_plan
 from edge import documents, render, validate
 from receipt import input_digest
 
@@ -1267,7 +1267,7 @@ if __name__ == "__main__":
         # Never include provider response bodies, subprocess output or values.
         print(
             str(error)
-            if isinstance(error, (OperationError, BackendError))
+            if isinstance(error, (OperationError, BackendError, ContractError))
             else "control-plane operation failed safely"
         )
         raise SystemExit(1) from None

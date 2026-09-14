@@ -67,6 +67,11 @@ def guard(plan, adoption, desired, *, allow_create=False):
     require(isinstance(changes, list), "missing routing changes")
     adopted = copy.deepcopy(plan)
     adopted["resource_changes"] = [v for v in changes if v.get("address") in adoption]
+    # Creating the reviewed attachments and activating R2 TLS changes three
+    # computed fields. Validate that exact convergence before the WP-06A guard;
+    # its general rejection of drift remains unchanged for every other field.
+    validate_creation_observations(plan, adoption, desired)
+    adopted["resource_drift"] = []
     no_change_plan(adopted, adoption)
     seen = set()
     for item in changes:
@@ -116,6 +121,62 @@ def guard(plan, adoption, desired, *, allow_create=False):
     require(seen == set(adoption) | set(desired), "routing inventory is incomplete")
     return {address: next(v["change"]["actions"] for v in changes if v["address"] == address)
             for address in sorted(seen)}
+
+
+def validate_creation_observations(plan, adoption, desired):
+    drifts = plan.get("resource_drift", [])
+    require(isinstance(drifts, list), "invalid routing drift inventory")
+    if not drifts:
+        return
+    changes = plan["resource_changes"]
+    require(all(isinstance(item, dict) and item.get("change", {}).get("actions") == ["no-op"]
+                for item in changes), "creation observations require an entirely no-change plan")
+    resources = {item.get("address"): item for item in changes}
+    founder = "cloudflare_zero_trust_access_policy.founder"
+    machine = "cloudflare_zero_trust_access_policy.publisher_machine[0]"
+    media = "cloudflare_r2_custom_domain.publisher_media[0]"
+    counts = {founder: (1, 3), machine: (0, 1)}
+    require(founder in adoption and machine in desired and media in desired,
+            "creation observations require the reviewed publisher profile")
+    seen = set()
+    for item in drifts:
+        require(isinstance(item, dict), "invalid routing drift record")
+        address = item.get("address")
+        require(address in {*counts, media} and address not in seen,
+                "resource drift requires separate review")
+        seen.add(address)
+        resource = resources.get(address, {})
+        require(item.get("mode") == resource.get("mode") == "managed"
+                and item.get("provider_name") == resource.get("provider_name")
+                and item.get("provider_name") in {
+                    "registry.opentofu.org/cloudflare/cloudflare",
+                    "registry.terraform.io/cloudflare/cloudflare"}
+                and not item.get("previous_address"), "invalid creation observation identity")
+        change = item.get("change", {})
+        require(isinstance(change, dict) and change.get("actions") == ["update"]
+                and not change.get("after_unknown") and not change.get("importing"),
+                "invalid creation observation action")
+        before, after = change.get("before"), change.get("after")
+        current = resource.get("change", {})
+        require(isinstance(before, dict) and isinstance(after, dict)
+                and set(before) == set(after)
+                and after == current.get("before") == current.get("after"),
+                "creation observation differs from current no-change resource")
+        changed = {key for key in before if before[key] != after[key]}
+        if address in counts:
+            old, new = counts[address]
+            require(changed == {"app_count"}
+                    and type(before.get("app_count")) is int and type(after.get("app_count")) is int
+                    and (before["app_count"], after["app_count"]) == (old, new),
+                    "policy attachment count differs from reviewed creation")
+        else:
+            prior = before.get("status")
+            require(changed == {"status"} and isinstance(prior, dict)
+                    and set(prior) == {"ownership", "ssl"}
+                    and prior["ownership"] in {"pending", "active"}
+                    and prior["ssl"] in {"initializing", "pending", "active"}
+                    and after.get("status") == {"ownership": "active", "ssl": "active"},
+                    "media domain activation differs from reviewed creation")
 
 
 def prune_nulls(value):

@@ -220,3 +220,97 @@ def test_complete_credential_set_cannot_cross_catalog_scopes():
     value['values']['platform-publisher-media-access-key'] = 'fixture-extra'
     with pytest.raises(credentials.op.OperationError):
         credentials.validate_set('publisher-access', value)
+
+
+def converged_plan():
+    candidate = plan(False)
+    observations = {
+        'cloudflare_zero_trust_access_policy.founder': ('app_count', 1, 3),
+        'cloudflare_zero_trust_access_policy.publisher_machine[0]': ('app_count', 0, 1),
+        'cloudflare_r2_custom_domain.publisher_media[0]': (
+            'status', {'ownership': 'pending', 'ssl': 'initializing'},
+            {'ownership': 'active', 'ssl': 'active'}),
+    }
+    candidate['resource_drift'] = []
+    for address, (key, before, after) in observations.items():
+        resource = next(item for item in candidate['resource_changes'] if item['address'] == address)
+        resource['change']['before'][key] = deepcopy(after)
+        resource['change']['after'][key] = deepcopy(after)
+        drift = deepcopy(resource)
+        drift['change']['actions'] = ['update']
+        drift['change']['before'][key] = deepcopy(before)
+        candidate['resource_drift'].append(drift)
+    return candidate
+
+
+def test_reviewed_creation_computed_fields_are_accepted_without_mutating_plan():
+    candidate = converged_plan()
+    original = deepcopy(candidate)
+    assert len(guard(candidate, ADOPTION, DESIRED)) == 23
+    assert candidate == original
+    # The standalone WP-06A rule still rejects drift, including these records.
+    from control_plane import no_change_plan
+    baseline = deepcopy(candidate)
+    baseline['resource_changes'] = baseline['resource_changes'][:len(ADOPTION)]
+    with pytest.raises(ContractError, match='drift'):
+        no_change_plan(baseline, ADOPTION)
+
+
+@pytest.mark.parametrize('mutation', [
+    'other-adopted-resource', 'other-child-resource', 'duplicate', 'selector',
+    'identity', 'additional-key', 'missing-key', 'unknown', 'import', 'move',
+    'provider', 'delete', 'missing-change', 'count-before', 'count-after',
+    'count-type', 'status-before', 'status-after', 'status-extra', 'current-mismatch',
+    'planned-create', 'planned-update', 'malformed-inventory',
+])
+def test_other_drift_and_unproven_convergence_remain_rejected(mutation):
+    candidate = converged_plan()
+    founder, machine, media = candidate['resource_drift']
+    if mutation == 'other-adopted-resource':
+        founder['address'] = 'cloudflare_dns_record.team'
+    elif mutation == 'other-child-resource':
+        media['address'] = 'cloudflare_r2_bucket.runtime["publisher-media"]'
+    elif mutation == 'duplicate':
+        candidate['resource_drift'].append(deepcopy(founder))
+    elif mutation == 'selector':
+        machine['change']['before']['include'] = [{'any_valid_service_token': {}}]
+    elif mutation == 'identity':
+        founder['change']['before']['id'] = 'different-policy'
+    elif mutation == 'additional-key':
+        founder['change']['before']['decision'] = 'bypass'
+    elif mutation == 'missing-key':
+        founder['change']['before'].pop('id')
+    elif mutation == 'unknown':
+        founder['change']['after_unknown'] = {'app_count': True}
+    elif mutation == 'import':
+        founder['change']['importing'] = {'id': 'fixture'}
+    elif mutation == 'move':
+        founder['previous_address'] = 'cloudflare_zero_trust_access_policy.unrelated'
+    elif mutation == 'provider':
+        founder['provider_name'] = 'registry.opentofu.org/unrelated/provider'
+    elif mutation == 'delete':
+        founder['change']['actions'] = ['delete']
+    elif mutation == 'missing-change':
+        founder.pop('change')
+    elif mutation == 'count-before':
+        founder['change']['before']['app_count'] = 2
+    elif mutation == 'count-after':
+        founder['change']['after']['app_count'] = 4
+    elif mutation == 'count-type':
+        machine['change']['before']['app_count'] = False
+    elif mutation == 'status-before':
+        media['change']['before']['status']['ownership'] = 'blocked'
+    elif mutation == 'status-after':
+        media['change']['after']['status']['ssl'] = 'pending'
+    elif mutation == 'status-extra':
+        media['change']['before']['status']['unreviewed'] = 'value'
+    elif mutation == 'current-mismatch':
+        founder['change']['after']['id'] = 'different-policy'
+    elif mutation == 'planned-create':
+        candidate['resource_changes'][-1]['change']['actions'] = ['create']
+    elif mutation == 'planned-update':
+        candidate['resource_changes'][-1]['change']['actions'] = ['update']
+    else:
+        candidate['resource_drift'] = {}
+    with pytest.raises(ContractError):
+        guard(candidate, ADOPTION, DESIRED, allow_create=True)
