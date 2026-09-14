@@ -241,13 +241,34 @@ requires a fresh founder cost decision. See the linked IaC plan for thresholds.
       and provider recovery logins, distinct-recipient checks and SOPS MAC
       recovery verification remain required.
 
-- [ ] Approve a temporary Cloudflare management credential for the exact
-      cross-reviewed #14/#15 issuance plan: the existing operator token cannot
-      inspect account permission groups or issue the required bucket-scoped
-      runtime credentials. Use a bounded expiry, save issued roots to the
-      password manager/SOPS, and revoke the temporary management token after
-      rollout. No management token is installed on either server; see
+- [x] Founder approved the temporary Cloudflare management credential on
+      2026-09-14 for the exact cross-reviewed #14/#15 issuance plan; Codex used
+      it to issue the dedicated Access credential and four bucket-scoped R2
+      pairs. Its bounded expiry is 2026-09-16. Six complete runtime SOPS sets
+      are committed under both approved recipients. Password-manager escrow
+      and temporary-token revocation remain separately open below.
+      No management token is installed on either server; see
       [publisher boundary rollout](docs/runbooks/publisher-boundaries.md).
+
+- [x] Founder approved and Codex created the temporary Cloudflare read-only
+      verifier on 2026-09-14, including `Access: Organizations, Identity Providers,
+      and Groups Read`. The old operator token returned HTTP 403 on
+      `/accounts/{account_id}/access/organizations`; the approved verifier
+      completed the mandatory native twenty-three-resource capture on the
+      author branch. It expires 2026-09-16, stays outside Git and both servers,
+      and does not authorize production use of an unreviewed guard fix; see
+      [publisher boundary rollout](docs/runbooks/publisher-boundaries.md).
+- [ ] Revoke the temporary Cloudflare management and read-only verifier tokens
+      after rollout and final native verification. Password-manager escrow of
+      the issued recovery roots remains required before relying on backups.
+      Access and tunnel recovery files are uploaded to NordPass; the other
+      four storage records and source-root configuration are not yet saved,
+      and no byte-identical retrieval is verified. Save all required files,
+      verify byte-identical password-manager retrieval, then delete operator
+      plaintext exports, the temporary source-root `.env`, verification
+      downloads and any generated plaintext residue under `.artifacts/cloudflare`.
+      Re-export private operator inputs only temporarily when needed; do not
+      claim escrow or cleanup complete until the corresponding verification passes.
 
 ## 10. Change log
 
@@ -281,3 +302,5 @@ requires a fresh founder cost decision. See the linked IaC plan for thresholds.
 | 2026-09-13 | Founder removed the second-device age-key validation requirement because no second device is available, after the shared-recipient recovery risk was explained. This supersedes the 2026-08-17 second-device gate for generated and provider-issued secrets; no successful second-device drill is claimed. The founder authorized retaining the controller-generated OpenTofu state passphrase under the current two recipients. Neither the git nor R2 ciphertext copy can recover the passphrase if both private keys are lost; the Cloudflare-state fallback is reviewed re-import from `infra/tofu/cloudflare/adoption.json` into an empty replacement backend. Password-manager escrow, provider recovery logins, distinct-recipient and SOPS MAC verification remain required. Monthly change `$0`. |
 | 2026-09-14 | Issues #14/#15 (PR #71): added opt-in publisher tunnel/Access, four separately scoped R2 buckets (core backup, publisher backup, controller-only source escrow, public media), encrypted application backup and independent Git-bundle recovery foundations. Native plans preserve all seven imported objects; host plan/apply refresh real provider authority around Ansible and founder confirmation. Publisher scratch physically reserves 2 GiB on the existing 30 GB disk, with 8 GiB update headroom preserved; timers await verified recovery. Monthly subscription/software change `$0`; R2 usage only, with seven-daily/four-weekly state retention and seven-day media expiry (see the cost table in [backup recovery](docs/runbooks/backup-recovery.md)). A temporary scoped management credential remains a founder item in §9. No new provider/server activation is claimed: live route/storage probes, independent root escrow, encrypted R2/outage/application recovery receipts and #17's adoption/fixture/OOM investigation/seven-day capacity evidence remain required. |
 | 2026-09-14 | Founder selected a non-expiring n8n-to-publisher Access service token to avoid monthly renewal and surprise outages in the solo-founder operation. Issuance requests and verifies Cloudflare's `forever` lifetime; scoped API authorization, independent Postiz credentials, password-manager/SOPS recovery and explicit revoke/rotate procedures remain required. This changes only the runtime service-token lifetime; the temporary management credential still expires and must be revoked after rollout. No token issuance or production activation is claimed by this policy change. Monthly cost change `$0`. |
+| 2026-09-14 | The approved WP-06B create produced all sixteen publisher resources; its post-apply guard rejected only R2 domain activation and the exact founder/machine attachment counts. The routing guard now accepts those computed transitions only with explicit observation opt-in and an entirely no-change plan; all other drift remains rejected. Post-apply failures preserve a machine-generated rejection receipt and attempt an encrypted recovery snapshot without changing failure semantics. Founder-approved verifier read access resolved the organization-capture HTTP 403. Existing tunnel retrieval now precedes bucket-key creation, and CLI helpers share their safe exception/recipient identity. No host activation, backup acceptance or canary is claimed. Monthly software change `$0`; existing R2 usage pricing is unchanged. |
+| 2026-09-14 | Issues #14/#15 (PR #78): founder-approved issuance created four non-expiring R2 credentials, one bucket each, against digest `e4c28aed7868d8a760614a9f921338bdd1af5775a0c3fa692057fb2798a47a7a`; the existing tunnel token was recovered without rotation. Six complete runtime SOPS sets contain fourteen live values, independently MAC-verified under both approved recipients. Four own-bucket reads succeeded and twelve cross-bucket reads were denied. Access and tunnel recovery files are uploaded to NordPass; the remaining storage/root files, byte-identical retrieval and destruction of transient operator plaintext copies remain open, as does temporary-token revocation. No host activation, backup acceptance, source initialization or canary is claimed. Monthly subscription/software change `$0`; existing R2 usage pricing is unchanged. |

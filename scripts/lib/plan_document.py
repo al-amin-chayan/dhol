@@ -15,12 +15,12 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import importlib.util
 import ipaddress
 import json
 from pathlib import Path
 import re
 import sys
+import subprocess
 from typing import Any
 
 import yaml
@@ -302,11 +302,17 @@ def build_plan(arguments: argparse.Namespace) -> tuple[dict[str, Any], list[str]
             receipt_path = getattr(arguments, "cloudflare_receipt", None)
             if receipt_path is None:
                 raise ValueError("missing receipt")
-            spec = importlib.util.spec_from_file_location("cloudflare_receipt", root / "infra/tofu/cloudflare/receipt.py")
-            adapter = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(adapter)
-            tofu = adapter.normalize(root, json.loads(receipt_path.read_text()))
-        except (OSError, ValueError, TypeError, AttributeError, KeyError):
+            # Use the adapter's standalone interface: a fresh interpreter loads
+            # its sibling modules from this exact checkout, independent of the
+            # caller's sys.path or a test process's previously imported modules.
+            result = subprocess.run(
+                [sys.executable, str(root / "infra/tofu/cloudflare/receipt.py"),
+                 "--root", str(root), "--receipt", str(receipt_path)],
+                capture_output=True, text=True, check=True, timeout=30,
+            )
+            tofu = json.loads(result.stdout)
+        except (OSError, ValueError, TypeError, AttributeError, KeyError,
+                subprocess.SubprocessError):
             findings.append("infra/tofu: no valid fresh complete live no-change receipt; this plan authorizes nothing (WP-06)")
 
     plan = {
