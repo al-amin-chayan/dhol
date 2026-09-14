@@ -3,6 +3,12 @@ scope: publisher
 host_ids: [publish-1]
 public_endpoint_ids: [publisher-admin-api]
 
+# Install the reviewed WP-06B/WP-07 boundary before admitting the publisher.
+# Timers remain stopped until real encrypted backup/source restore receipts exist.
+cloudflared_enabled: true
+restic_enabled: true
+restic_timer_enabled: false
+
 # WP-13 desired state is present but cannot activate until these live gates
 # produce reviewed receipts on publish-1: #45/WP-05D, #14/WP-06B and #15/WP-07.
 publisher_enabled: false

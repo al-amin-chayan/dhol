@@ -5,6 +5,7 @@ import shutil
 import sys
 
 import yaml
+import pytest
 
 
 INVENTORY_DIR = Path(__file__).resolve().parents[1]
@@ -36,6 +37,26 @@ def test_production_inventory_is_valid_and_idempotent() -> None:
     second = validate_inventory(REPO_ROOT)
     assert first == []
     assert second == first
+
+
+@pytest.mark.parametrize("scope", ["all", "core"])
+@pytest.mark.parametrize("flag", ["cloudflared_enabled", "restic_enabled", "restic_timer_enabled"])
+def test_publisher_boundary_flags_cannot_expand_to_other_hosts(tmp_path: Path, scope: str, flag: str) -> None:
+    root = repo_copy(tmp_path)
+    path = root / f"infra/inventories/production/group_vars/{scope}.yml"
+    values = load_yaml(path)
+    values[flag] = True
+    write_yaml(path, values)
+    assert any("schema" in item for item in validate_inventory(root))
+
+
+def test_backup_timer_cannot_be_enabled_without_backup_installation(tmp_path: Path) -> None:
+    root = repo_copy(tmp_path)
+    path = root / "infra/inventories/production/group_vars/publisher.yml"
+    values = load_yaml(path)
+    values.update(restic_enabled=False, restic_timer_enabled=True)
+    write_yaml(path, values)
+    assert any("restic_enabled" in item for item in validate_inventory(root))
 
 
 def test_unknown_endpoint_host_fails(tmp_path: Path) -> None:

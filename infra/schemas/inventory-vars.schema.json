@@ -45,6 +45,9 @@
       "items": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"},
       "uniqueItems": true
     },
+    "cloudflared_enabled": {"type": "boolean"},
+    "restic_enabled": {"type": "boolean"},
+    "restic_timer_enabled": {"type": "boolean"},
     "publisher_enabled": {"type": "boolean"},
     "publisher_activation_blockers": {
       "type": "array",
@@ -63,6 +66,29 @@
     }
   },
   "allOf": [
+    {
+      "if": {"properties": {"scope": {"const": "publisher"}}},
+      "then": {},
+      "else": {
+        "not": {
+          "anyOf": [
+            {"required": ["cloudflared_enabled"]},
+            {"required": ["restic_enabled"]},
+            {"required": ["restic_timer_enabled"]}
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["restic_timer_enabled"],
+        "properties": {"restic_timer_enabled": {"const": true}}
+      },
+      "then": {
+        "required": ["restic_enabled"],
+        "properties": {"restic_enabled": {"const": true}}
+      }
+    },
     {
       "if": {"properties": {"scope": {"const": "all"}}},
       "then": {
