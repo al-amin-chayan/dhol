@@ -31,6 +31,35 @@ escrow = module("source_escrow_foundation", "scripts/lib/source_escrow.py")
 operator = module("backup_operator_foundation", "scripts/lib/backup_operator.py")
 
 
+def test_readonly_first_install_plan_needs_no_download_directory_or_timer_units(tmp_path):
+    """Exercise real Ansible check mode against an absent installation."""
+    import yaml
+
+    tasks = yaml.safe_load((ROOT / "infra/roles/restic/tasks/main.yml").read_text())
+    install = next(t for t in tasks if "block" in t)
+    inspect = next(t for t in tasks if t["name"] == "Inspect timer units before planning their first installation")
+    timers = next(t for t in tasks if t["name"] == "Start only the founder-approved verified backup timers")
+    # A named disposable directory guarantees absent units even on developers'
+    # machines. No task installs a package, starts a service, or contacts R2.
+    inspect["ansible.builtin.stat"]["path"] = str(tmp_path / "absent") + "/{{ item }}"
+    playbook = tmp_path / "readonly-install.yml"
+    playbook.write_text(yaml.safe_dump([{
+        "name": "Check absent backup foundation without mutation", "hosts": "all",
+        "gather_facts": False,
+        "vars": {"ansible_remote_tmp": str(tmp_path / "ansible-remote"),
+                 "restic_current_version": {"rc": 1, "stdout": ""},
+                 "restic_timer_enabled": False},
+        "tasks": [install, inspect, timers],
+    }]))
+    result = subprocess.run([
+        "ansible-playbook", "--check", "--diff", "--inventory", "localhost,",
+        "--connection", "local", str(playbook),
+    ], capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "failed=0" in result.stdout
+    assert not (tmp_path / "absent").exists()
+
+
 @pytest.mark.parametrize("worktree", [False, True])
 def test_backup_identity_accepts_home_ssh_from_primary_and_worktree(tmp_path, monkeypatch, worktree):
     home = tmp_path / "home"

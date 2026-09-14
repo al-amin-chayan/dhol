@@ -151,6 +151,20 @@ def test_production_publish_inventory_enables_only_its_declared_connector() -> N
         ROOT, "publish-1", "203.0.113.20", "converged", "/tmp/id", "/tmp/known-hosts",
     )
     assert inventory["all"]["children"]["baseline_targets"]["hosts"]["publish-1"]["baseline_allow_cloudflared_quic"] is True
+    settings = inventory["all"]["children"]["publisher"]["vars"]
+    assert settings["cloudflared_enabled"] is True
+    assert settings["restic_enabled"] is True
+    assert settings["restic_timer_enabled"] is False
+    assert settings["publisher_enabled"] is False
+    assert "scope" not in settings and "host_ids" not in settings
+
+
+def test_role_settings_for_another_host_never_enter_rendered_inventory(rendering_root: Path) -> None:
+    path = rendering_root / "infra/inventories/production/group_vars/publisher.yml"
+    path.write_text(yaml.safe_dump({"scope": "publisher", "host_ids": ["another-host"],
+                                   "cloudflared_enabled": True}))
+    with pytest.raises(ValueError, match="exact host and role"):
+        rendered(rendering_root, "converged")
 
 
 def test_missing_manifest_never_enables_cloudflared_exception(tmp_path: Path) -> None:
@@ -185,6 +199,9 @@ def rendering_root(tmp_path: Path) -> Path:
     (group_vars / "all.yml").write_bytes(
         (ROOT / "infra/inventories/production/group_vars/all.yml").read_bytes()
     )
+    (group_vars / f"{document['host_role']}.yml").write_text(yaml.safe_dump({
+        "scope": document["host_role"], "host_ids": [document["host_id"]],
+    }))
     return tmp_path
 
 
@@ -453,6 +470,9 @@ def vpn_root(tmp_path: Path, document: dict) -> Path:
     (group_vars / "all.yml").write_bytes(
         (ROOT / "infra/inventories/production/group_vars/all.yml").read_bytes()
     )
+    (group_vars / f"{document['host_role']}.yml").write_text(yaml.safe_dump({
+        "scope": document["host_role"], "host_ids": [document["host_id"]],
+    }))
     return tmp_path
 
 
@@ -584,3 +604,20 @@ def test_the_probe_always_follows_the_transport(tmp_path: Path) -> None:
         variables = host_vars(inventory)
         assert variables["ansible_host"] == expected
         assert variables["baseline_second_connection_host"] == expected
+
+
+@pytest.mark.parametrize("role", ["publisher-typo", "../publisher", None])
+def test_renderer_rejects_unsupported_roles(rendering_root: Path, role) -> None:
+    document = positive_document()
+    document["host_role"] = role
+    path = rendering_root / f"infra/inventories/production/baseline/{document['host_id']}.yml"
+    path.write_text(yaml.safe_dump(document))
+    with pytest.raises(ValueError, match="unsupported host role"):
+        rendered(rendering_root, "converged")
+
+
+def test_renderer_requires_role_settings_for_synthetic_hosts(rendering_root: Path) -> None:
+    role = positive_document()["host_role"]
+    (rendering_root / f"infra/inventories/production/group_vars/{role}.yml").unlink()
+    with pytest.raises(ValueError, match="host role variables are missing"):
+        rendered(rendering_root, "converged")

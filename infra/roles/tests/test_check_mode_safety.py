@@ -1,4 +1,4 @@
-"""Every live-state assertion in the baseline roles must be check-mode guarded.
+"""Every live-state assertion in the planned roles must be check-mode guarded.
 
 Three separate review rounds reported the same defect: a plan run asserting
 postconditions against state that check mode deliberately did not create, so no
@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import subprocess
 
 import pytest
 import yaml
@@ -22,7 +23,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[3]
 ROLE_TASK_FILES = sorted(
     path
-    for role in ("base", "docker", "firewall", "wireguard", "release_receipt", "publisher")
+    for role in ("base", "docker", "firewall", "wireguard", "release_receipt", "publisher", "restic", "cloudflared")
     for path in (ROOT / f"infra/roles/{role}/tasks").glob("*.yml")
 )
 
@@ -41,6 +42,12 @@ CONTRACT_ASSERTIONS = {
     # run: it must still refuse during planning.
     "Refuse to remove or replace an undeclared container runtime",
     "Require verified publisher dependency receipts",
+    "Require the reviewed publish-1 backup boundary and scoped values",
+    "Require the independent publisher tunnel and live Access audiences",
+    "Refuse a modified or linked existing dump image",
+    # Independently installed admission receipt, never created by this play.
+    # An unauthorized timer plan must fail even in check mode.
+    "Require exact-host recovery verification before starting timers",
 }
 
 
@@ -74,7 +81,8 @@ def assertion_tasks() -> list[tuple[Path, dict]]:
 def test_role_task_files_are_discovered() -> None:
     """A shrinking scan silently stops enforcing anything."""
 
-    assert len(ROLE_TASK_FILES) >= 8
+    assert len({path.parent.parent.name for path in ROLE_TASK_FILES}) >= 8
+    assert {"restic", "cloudflared"} <= {path.parent.parent.name for path in ROLE_TASK_FILES}
     assert assertion_tasks()
 
 
@@ -132,3 +140,80 @@ def test_a_guard_inside_a_condition_list_is_accepted() -> None:
 
 def test_a_list_without_a_negating_condition_is_not_a_guard() -> None:
     assert not guarded({"when": ["ansible_check_mode", "some_other_condition"]})
+
+
+@pytest.mark.parametrize("role", ["restic", "cloudflared"])
+def test_newly_planned_service_state_tasks_require_existing_units_or_apply(role: str) -> None:
+    """Reject missing-unit service operations, which assert coverage cannot see."""
+    for path in (ROOT / f"infra/roles/{role}/tasks").glob("*.yml"):
+        tasks = yaml.safe_load(path.read_text())
+        for task in tasks:
+            service = task.get("ansible.builtin.systemd_service", {})
+            if ("state" not in service and "enabled" not in service) or guarded(task):
+                continue
+            conditions = guard_conditions(task)
+            if role == "cloudflared":
+                assert "not ansible_check_mode or cloudflared_installed_unit.stat.exists" in conditions
+                inspect = next(t for t in tasks if t.get("register") == "cloudflared_installed_unit")
+                assert inspect["ansible.builtin.stat"]["path"] == "/etc/systemd/system/" + service["name"]
+            else:
+                assert "not ansible_check_mode or item.stat.exists" in conditions
+                assert task["loop"] == "{{ restic_installed_timer_units.results }}"
+                assert service["name"] == "{{ item.item }}"
+                inspect = next(t for t in tasks if t.get("register") == "restic_installed_timer_units")
+                assert inspect["ansible.builtin.stat"]["path"] == "/etc/systemd/system/{{ item }}"
+
+
+def run_readonly_tasks(tmp_path: Path, tasks: list, variables: dict) -> subprocess.CompletedProcess:
+    playbook = tmp_path / "readonly.yml"
+    playbook.write_text(yaml.safe_dump([{
+        "name": "Verify first installation admission without mutation", "hosts": "all",
+        "gather_facts": False,
+        "vars": {"ansible_remote_tmp": str(tmp_path / "remote"), **variables},
+        "tasks": tasks,
+    }]))
+    return subprocess.run([
+        "ansible-playbook", "--check", "--diff", "--inventory", "localhost,",
+        "--connection", "local", str(playbook),
+    ], capture_output=True, text=True, timeout=60)
+
+
+def test_connector_first_install_plan_handles_an_absent_unit(tmp_path: Path) -> None:
+    tasks = yaml.safe_load((ROOT / "infra/roles/cloudflared/tasks/main.yml").read_text())
+    template = next(t for t in tasks if t["name"] == "Install the bounded publisher connector service")
+    inspect = next(t for t in tasks if t.get("register") == "cloudflared_installed_unit")
+    service = next(t for t in tasks if t["name"] == "Keep the isolated publisher connector enabled")
+    absent_unit = tmp_path / "cloudflared.service"
+    template["ansible.builtin.template"].update(
+        src=str(ROOT / "infra/roles/cloudflared/templates/cloudflared.service.j2"),
+        dest=str(absent_unit), owner=None, group=None,
+    )
+    template.pop("notify")
+    inspect["ansible.builtin.stat"]["path"] = str(absent_unit)
+    result = run_readonly_tasks(tmp_path, [template, inspect, service], {})
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "failed=0" in result.stdout
+    assert not absent_unit.exists()
+
+
+@pytest.mark.parametrize("receipt", [None, "wrong-host", "unverified", "wrong-gate", "bad-head", "valid"])
+def test_timer_plan_requires_independent_exact_host_recovery_receipt(tmp_path: Path, receipt) -> None:
+    tasks = yaml.safe_load((ROOT / "infra/roles/restic/tasks/main.yml").read_text())
+    read = next(t for t in tasks if t.get("register") == "restic_gate_receipt")
+    require = next(t for t in tasks if t["name"] == "Require exact-host recovery verification before starting timers")
+    receipt_path = tmp_path / "wp07.yml"
+    if receipt is not None:
+        document = {"gate": "wp07-publish1", "host_id": "publish-1", "verified": True,
+                    "reviewed_head": "a" * 40}
+        if receipt == "wrong-host":
+            document["host_id"] = "core-1"
+        elif receipt == "unverified":
+            document["verified"] = False
+        elif receipt == "wrong-gate":
+            document["gate"] = "wp06b-publish1"
+        elif receipt == "bad-head":
+            document["reviewed_head"] = "invalid"
+        receipt_path.write_text(yaml.safe_dump(document))
+    read["ansible.builtin.slurp"]["src"] = str(receipt_path)
+    result = run_readonly_tasks(tmp_path, [read, require], {"restic_timer_enabled": True})
+    assert (result.returncode == 0) == (receipt == "valid"), result.stdout + result.stderr
