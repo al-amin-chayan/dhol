@@ -17,7 +17,7 @@ must remain no-change. This lane does not activate unrelated n8n/webhook paths.
    `review:requested`, exact head SHA and these runbooks. The founder starts
    Claude's baseline review. Promote approved code through a reviewed
    `develop` → `main` merge and annotate the merge commit with a production tag.
-3. Run `credential-plan-access`. Review its digest/account/name/30-day expiry,
+3. Run `credential-plan-access`. Review its digest/account/name/non-expiring lifetime,
    then confirm `credential-issue-access --approved-digest <digest> --release
    <tag> --review-pr <promotion-PR>`. Both use the private input options above.
    Issuance produces only `publisher-access.sops.yml` in ignored evidence,
@@ -91,11 +91,31 @@ the exposed dedicated service token, tunnel token or bucket credential using
 its catalog procedure; the existing shared operator R2 root is not a runtime
 credential and must not be revoked incidentally.
 
-The service token is valid for 30 days. Schedule a reviewed rotation before
-expiry, escrow the new secret immediately, update only the API policy/client,
-prove positive/negative probes, then revoke the old dedicated token. A rotation
-changes an existing selector and requires a separate explicit plan; do not
-weaken the create-only guard to bypass review.
+The founder selected a non-expiring runtime service token on 2026-09-14 to
+avoid recurring renewal and surprise outages in a one-person operation. The
+issuer requests `duration: forever`, supported by the current
+[Cloudflare API](https://developers.cloudflare.com/api/resources/zero_trust/subresources/access/subresources/service_tokens/methods/create/),
+and verifies the returned lifetime before accepting the token. There is no
+scheduled expiration or monthly renewal. The token is accepted only by the
+specific publisher API Access policy; it does not replace the independent
+project-scoped Postiz API credential. A leaked token remains usable until it
+is disabled, rotated or revoked, so keep its recovery record in the password
+manager and its runtime value in the dedicated SOPS set.
+
+For an exposure, go to Cloudflare Zero Trust > Access controls > Service
+credentials > Service Tokens and disable the named
+`dholbeat-n8n-publisher-api` token immediately. This stops API access until
+recovery. Cloudflare also supports rotating the client secret or deleting the
+token. Escrow the replacement, update the n8n credential, prove the positive
+and negative route probes, and invalidate the old secret. Do not assume a
+Cloudflare dashboard change updates n8n or committed recovery ciphertext.
+Replacing the token ID also changes the Access policy selector and requires
+a separately reviewed explicit plan; do not weaken the create-only guard.
+See [Cloudflare service-token controls](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/).
+
+The temporary account-management token remains short-lived and must be revoked
+after rollout; the non-expiring choice applies only to the runtime API service
+token. No account-management credential is installed on a production host.
 
 `infra-plan` refreshes the real provider plan before Ansible and again afterward,
 requiring identical normalized source, encrypted-state and Access authority.

@@ -15,7 +15,7 @@ from routing import SERVICE_NAME
 def blueprint(stage):
     if stage == "access":
         requests = [{"method": "POST", "path": f"/accounts/{op.ACCOUNT}/access/service_tokens",
-                     "body": {"name": SERVICE_NAME, "duration": "720h"}}]
+                     "body": {"name": SERVICE_NAME, "duration": "forever"}}]
     elif stage == "storage":
         requests = [{"method": "POST", "path": f"/accounts/{op.ACCOUNT}/tokens", "name": name,
             "permission_group": "Workers R2 Storage Bucket Item Write",
@@ -99,6 +99,13 @@ def issue(inputs, stage):
         request = document["requests"][0]
         token = api.request(request["method"], request["path"], request["body"])
         try:
+            duration = token.get("duration", "<missing>")
+            enabled = token.get("enabled", "<missing>")
+            if duration != request["body"]["duration"] or enabled is not True:
+                raise op.OperationError(
+                    "issued service token does not match the approved non-expiring lifetime: "
+                    f"observed duration={duration!r} enabled={enabled!r}; "
+                    f"expected duration={request['body']['duration']!r} enabled=True")
             value["values"].update({"platform-n8n-publisher-access-client-id": token["client_id"],
                                     "platform-n8n-publisher-access-client-secret": token["client_secret"]})
             store("publisher-access", value)
@@ -143,4 +150,5 @@ def issue(inputs, stage):
     op.evidence("credential-issue-" + stage, {"approved_digest": approval,
         "reviewed_head": os.environ["DHOLBEAT_REVIEWED_HEAD"], "credential_ids": identifiers,
         "ciphertext_mac_recovery": True, "password_manager_escrow": "founder-action-required",
-        "opentofu_state_contains_credentials": False})
+        "opentofu_state_contains_credentials": False,
+        **({"service_token_duration": token["duration"]} if stage == "access" else {})})
