@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: promotion-ancestry
+  group: promotion-ancestry-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

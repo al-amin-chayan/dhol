@@ -1,0 +1,13 @@
+[Unit]
+Description=Check Dholbeat backup freshness and bounded size
+OnFailure=dholbeat-backup-alert.service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/sbin/dholbeat-backup status
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+MemoryMax=32M

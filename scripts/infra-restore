@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Only named disposable recovery is exposed by this operator entry point.
+set -euo pipefail
+script_dir="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd -P)"
+exec python3 "$script_dir/lib/backup_operator.py" restore-disposable "$@"

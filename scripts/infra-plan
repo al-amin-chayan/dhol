@@ -280,14 +280,6 @@ done 3<<EOF
 $COMPOSE_STACKS
 EOF
 
-# There is no OpenTofu plan adapter yet. Hashing an operator-supplied file
-# would let a zero-byte or unrelated file satisfy the external-state gate, so
-# committed declarations fail closed until WP-06 implements a real adapter that
-# renders and binds a deterministic redacted change representation.
-if [ -d "$REPO_ROOT/infra/tofu" ]; then
-  dholbeat_die "committed OpenTofu declarations exist but no plan adapter is implemented; \
-the external-state delta cannot be bound, so no approvable plan is produced (WP-06)"
-fi
 
 # A reviewed plan must say whether this release replaces the server identity.
 # Only the public half is derived, and only that reaches the plan document.
@@ -326,6 +318,11 @@ ANSIBLE_ARGS+=(
   --extra-vars "dholbeat_expected_role=$HOST_ROLE"
   "$PLANNED_PLAYBOOK"
 )
+
+# Refresh before the role consumes Access audiences, not only after Ansible.
+if [ -d "$REPO_ROOT/infra/tofu" ]; then
+  dholbeat_refresh_cloudflare "$TEMP_ROOT/cloudflare-before.json"
+fi
 
 printf '\n==> %s against %s\n' "$PLAN_KIND" "$LIMIT"
 set +e
@@ -366,6 +363,17 @@ chmod 0600 "$ARTIFACT_ROOT/ansible-run.log"
   | awk '{print $1, $2, $4}' >"$ARTIFACT_ROOT/known-hosts-fingerprint.txt"
 chmod 0600 "$ARTIFACT_ROOT/known-hosts-fingerprint.txt"
 
+CLOUDFLARE_RECEIPT_ARGS=()
+# Always execute the real pinned provider against remote state. An operator-
+# supplied receipt is never a substitute for this live read-only plan.
+if [ -d "$REPO_ROOT/infra/tofu" ]; then
+  dholbeat_refresh_cloudflare "$ARTIFACT_ROOT/cloudflare-authority.json"
+  dholbeat_compare_cloudflare "$TEMP_ROOT/cloudflare-before.json" "$ARTIFACT_ROOT/cloudflare-authority.json"
+  install -m 0600 "$REPO_ROOT/.artifacts/cloudflare/plan.json" "$ARTIFACT_ROOT/cloudflare-receipt.json"
+  CLOUDFLARE_RECEIPT_ARGS=(--cloudflare-receipt "/workspace/.artifacts/$ARTIFACT_NAME/cloudflare-receipt.json")
+fi
+
+
 printf '\n==> redacted plan document\n'
 "$SCRIPT_DIR/controller" exec python3 scripts/lib/plan_document.py render \
   --root /workspace \
@@ -387,6 +395,7 @@ printf '\n==> redacted plan document\n'
   --transport "$TRANSPORT" \
   --wireguard-restore-public-key "$WIREGUARD_RESTORE_PUBLIC_KEY" \
   ${COMPOSE_RENDER_ARGS[@]+"${COMPOSE_RENDER_ARGS[@]}"} \
+  ${CLOUDFLARE_RECEIPT_ARGS[@]+"${CLOUDFLARE_RECEIPT_ARGS[@]}"} \
   >"$ARTIFACT_ROOT/plan.yml" \
   || dholbeat_die "the plan authorizes nothing; see .artifacts/$ARTIFACT_NAME/ansible-run.log"
 chmod 0600 "$ARTIFACT_ROOT/plan.yml"

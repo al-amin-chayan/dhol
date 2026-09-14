@@ -86,6 +86,7 @@ def test_both_rulesets_require_cross_review_and_controller_checks() -> None:
         assert pull_request["required_approving_review_count"] == 1
         assert pull_request["dismiss_stale_reviews_on_push"] is True
         assert pull_request["require_last_push_approval"] is True
+        assert pull_request["require_extra_approval_for_unattributed_changes"] is True
         assert pull_request["required_review_thread_resolution"] is True
         checks = rule(ruleset, "required_status_checks")["parameters"]["required_status_checks"]
         assert checks == [
@@ -310,3 +311,139 @@ def test_superseded_label_assignments_are_migrated_before_removal(
         ("DELETE", "labels/review%3Aapproved"),
     ]
     assert "removed superseded label: review:approved" in capsys.readouterr().out
+
+
+def live_configuration():
+    desired = MODULE.desired_configuration()
+    data = {
+        "git/ref/heads/develop": {"object": {"sha": "a" * 40}},
+        "": {**desired["repository_settings"], "unmanaged": True},
+        "actions/permissions": {**desired["actions_permissions"], "unmanaged": True},
+        "labels?per_page=100&page=1": copy.deepcopy(desired["labels"]["labels"]),
+        "rulesets?per_page=100&page=1": [
+            {"name": item["name"], "id": index}
+            for index, item in enumerate(desired["rulesets"])
+        ],
+    }
+    data["labels?per_page=100&page=1"].append({"name": "unmanaged"})
+    data["rulesets?per_page=100&page=1"].append({"name": "unmanaged", "id": 99})
+    for index, item in enumerate(desired["rulesets"]):
+        live = copy.deepcopy(item)
+        live["id"] = index
+        rule(live, "pull_request")["parameters"]["required_reviewers"] = []
+        data[f"rulesets/{index}"] = live
+    return desired, data
+
+
+def install_read_only_api(monkeypatch, data):
+    tokens = []
+    calls = []
+
+    def mint():
+        tokens.append("fresh-token")
+        return tokens[-1]
+
+    def request(token, repository, method, path, payload=None):
+        assert token == "fresh-token"
+        assert repository == "owner/repository"
+        assert method == "GET"
+        assert payload is None
+        calls.append(path)
+        value = data[path]
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    monkeypatch.setattr(MODULE, "mint_token", mint)
+    monkeypatch.setattr(MODULE, "github_request", request)
+    return tokens, calls
+
+
+def test_read_only_check_matches_live_policy_with_one_fresh_token(monkeypatch, capsys):
+    desired, data = live_configuration()
+    tokens, calls = install_read_only_api(monkeypatch, data)
+    assert MODULE.check("owner/repository", desired) is True
+    assert tokens == ["fresh-token"]
+    assert "rulesets/99" not in calls
+    assert "configuration check: MATCH" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("change", [
+    "settings", "actions", "label", "missing-label", "superseded-label",
+    "missing-ruleset", "duplicate-ruleset", "extra-approval", "main-strict",
+    "develop-strict", "nonempty-reviewers", "unknown-rule-parameter", "missing-develop",
+])
+def test_read_only_check_detects_drift_without_writing(monkeypatch, capsys, change):
+    desired, data = live_configuration()
+    if change == "settings":
+        data[""]["allow_auto_merge"] = False
+    elif change == "actions":
+        data["actions/permissions"]["sha_pinning_required"] = False
+    elif change == "label":
+        data["labels?per_page=100&page=1"][0]["color"] = "000000"
+    elif change == "missing-label":
+        data["labels?per_page=100&page=1"].pop(0)
+    elif change == "superseded-label":
+        data["labels?per_page=100&page=1"].append({"name": "review:approved"})
+    elif change == "missing-ruleset":
+        data["rulesets?per_page=100&page=1"].pop(0)
+    elif change == "duplicate-ruleset":
+        data["rulesets?per_page=100&page=1"].append({"name": desired["rulesets"][0]["name"], "id": 10})
+    elif change == "extra-approval":
+        rule(data["rulesets/0"], "pull_request")["parameters"]["require_extra_approval_for_unattributed_changes"] = False
+    elif change in {"main-strict", "develop-strict"}:
+        index = 1 if change == "main-strict" else 0
+        params = rule(data[f"rulesets/{index}"], "required_status_checks")["parameters"]
+        params["strict_required_status_checks_policy"] = not params["strict_required_status_checks_policy"]
+    elif change == "nonempty-reviewers":
+        rule(data["rulesets/0"], "pull_request")["parameters"]["required_reviewers"] = [{"reviewer_id": 1}]
+    elif change == "unknown-rule-parameter":
+        rule(data["rulesets/0"], "pull_request")["parameters"]["future_policy"] = True
+    elif change == "missing-develop":
+        data["git/ref/heads/develop"] = MODULE.GitHubApiError(404, "missing")
+    install_read_only_api(monkeypatch, data)
+    assert MODULE.check("owner/repository", desired) is False
+    output = capsys.readouterr().out
+    assert "configuration check: DRIFT" in output
+    # A consolidated report continues to inspect other policy after finding drift.
+    assert desired["rulesets"][1]["name"] in output
+
+
+@pytest.mark.parametrize("status", [401, 403, 500])
+def test_read_only_check_propagates_api_failure(monkeypatch, status):
+    desired, data = live_configuration()
+    data["git/ref/heads/develop"] = MODULE.GitHubApiError(status, "failure")
+    install_read_only_api(monkeypatch, data)
+    with pytest.raises(MODULE.GitHubApiError):
+        MODULE.check("owner/repository", desired)
+
+
+def test_read_only_check_reads_all_label_and_ruleset_pages(monkeypatch):
+    desired, data = live_configuration()
+    for path in ("labels", "rulesets"):
+        data[f"{path}?per_page=100&page=2"] = data[f"{path}?per_page=100&page=1"]
+        data[f"{path}?per_page=100&page=1"] = [
+            {"name": f"unmanaged-{index}", "id": index + 100} for index in range(100)
+        ]
+    _, calls = install_read_only_api(monkeypatch, data)
+    assert MODULE.check("owner/repository", desired) is True
+    assert "labels?per_page=100&page=2" in calls
+    assert "rulesets?per_page=100&page=2" in calls
+
+
+@pytest.mark.parametrize("matches,code", [(True, 0), (False, 1)])
+def test_check_cli_exit_status(monkeypatch, matches, code):
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--check", "--repo", "owner/repository"])
+    monkeypatch.setattr(MODULE, "check", lambda repository, configuration: matches)
+    monkeypatch.setattr(MODULE, "apply", lambda *args: pytest.fail("check must not apply"))
+    with pytest.raises(SystemExit) as result:
+        MODULE.main()
+    assert result.value.code == code
+
+
+def test_check_and_apply_are_mutually_exclusive(monkeypatch):
+    monkeypatch.setattr(sys, "argv", [str(SCRIPT), "--check", "--apply"])
+    monkeypatch.setattr(MODULE, "mint_token", lambda: pytest.fail("must reject before authentication"))
+    with pytest.raises(SystemExit) as result:
+        MODULE.main()
+    assert result.value.code == 2

@@ -253,6 +253,14 @@ IFS= read -r CONFIRMATION </dev/tty
 [ "$CONFIRMATION" = "apply $LIMIT $RELEASE_TAG" ] \
   || dholbeat_die "founder confirmation did not match; nothing was changed"
 
+# Confirmation may take arbitrarily long. Re-prove provider authority now,
+# and reject drift against the byte-identical pre-apply plan before mutation.
+if [ -d "$REPO_ROOT/infra/tofu" ]; then
+  dholbeat_refresh_cloudflare "$ARTIFACT_ROOT/cloudflare-authority.json"
+  dholbeat_compare_cloudflare "$(dirname -- "$PREAPPLY_PLAN")/cloudflare-authority.json" \
+    "$ARTIFACT_ROOT/cloudflare-authority.json"
+fi
+
 cat >"$TEMP_ROOT/inputs/run-ansible.sh" <<'RUNNER'
 #!/bin/sh
 # Run Ansible from the infra tree so the committed roles_path resolves.

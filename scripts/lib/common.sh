@@ -159,3 +159,26 @@ dholbeat_human_bytes() {
     printf "%.1f %s", value, units[unit]
   }'
 }
+
+# Fresh capture is mandatory at every operator boundary. The stable authority
+# excludes plan encryption randomness and observation time; source/state and
+# real Access audiences remain part of byte-identical host-plan approval.
+dholbeat_refresh_cloudflare() {
+  local output="$1"
+  "$SCRIPT_DIR/cloudflare" plan \
+    --credentials "${DHOLBEAT_CLOUDFLARE_CREDENTIAL_FILE:-$HOME/.config/dholbeat/cloudflare/operator.env}" \
+    --founder-key "${SOPS_AGE_KEY_FILE:-$HOME/.config/dholbeat/age/founder.age}" \
+    --break-glass-key "${DHOLBEAT_BREAK_GLASS_KEY_FILE:-$HOME/.config/dholbeat/age/break-glass.age}" \
+    --confirm cloudflare-control-plane >&2 \
+    || dholbeat_die "WP-06 live Cloudflare plan failed; no host operation is authorized"
+  "$SCRIPT_DIR/controller" exec python3 infra/tofu/cloudflare/receipt.py \
+    --root /workspace --receipt /workspace/.artifacts/cloudflare/plan.json >"$output" \
+    || dholbeat_die "fresh Cloudflare authority failed validation"
+  chmod 0600 "$output"
+}
+
+dholbeat_compare_cloudflare() {
+  if [ ! -s "$1" ] || [ ! -s "$2" ] || ! cmp -s "$1" "$2"; then
+    dholbeat_die "Cloudflare source, encrypted state, or Access authority changed; obtain a new approved host plan"
+  fi
+}

@@ -1,0 +1,7 @@
+{{ {
+  'tunnel': cloudflared_manifest['tunnel'],
+  'metrics': '127.0.0.1:20241',
+  'no-autoupdate': true,
+  'originRequest': {'access': {'required': true, 'teamName': cloudflared_access_team_name, 'audTag': cloudflared_access_audiences}},
+  'ingress': cloudflared_manifest['ingress']
+} | to_nice_yaml }}

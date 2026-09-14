@@ -22,7 +22,7 @@ from typing import Any, BinaryIO, Iterator, Sequence
 DEFAULT_PROJECT_DIR = Path("/opt/dholbeat/publisher")
 DEFAULT_COMPOSE_FILE = DEFAULT_PROJECT_DIR / "compose.yml"
 DEFAULT_RESTORE_FILE = DEFAULT_PROJECT_DIR / "compose.restore.yml"
-DEFAULT_STAGING_ROOT = Path("/var/lib/dholbeat/publisher/backup-staging")
+DEFAULT_STAGING_ROOT = Path("/var/lib/dholbeat/restic/application")
 DEFAULT_DOCKER_DATA_ROOT = Path("/var/lib/docker")
 DEFAULT_KILL_SWITCH = Path("/var/lib/dholbeat/publisher/kill-switch.json")
 DEFAULT_LOCK = Path("/run/lock/dholbeat-publisher.lock")

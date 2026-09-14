@@ -32,6 +32,7 @@ if [ "${1:-}" != "--inside-controller" ]; then
   # host before entering the pinned runtime, keeping CI's single entry point.
   printf '\n==> real Git promotion and synchronization regression\n'
   python3 "$SCRIPT_DIR/tests/promotion_graph.py"
+  python3 "$SCRIPT_DIR/tests/repository_bundle_graph.py"
   exec "$SCRIPT_DIR/controller" exec scripts/check --inside-controller
 fi
 
@@ -61,6 +62,10 @@ run_step "YAML lint" yamllint --config-file infra/controller/yamllint.yml "${yam
 run_step "shell lint" shellcheck \
   scripts/check \
   scripts/controller \
+  scripts/cloudflare \
+  scripts/infra-backup \
+  scripts/infra-restore \
+  scripts/repository-bundle \
   scripts/eof-marker.sh \
   scripts/github-app-gh \
   scripts/github-app-git \

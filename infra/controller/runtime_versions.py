@@ -17,6 +17,7 @@ import yaml
 LOCK_PATH = Path("/opt/dholbeat/toolchain.lock.yml")
 COLLECTIONS_ROOT = Path("/usr/share/ansible/collections/ansible_collections")
 TOOL_COMMANDS = {
+    "restic": ["restic", "version"],
     "sops": ["sops", "--version"],
     "age": ["age", "--version"],
     "tofu": ["tofu", "version"],

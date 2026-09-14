@@ -102,7 +102,7 @@ services:
     secret_ids: []
     writable_paths:
       - /var/lib/docker/volumes/dholbeat-publisher_temporal-elasticsearch-data/_data
-      - /var/lib/dholbeat/publisher/backup-staging
+      - /var/lib/dholbeat/restic/application
     backup_adapter_id: publisher-postiz-state
     health_probe: {type: http, target: /_cluster/health}
     resources:

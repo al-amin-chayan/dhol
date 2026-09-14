@@ -1,0 +1,9 @@
+{
+  "cloudflare_dns_record.team": {"resource_id": "2e7b91f7550efbf09b761c79aec315f2", "import_id": "2c295efab57307e714b212bcab2d7c42/2e7b91f7550efbf09b761c79aec315f2"},
+  "cloudflare_dns_record.publish": {"resource_id": "71cb378fe48478308fdf1ef4bbb0c5d6", "import_id": "2c295efab57307e714b212bcab2d7c42/71cb378fe48478308fdf1ef4bbb0c5d6"},
+  "cloudflare_zero_trust_tunnel_cloudflared.core": {"resource_id": "dba0c2c4-cca2-4876-8482-aa55ec36b18f", "import_id": "7512591000a1e57593bc784dad59bfc0/dba0c2c4-cca2-4876-8482-aa55ec36b18f"},
+  "cloudflare_zero_trust_tunnel_cloudflared.publisher": {"resource_id": "55d6ce3a-7abb-452b-b819-f2feb2fa2a58", "import_id": "7512591000a1e57593bc784dad59bfc0/55d6ce3a-7abb-452b-b819-f2feb2fa2a58"},
+  "cloudflare_zero_trust_tunnel_cloudflared_config.core": {"resource_id": "dba0c2c4-cca2-4876-8482-aa55ec36b18f", "import_id": "7512591000a1e57593bc784dad59bfc0/dba0c2c4-cca2-4876-8482-aa55ec36b18f"},
+  "cloudflare_zero_trust_access_application.team": {"resource_id": "8ea0cfc9-791e-4db1-9d60-e57d077511d9", "import_id": "accounts/7512591000a1e57593bc784dad59bfc0/8ea0cfc9-791e-4db1-9d60-e57d077511d9"},
+  "cloudflare_zero_trust_access_policy.founder": {"resource_id": "ac83950b-6eb2-4b62-bfb1-4599683c3fd5", "import_id": "7512591000a1e57593bc784dad59bfc0/ac83950b-6eb2-4b62-bfb1-4599683c3fd5"}
+}

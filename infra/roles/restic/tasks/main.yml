@@ -1,0 +1,141 @@
+---
+- name: Require the reviewed publish-1 backup boundary and scoped values
+  ansible.builtin.assert:
+    that:
+      - dholbeat_host_id == 'publish-1'
+      - dholbeat_host_role == 'publisher'
+      - restic_secret_values['platform-publisher-restic-password'] is match('^[A-Za-z0-9_-]{48,}$')
+      - restic_secret_values['platform-publisher-backup-access-key'] is match('^[A-Za-z0-9_-]+$')
+      - restic_secret_values['platform-publisher-backup-secret-access-key'] is match('^[A-Za-z0-9_-]+$')
+      - restic_secret_values['platform-publisher-backup-access-key'] != restic_media_values['platform-publisher-media-access-key']
+      - restic_secret_values['platform-publisher-backup-secret-access-key'] != restic_media_values['platform-publisher-media-secret-access-key']
+    quiet: true
+    fail_msg: Refusing backup installation because host or private credential boundary is invalid.
+  no_log: true
+
+- name: Create bounded root-only backup directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  loop:
+    - /var/lib/dholbeat/restic
+    - "{{ restic_staging }}"
+    - "{{ restic_restore_root }}"
+    - /etc/dholbeat/receipts
+
+- name: Install the bounded publisher dump filesystem before application admission
+  ansible.builtin.import_tasks: staging.yml
+
+- name: Read the currently installed restic version
+  ansible.builtin.command: /usr/local/bin/restic version
+  register: restic_current_version
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Install the checksum-locked restic binary when needed
+  when: restic_current_version.rc != 0 or 'restic 0.19.1 ' not in restic_current_version.stdout
+  block:
+    - name: Download the pinned compressed restic artifact
+      ansible.builtin.get_url:
+        url: "{{ (lookup('file', playbook_dir ~ '/../../toolchain.lock.yml') | from_yaml)['tools']['restic']['artifacts']['amd64']['url'] }}"
+        checksum: "sha256:{{ (lookup('file', playbook_dir ~ '/../../toolchain.lock.yml') | from_yaml)['tools']['restic']['artifacts']['amd64']['sha256'] }}"
+        dest: /var/lib/dholbeat/restic/restic.bz2
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Decompress the verified binary into the managed installation
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -c
+          - >-
+            import bz2, os, pathlib;
+            p=pathlib.Path('/usr/local/bin/restic.new');
+            p.write_bytes(bz2.decompress(pathlib.Path('/var/lib/dholbeat/restic/restic.bz2').read_bytes()));
+            os.chmod(p, 0o755);
+            p.replace('/usr/local/bin/restic')
+      changed_when: true
+      when: not ansible_check_mode
+  always:
+    - name: Remove the ephemeral compressed installation artifact
+      ansible.builtin.file:
+        path: /var/lib/dholbeat/restic/restic.bz2
+        state: absent
+
+- name: Install the application-aware backup runner
+  ansible.builtin.copy:
+    src: backup.py
+    dest: /usr/local/sbin/dholbeat-backup
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Render the private backup credential environment
+  ansible.builtin.template:
+    src: restic.env.j2
+    dest: /etc/dholbeat/restic.env
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+
+- name: Render the public backup configuration
+  ansible.builtin.template:
+    src: backup.json.j2
+    dest: /etc/dholbeat/backup.json
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Install bounded backup and freshness units
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "/etc/systemd/system/{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - {src: backup.service.j2, dest: dholbeat-backup.service}
+    - {src: backup.timer.j2, dest: dholbeat-backup.timer}
+    - {src: backup-health.service.j2, dest: dholbeat-backup-health.service}
+    - {src: backup-health.timer.j2, dest: dholbeat-backup-health.timer}
+    - {src: backup-alert.service.j2, dest: dholbeat-backup-alert.service}
+  notify: Reload backup systemd units
+
+- name: Flush backup unit installation before operator initialization
+  ansible.builtin.meta: flush_handlers
+
+# No timer starts until a real first snapshot and source/disposable recovery
+# have passed the independently installed wp07 gate receipt.
+- name: Read the verified backup-foundation receipt
+  ansible.builtin.slurp:
+    src: /etc/dholbeat/receipts/wp07-publish1.yml
+  register: restic_gate_receipt
+  when: restic_timer_enabled | bool
+  no_log: true
+
+- name: Require exact-host recovery verification before starting timers
+  ansible.builtin.assert:
+    that:
+      - (restic_gate_receipt.content | b64decode | from_yaml).gate == 'wp07-publish1'
+      - (restic_gate_receipt.content | b64decode | from_yaml).host_id == 'publish-1'
+      - (restic_gate_receipt.content | b64decode | from_yaml).verified is sameas true
+      - (restic_gate_receipt.content | b64decode | from_yaml).reviewed_head is match('^[a-f0-9]{40}$')
+    quiet: true
+  when: restic_timer_enabled | bool
+  no_log: true
+
+- name: Start only the founder-approved verified backup timers
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: "{{ restic_timer_enabled | bool }}"
+    state: "{{ 'started' if restic_timer_enabled | bool else 'stopped' }}"
+  loop:
+    - dholbeat-backup.timer
+    - dholbeat-backup-health.timer
