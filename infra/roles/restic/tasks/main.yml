@@ -122,6 +122,8 @@
 
 # No timer starts until a real first snapshot and source/disposable recovery
 # have passed the independently installed wp07 gate receipt.
+# This is an admission precondition, not a postcondition of this play: reject
+# missing/invalid authorization during planning as well as application.
 - name: Read the verified backup-foundation receipt
   ansible.builtin.slurp:
     src: /etc/dholbeat/receipts/wp07-publish1.yml

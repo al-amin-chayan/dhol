@@ -199,6 +199,9 @@ def rendering_root(tmp_path: Path) -> Path:
     (group_vars / "all.yml").write_bytes(
         (ROOT / "infra/inventories/production/group_vars/all.yml").read_bytes()
     )
+    (group_vars / f"{document['host_role']}.yml").write_text(yaml.safe_dump({
+        "scope": document["host_role"], "host_ids": [document["host_id"]],
+    }))
     return tmp_path
 
 
@@ -467,6 +470,9 @@ def vpn_root(tmp_path: Path, document: dict) -> Path:
     (group_vars / "all.yml").write_bytes(
         (ROOT / "infra/inventories/production/group_vars/all.yml").read_bytes()
     )
+    (group_vars / f"{document['host_role']}.yml").write_text(yaml.safe_dump({
+        "scope": document["host_role"], "host_ids": [document["host_id"]],
+    }))
     return tmp_path
 
 
@@ -598,3 +604,20 @@ def test_the_probe_always_follows_the_transport(tmp_path: Path) -> None:
         variables = host_vars(inventory)
         assert variables["ansible_host"] == expected
         assert variables["baseline_second_connection_host"] == expected
+
+
+@pytest.mark.parametrize("role", ["publisher-typo", "../publisher", None])
+def test_renderer_rejects_unsupported_roles(rendering_root: Path, role) -> None:
+    document = positive_document()
+    document["host_role"] = role
+    path = rendering_root / f"infra/inventories/production/baseline/{document['host_id']}.yml"
+    path.write_text(yaml.safe_dump(document))
+    with pytest.raises(ValueError, match="unsupported host role"):
+        rendered(rendering_root, "converged")
+
+
+def test_renderer_requires_role_settings_for_synthetic_hosts(rendering_root: Path) -> None:
+    role = positive_document()["host_role"]
+    (rendering_root / f"infra/inventories/production/group_vars/{role}.yml").unlink()
+    with pytest.raises(ValueError, match="host role variables are missing"):
+        rendered(rendering_root, "converged")

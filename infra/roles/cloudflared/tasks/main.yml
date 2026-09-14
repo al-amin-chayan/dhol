@@ -67,11 +67,17 @@
 - name: Restart only the publisher connector after the reviewed local changes
   ansible.builtin.meta: flush_handlers
 
+- name: Inspect the connector unit before planning its first installation
+  ansible.builtin.stat:
+    path: /etc/systemd/system/cloudflared.service
+  register: cloudflared_installed_unit
+
 - name: Keep the isolated publisher connector enabled
   ansible.builtin.systemd_service:
     name: cloudflared.service
     enabled: true
     state: started
+  when: not ansible_check_mode or cloudflared_installed_unit.stat.exists
 
 - name: Prove the connector has live outbound-only connections
   ansible.builtin.uri:

@@ -95,3 +95,12 @@ def test_wrong_canonical_role_fails(tmp_path: Path) -> None:
     inventory["hosts"][0]["id"] = "core-replacement"
     write_yaml(path, inventory)
     assert "inventory: canonical role core must be owned by core-1" in validate_inventory(root)
+
+
+def test_single_host_role_schema_rejects_multiple_host_ids(tmp_path: Path) -> None:
+    root = repo_copy(tmp_path)
+    path = root / "infra/inventories/production/group_vars/publisher.yml"
+    values = load_yaml(path)
+    values["host_ids"].append("publish-2")
+    write_yaml(path, values)
+    assert any("schema" in item for item in validate_inventory(root))

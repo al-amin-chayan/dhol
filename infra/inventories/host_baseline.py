@@ -722,6 +722,8 @@ def render_inventory(
     document = load_yaml(baseline_path(root, host_id))
     if not isinstance(document, dict):
         raise ValueError(f"{host_id}: baseline contract is not a mapping")
+    if document.get("host_role") not in SUPPORTED_ROLES:
+        raise ValueError(f"{host_id}: unsupported host role")
     try:
         ipaddress.ip_address(address)
     except ValueError as error:
@@ -743,8 +745,8 @@ def render_inventory(
             raise ValueError("role variables must belong only to this exact host and role")
         role_settings = {k: v for k, v in role_document.items()
                          if k not in {"schema_version", "scope", "host_ids", "public_endpoint_ids"}}
-    elif host_id in {"core-1", "publish-1"}:
-        raise ValueError("canonical host role variables are missing")
+    else:
+        raise ValueError("host role variables are missing")
     admin_identity = admin_identity_file or identity_file
     bootstrap_stage = stage == "bootstrap"
     connection_user = document["bootstrap"]["identity"] if bootstrap_stage else admin["user"]

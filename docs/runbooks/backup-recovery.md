@@ -157,3 +157,17 @@ There is no new paid subscription. These bounds cap local staging and retained
 generations; they do not guarantee a fixed provider bill as application data
 grows. Check measured R2 storage/operations against README's $10–25/month
 platform ceiling before activating additional hosts.
+
+### Reading first-install plan changes
+
+The read-only restic plan reports a changed installation annotation when the
+locked binary is absent or differs. That check-only task is included in the
+approved plan digest; application instead downloads and installs the locked
+artifact. Plan and apply changed-task counts therefore need not match task for
+task. Compare the reviewed artifact, source hashes and intended final state,
+rather than treating the differing task names as drift.
+
+The WP-07 timer-admission receipt is independently installed before activation.
+Its exact-host recovery validation runs during planning and application: a
+missing or invalid receipt blocks an activation plan. This is an authorization
+precondition, not a postcondition that check mode would need to create.
