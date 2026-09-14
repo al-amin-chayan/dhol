@@ -14,6 +14,7 @@ import re
 import secrets
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.error
@@ -31,7 +32,7 @@ from backend import (
     session,
     snapshot,
 )
-from control_plane import no_change_plan
+from control_plane import ContractError, no_change_plan
 from edge import documents, render, validate
 from receipt import input_digest
 
@@ -371,7 +372,7 @@ def plan(inputs, adopt=False):
         )
         try:
             if desired:
-                guard(document, expected, desired)
+                guard(document, expected, desired, allow_observations=True)
             else:
                 no_change_plan(document, expected)
         except ValueError as error:
@@ -1252,6 +1253,9 @@ def main():
 
 
 if __name__ == "__main__":
+    # Helpers import operations. Share this entry-point instance so their safe
+    # exception classes and recipient fingerprints match the CLI handler.
+    sys.modules["operations"] = sys.modules[__name__]
     try:
         main()
     except (
@@ -1267,7 +1271,7 @@ if __name__ == "__main__":
         # Never include provider response bodies, subprocess output or values.
         print(
             str(error)
-            if isinstance(error, (OperationError, BackendError))
+            if isinstance(error, (OperationError, BackendError, ContractError))
             else "control-plane operation failed safely"
         )
         raise SystemExit(1) from None

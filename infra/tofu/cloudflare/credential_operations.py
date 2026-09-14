@@ -123,6 +123,12 @@ def issue(inputs, stage):
         existing = api.request("GET", f"/accounts/{op.ACCOUNT}/tokens")
         if any(t.get("name") in {r["name"] for r in document["requests"]} for t in existing):
             raise op.OperationError("a scoped bucket credential already exists; recover rather than overwrite it")
+        # Secret retrieval needs Tunnel Write, even though it is a GET. Prove
+        # access and encrypt the existing tunnel before creating any bucket key.
+        tunnel = load_set('publisher-tunnel')
+        tunnel["values"]["platform-publisher-tunnel-token"] = api.request("GET",
+            f"/accounts/{op.ACCOUNT}/cfd_tunnel/55d6ce3a-7abb-452b-b819-f2feb2fa2a58/token")
+        store("publisher-tunnel", tunnel)
         identifiers = {}
         owners = [("core-backups", "platform-core-backup"), ("publisher-backups", "platform-publisher-backup"),
                   ("publisher-media", "platform-publisher-media"), ("source-escrow", "platform-source-escrow")]
@@ -143,10 +149,6 @@ def issue(inputs, stage):
                 api.request("DELETE", f"/accounts/{op.ACCOUNT}/tokens/{token['id']}")
                 raise
             identifiers[request["name"]] = token["id"]
-        tunnel = load_set('publisher-tunnel')
-        tunnel["values"]["platform-publisher-tunnel-token"] = api.request("GET",
-            f"/accounts/{op.ACCOUNT}/cfd_tunnel/55d6ce3a-7abb-452b-b819-f2feb2fa2a58/token")
-        store("publisher-tunnel", tunnel)
     op.evidence("credential-issue-" + stage, {"approved_digest": approval,
         "reviewed_head": os.environ["DHOLBEAT_REVIEWED_HEAD"], "credential_ids": identifiers,
         "ciphertext_mac_recovery": True, "password_manager_escrow": "founder-action-required",
