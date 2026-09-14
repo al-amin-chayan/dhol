@@ -120,7 +120,7 @@ def test_credentials_plan_is_deterministic_and_bucket_only():
         assert len(request["resources"]) == 1
         assert "bucket.*" not in json.dumps(request)
     access = credentials.blueprint("access")
-    assert access["requests"][0]["body"] == {"name": SERVICE_NAME, "duration": "720h"}
+    assert access["requests"][0]["body"] == {"name": SERVICE_NAME, "duration": "forever"}
 
 
 def test_dedicated_source_bucket_has_private_domain_and_restic_retention():
@@ -136,6 +136,64 @@ def test_credential_issuance_cannot_run_without_exact_release_and_approval(monke
     monkeypatch.delenv("DHOLBEAT_REVIEWED_HEAD", raising=False)
     with pytest.raises(credentials.op.OperationError, match="founder-approved"):
         credentials.issue({}, "access")
+
+
+def test_monthly_plan_approval_does_not_authorize_nonexpiring_issuance(monkeypatch):
+    monkeypatch.setattr(credentials.op, "recipient_checks", lambda: {})
+    previous = credentials.blueprint("access")
+    previous["requests"][0]["body"]["duration"] = "720h"
+    approval = credentials.digest(json.dumps(previous, sort_keys=True, separators=(",", ":")).encode())
+    monkeypatch.setenv("DHOLBEAT_APPROVED_ROUTING_DIGEST", approval)
+    monkeypatch.setenv("DHOLBEAT_REVIEWED_HEAD", "a" * 40)
+    with pytest.raises(credentials.op.OperationError, match="founder-approved"):
+        credentials.issue({}, "access")
+
+
+@pytest.mark.parametrize("duration,enabled,accepted", [
+    ("forever", True, True), ("720h", True, False), (None, True, False), ("forever", False, False),
+    ("<missing>", True, False), ("forever", None, False), ("forever", "<missing>", False),
+])
+def test_issuance_verifies_lifetime_and_revokes_unaccepted_token(monkeypatch, duration, enabled, accepted):
+    monkeypatch.setattr(credentials.op, "recipient_checks", lambda: {})
+    document = credentials.blueprint("access")
+    approval = credentials.digest(json.dumps(document, sort_keys=True, separators=(",", ":")).encode())
+    monkeypatch.setenv("DHOLBEAT_APPROVED_ROUTING_DIGEST", approval)
+    monkeypatch.setenv("DHOLBEAT_REVIEWED_HEAD", "a" * 40)
+    calls, stored, receipts = [], [], []
+
+    class API:
+        def request(self, method, path, body=None):
+            calls.append((method, path, body))
+            if method == "GET":
+                return []
+            if method == "POST":
+                token = {"id": TOKEN, "client_id": "fixture-client", "client_secret": "fixture-secret"}
+                if duration != "<missing>":
+                    token["duration"] = duration
+                if enabled != "<missing>":
+                    token["enabled"] = enabled
+                return token
+            assert method == "DELETE" and path.endswith("/" + TOKEN)
+
+    monkeypatch.setattr(credentials.op, "Cloudflare", lambda _: API())
+    monkeypatch.setattr(credentials, "load_set", lambda _: {"values": {}})
+    monkeypatch.setattr(credentials, "store", lambda name, value: stored.append((name, deepcopy(value))))
+    monkeypatch.setattr(credentials.op, "evidence", lambda name, value: receipts.append((name, value)))
+    if accepted:
+        credentials.issue({"CLOUDFLARE_API_TOKEN": "fixture-management"}, "access")
+        assert len(stored) == 1 and stored[0][0] == "publisher-access"
+        assert receipts[0][1]["service_token_duration"] == "forever"
+        assert receipts[0][1]["ciphertext_mac_recovery"] is True
+        assert [v[0] for v in calls] == ["GET", "POST"]
+    else:
+        with pytest.raises(credentials.op.OperationError, match="non-expiring lifetime") as rejection:
+            credentials.issue({"CLOUDFLARE_API_TOKEN": "fixture-management"}, "access")
+        assert f"observed duration={duration!r} enabled={enabled!r}" in str(rejection.value)
+        assert "expected duration='forever' enabled=True" in str(rejection.value)
+        assert "fixture-secret" not in str(rejection.value)
+        assert not stored and not receipts
+        assert [v[0] for v in calls] == ["GET", "POST", "DELETE"]
+    assert calls[1][2] == {"name": SERVICE_NAME, "duration": "forever"}
 
 
 @pytest.mark.parametrize('address,key,value', [
