@@ -246,8 +246,10 @@ def converged_plan():
 def test_reviewed_creation_computed_fields_are_accepted_without_mutating_plan():
     candidate = converged_plan()
     original = deepcopy(candidate)
-    assert len(guard(candidate, ADOPTION, DESIRED)) == 23
+    assert len(guard(candidate, ADOPTION, DESIRED, allow_observations=True)) == 23
     assert candidate == original
+    with pytest.raises(ContractError, match='drift'):
+        guard(candidate, ADOPTION, DESIRED)
     # The standalone WP-06A rule still rejects drift, including these records.
     from control_plane import no_change_plan
     baseline = deepcopy(candidate)
@@ -313,4 +315,30 @@ def test_other_drift_and_unproven_convergence_remain_rejected(mutation):
     else:
         candidate['resource_drift'] = {}
     with pytest.raises(ContractError):
-        guard(candidate, ADOPTION, DESIRED, allow_create=True)
+        guard(candidate, ADOPTION, DESIRED, allow_create=True, allow_observations=True)
+
+
+def test_storage_issuer_proves_tunnel_secret_access_before_creating_bucket_keys(monkeypatch):
+    monkeypatch.setattr(credentials.op, "recipient_checks", lambda: {})
+    document = credentials.blueprint("storage")
+    approval = credentials.digest(json.dumps(document, sort_keys=True, separators=(",", ":")).encode())
+    monkeypatch.setenv("DHOLBEAT_APPROVED_ROUTING_DIGEST", approval)
+    monkeypatch.setenv("DHOLBEAT_REVIEWED_HEAD", "a" * 40)
+    calls, stored = [], []
+    class API:
+        def request(self, method, path, body=None):
+            calls.append((method, path))
+            if path.endswith("/permission_groups"):
+                return [{"id": "fixture-group", "name": "Workers R2 Storage Bucket Item Write"}]
+            if path.endswith("/tokens"):
+                return []
+            if path.endswith("/token"):
+                raise credentials.op.OperationError("tunnel secret permission denied")
+            raise AssertionError("no provider mutation may precede the tunnel preflight")
+    monkeypatch.setattr(credentials.op, "Cloudflare", lambda *args: API())
+    monkeypatch.setattr(credentials, "load_set", lambda *args: {"values": {}})
+    monkeypatch.setattr(credentials, "store", lambda *args: stored.append(args))
+    with pytest.raises(credentials.op.OperationError, match="tunnel secret"):
+        credentials.issue({"CLOUDFLARE_API_TOKEN": "fixture"}, "storage")
+    assert all(method == "GET" for method, path in calls)
+    assert stored == []

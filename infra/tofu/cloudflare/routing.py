@@ -55,7 +55,7 @@ def footprint(manifest, bootstrap, token_id):
     return items
 
 
-def guard(plan, adoption, desired, *, allow_create=False):
+def guard(plan, adoption, desired, *, allow_create=False, allow_observations=False):
     """Protect all adopted identities and permit only the reviewed new footprint.
 
     New objects may have computed IDs, but their caller-supplied, source-derived
@@ -70,8 +70,9 @@ def guard(plan, adoption, desired, *, allow_create=False):
     # Creating the reviewed attachments and activating R2 TLS changes three
     # computed fields. Validate that exact convergence before the WP-06A guard;
     # its general rejection of drift remains unchanged for every other field.
-    validate_creation_observations(plan, adoption, desired)
-    adopted["resource_drift"] = []
+    if allow_observations:
+        validate_creation_observations(plan, adoption, desired)
+        adopted["resource_drift"] = []
     no_change_plan(adopted, adoption)
     seen = set()
     for item in changes:

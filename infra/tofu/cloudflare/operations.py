@@ -14,6 +14,7 @@ import re
 import secrets
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.error
@@ -371,7 +372,7 @@ def plan(inputs, adopt=False):
         )
         try:
             if desired:
-                guard(document, expected, desired)
+                guard(document, expected, desired, allow_observations=True)
             else:
                 no_change_plan(document, expected)
         except ValueError as error:
@@ -1252,6 +1253,9 @@ def main():
 
 
 if __name__ == "__main__":
+    # Helpers import operations. Share this entry-point instance so their safe
+    # exception classes and recipient fingerprints match the CLI handler.
+    sys.modules["operations"] = sys.modules[__name__]
     try:
         main()
     except (

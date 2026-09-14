@@ -216,8 +216,6 @@
       }
     }
   ],
-  "schema_version": 1,
-  "receipt_type": "publisher-routing-create-diagnostic",
   "release": "infra-prod-20260914-2",
   "promotion_pr": 75,
   "reviewed_source_head": "514d3c760f8c5fe96edf842b0deeb9800efaa707",
@@ -248,5 +246,6 @@
     "provider_actions": "all-no-op",
     "guard_passed": true
   },
-  "host_capture_blocker": "operator token lacks Access organization read permission; /access/organizations returned HTTP 403; MCP independent read succeeded"
+  "host_capture_blocker": "operator token lacks Access organization read permission; /access/organizations returned HTTP 403; MCP independent read succeeded",
+  "record_description": "One-off incident narrative and author verification; not a versioned receipt contract or production gate."
 }
