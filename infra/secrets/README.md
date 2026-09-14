@@ -175,8 +175,14 @@ provider/runtime credential; merely encrypting the same key again is insufficien
 
 ## Machine-route credentials
 
-These catalog entries describe future inputs; no production-issued value is encrypted or
-installed by WP-06A. Before promotion, verify the password-manager recovery records
+WP-06A declared these inputs without encrypting or installing production values.
+On 2026-09-14 the dedicated non-expiring Access service credential was issued
+and the existing publisher tunnel token was recovered without rotation; both
+now have complete committed SOPS sets under the two approved recipients.
+The independent publisher application API key and Telegram webhook secret are
+still separate pending inputs. Password-manager uploads of the Access and tunnel
+recovery files have completed, but byte-identical retrieval is not yet verified.
+Before promotion, verify the password-manager recovery records
 and both approved recipients under the current recovery-account checklist. Issue a
 dedicated n8n Cloudflare Service Auth token, restricted by an Access application to `publish.chayan.me/api/public/*`, and pair it with the independent
 publisher application API key. Never admit `any_valid_service_token` or a whole-host
@@ -188,13 +194,36 @@ credential active only during the bounded rotation window.
 
 ## Backup bucket credentials
 
-These scoped R2 pairs are declared for later backup promotion, with no provider-issued
-values in this lane. Each restic principal receives only its own private bucket pair;
+On 2026-09-14 four non-expiring bucket-scoped R2 pairs were issued for core
+backups, publisher backups, public media and independent source escrow. Their
+provider-issued values and the three generated restic passwords are committed
+in six complete runtime SOPS sets (including Access and tunnel), with independent
+MAC recovery verified under both approved age recipients. Password-manager
+escrow of these four storage sets and the independent source-root configuration
+is still pending; no production backup acceptance is claimed.
+The issuer stores the R2 token ID as the S3 access key and SHA-256 of the raw
+API token value as the S3 secret access key; it deliberately does not escrow
+the raw API token value. Recover the stored S3 pair or issue a replacement;
+Cloudflare cannot redisplay the original one-time token value. The generated
+restic password is a separate recovery root: replacing an R2 key cannot recover
+an existing encrypted repository if that password is lost.
+Each restic principal receives only its own private bucket pair;
 public-media credentials cannot read either backup bucket. After an exposure, issue a
 replacement restricted pair, verify password-manager recovery records and both
 approved recipients, encrypt under that host's SOPS set, verify a disposable backup
 and restore, converge the host-only file, and revoke the previous pair. Keep restic as the completed-object retention authority; a
 bucket lifecycle must never expire restic chunks or snapshots.
+
+After saving all required recovery files in the password manager, download them
+to a private temporary directory and verify byte-identical retrieval before
+deleting any unverified recovery copy. Then delete the operator plaintext JSON
+exports, the temporary source-root `.env`, verification downloads and any
+generated plaintext residue under `.artifacts/cloudflare`; inspect temporary
+editor copies too. Keep committed SOPS ciphertext. Do not delete unrelated age
+keys or existing provider/operator inputs as part of this cleanup. When a later
+operation needs plaintext, re-export it temporarily from the password manager,
+use mode `0600` outside Git, and delete that temporary copy after use. Record
+cleanup with file categories and verification status, never secret contents.
 
 ## Monthly cost
 
