@@ -39,6 +39,14 @@
 - name: Install the checksum-locked restic binary when needed
   when: restic_current_version.rc != 0 or 'restic 0.19.1 ' not in restic_current_version.stdout
   block:
+    - name: Report the checksum-locked restic installation in a read-only first plan
+      ansible.builtin.debug:
+        msg: >-
+          Install restic 0.19.1 from the committed amd64 artifact and checksum;
+          the download directory and binary are created only during apply.
+      changed_when: true
+      when: ansible_check_mode
+
     - name: Download the pinned compressed restic artifact
       ansible.builtin.get_url:
         url: "{{ (lookup('file', playbook_dir ~ '/../../toolchain.lock.yml') | from_yaml)['tools']['restic']['artifacts']['amd64']['url'] }}"
@@ -47,6 +55,7 @@
         owner: root
         group: root
         mode: "0600"
+      when: not ansible_check_mode
 
     - name: Decompress the verified binary into the managed installation
       ansible.builtin.command:
@@ -131,11 +140,20 @@
   when: restic_timer_enabled | bool
   no_log: true
 
-- name: Start only the founder-approved verified backup timers
-  ansible.builtin.systemd_service:
-    name: "{{ item }}"
-    enabled: "{{ restic_timer_enabled | bool }}"
-    state: "{{ 'started' if restic_timer_enabled | bool else 'stopped' }}"
+- name: Inspect timer units before planning their first installation
+  ansible.builtin.stat:
+    path: "/etc/systemd/system/{{ item }}"
   loop:
     - dholbeat-backup.timer
     - dholbeat-backup-health.timer
+  register: restic_installed_timer_units
+
+- name: Start only the founder-approved verified backup timers
+  ansible.builtin.systemd_service:
+    name: "{{ item.item }}"
+    enabled: "{{ restic_timer_enabled | bool }}"
+    state: "{{ 'started' if restic_timer_enabled | bool else 'stopped' }}"
+  loop: "{{ restic_installed_timer_units.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: not ansible_check_mode or item.stat.exists
