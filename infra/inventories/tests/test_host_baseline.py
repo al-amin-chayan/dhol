@@ -151,6 +151,20 @@ def test_production_publish_inventory_enables_only_its_declared_connector() -> N
         ROOT, "publish-1", "203.0.113.20", "converged", "/tmp/id", "/tmp/known-hosts",
     )
     assert inventory["all"]["children"]["baseline_targets"]["hosts"]["publish-1"]["baseline_allow_cloudflared_quic"] is True
+    settings = inventory["all"]["children"]["publisher"]["vars"]
+    assert settings["cloudflared_enabled"] is True
+    assert settings["restic_enabled"] is True
+    assert settings["restic_timer_enabled"] is False
+    assert settings["publisher_enabled"] is False
+    assert "scope" not in settings and "host_ids" not in settings
+
+
+def test_role_settings_for_another_host_never_enter_rendered_inventory(rendering_root: Path) -> None:
+    path = rendering_root / "infra/inventories/production/group_vars/publisher.yml"
+    path.write_text(yaml.safe_dump({"scope": "publisher", "host_ids": ["another-host"],
+                                   "cloudflared_enabled": True}))
+    with pytest.raises(ValueError, match="exact host and role"):
+        rendered(rendering_root, "converged")
 
 
 def test_missing_manifest_never_enables_cloudflared_exception(tmp_path: Path) -> None:
