@@ -310,7 +310,8 @@ def dump_database(
     database: str,
     destination: Path,
 ) -> None:
-    with destination.open("wb") as handle:
+    with destination.open("xb") as handle:
+        os.fchmod(handle.fileno(), 0o600)
         runner.run(
             ["exec", "-T", service, "pg_dump", "-U", user, "-d", database, "--clean", "--if-exists"],
             stdout=handle,
@@ -385,6 +386,10 @@ def copy_service_state(
     runner.run(
         ["cp", "--archive", f"{service}:{container_directory}/.", str(destination)]
     )
+    # docker cp may restore the source directory's ownership/mode. Keep the
+    # retained cache private from Elasticsearch's sibling snapshot bind.
+    os.chown(destination, 0, 0)
+    destination.chmod(0o700)
 
 
 def restore_service_state(
@@ -406,6 +411,7 @@ def create_visibility_snapshot(runner: ComposeRunner, backup_id: str, output: Pa
     visibility.mkdir(mode=0o770)
     try:
         os.chown(visibility, 1000, 0)
+        visibility.chmod(0o770)
     except PermissionError as error:
         raise StateError("backup adapter must run as root to stage Visibility state") from error
     location = f"/snapshots/{backup_id}/visibility"
@@ -452,6 +458,9 @@ def backup(
     should_restart_senders = not kill_switch.exists()
     operation_error: Exception | None = None
     output.mkdir(parents=True, mode=0o750)
+    # The service's UMask=0077 must not remove Elasticsearch's group traversal.
+    # SQL/Redis stay separately private; only Visibility is writable by UID 1000.
+    output.chmod(0o750)
     try:
         control_hits = None
         if visibility_control_post_id is not None:

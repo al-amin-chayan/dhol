@@ -67,8 +67,8 @@ def guard(plan, adoption, desired, *, allow_create=False, allow_observations=Fal
     require(isinstance(changes, list), "missing routing changes")
     adopted = copy.deepcopy(plan)
     adopted["resource_changes"] = [v for v in changes if v.get("address") in adoption]
-    # Creating the reviewed attachments and activating R2 TLS changes three
-    # computed fields. Validate that exact convergence before the WP-06A guard;
+    # Attachments, R2 TLS, and publisher connector startup change computed
+    # observations. Validate their narrow shape before the WP-06A guard;
     # its general rejection of drift remains unchanged for every other field.
     if allow_observations:
         validate_creation_observations(plan, adoption, desired)
@@ -136,6 +136,7 @@ def validate_creation_observations(plan, adoption, desired):
     founder = "cloudflare_zero_trust_access_policy.founder"
     machine = "cloudflare_zero_trust_access_policy.publisher_machine[0]"
     media = "cloudflare_r2_custom_domain.publisher_media[0]"
+    tunnel = "cloudflare_zero_trust_tunnel_cloudflared.publisher"
     counts = {founder: (1, 3), machine: (0, 1)}
     require(founder in adoption and machine in desired and media in desired,
             "creation observations require the reviewed publisher profile")
@@ -143,7 +144,7 @@ def validate_creation_observations(plan, adoption, desired):
     for item in drifts:
         require(isinstance(item, dict), "invalid routing drift record")
         address = item.get("address")
-        require(address in {*counts, media} and address not in seen,
+        require(address in {*counts, media, tunnel} and address not in seen,
                 "resource drift requires separate review")
         seen.add(address)
         resource = resources.get(address, {})
@@ -170,6 +171,35 @@ def validate_creation_observations(plan, adoption, desired):
                     and type(before.get("app_count")) is int and type(after.get("app_count")) is int
                     and (before["app_count"], after["app_count"]) == (old, new),
                     "policy attachment count differs from reviewed creation")
+        elif address == tunnel:
+            import ipaddress
+            from datetime import datetime
+            from uuid import UUID
+
+            require(tunnel in adoption and before.get("id") == after.get("id") == adoption[tunnel]["resource_id"],
+                    "publisher tunnel observation identity differs")
+            require(changed and changed <= {"connections", "conns_active_at"},
+                    "publisher tunnel configuration drift is forbidden")
+            connections = after.get("connections")
+            require(isinstance(connections, list) and len(connections) == 4,
+                    "publisher tunnel must have four active connections")
+            keys = {"client_id", "client_version", "colo_name", "id", "uuid",
+                    "opened_at", "origin_ip"}
+            try:
+                # The pinned provider omits the API's false reconnect flag.
+                require(all(isinstance(c, dict) and set(c) in (keys, keys | {"is_pending_reconnect"})
+                            and c.get("is_pending_reconnect", False) is False
+                            and ipaddress.ip_address(c["origin_ip"]).is_global
+                            and bool(c["client_version"]) and bool(c["colo_name"])
+                            and datetime.fromisoformat(c["opened_at"].replace("Z", "+00:00")).utcoffset() is not None
+                            for c in connections), "publisher tunnel connection metadata is invalid")
+                require(len({str(UUID(c["id"])) for c in connections}) == 4
+                        and len({str(UUID(c["client_id"])) for c in connections}) == 1
+                        and len({c["origin_ip"] for c in connections}) == 1
+                        and datetime.fromisoformat(after["conns_active_at"].replace("Z", "+00:00")).utcoffset() is not None,
+                        "publisher tunnel connection identities differ")
+            except (ValueError, TypeError, KeyError, AttributeError):
+                require(False, "publisher tunnel connection metadata is invalid")
         else:
             prior = before.get("status")
             require(changed == {"status"} and isinstance(prior, dict)

@@ -318,6 +318,87 @@ def test_other_drift_and_unproven_convergence_remain_rejected(mutation):
         guard(candidate, ADOPTION, DESIRED, allow_create=True, allow_observations=True)
 
 
+def tunnel_observation_plan():
+    candidate = converged_plan()
+    address = "cloudflare_zero_trust_tunnel_cloudflared.publisher"
+    resource = next(r for r in candidate['resource_changes'] if r['address'] == address)
+    connections = [{"id": f"00000000-0000-4000-8000-{i:012d}",
+                    "uuid": f"00000000-0000-4000-8000-{i:012d}",
+                    "client_id": "00000000-0000-4000-8000-000000000099",
+                    "client_version": "2026.8.1", "colo_name": "SIN",
+                    "origin_ip": "8.8.8.8", "is_pending_reconnect": False,
+                    "opened_at": "2026-09-15T04:01:20Z"} for i in range(4)]
+    refreshed = {**resource['change']['after'], 'connections': connections,
+                 'conns_active_at': "2026-09-15T04:01:20Z"}
+    resource['change']['before'] = deepcopy(refreshed)
+    resource['change']['after'] = deepcopy(refreshed)
+    drift = deepcopy(resource)
+    drift['change']['actions'] = ['update']
+    drift['change']['before']['connections'] = []
+    drift['change']['before']['conns_active_at'] = None
+    candidate['resource_drift'].append(drift)
+    return candidate
+
+
+@pytest.mark.parametrize('pruned_false', [False, True])
+def test_publisher_tunnel_live_connection_observation_preserves_no_change_plan(pruned_false):
+    candidate = tunnel_observation_plan()
+    if pruned_false:
+        drift = candidate['resource_drift'][-1]
+        for connection in drift['change']['after']['connections']:
+            connection.pop('is_pending_reconnect')
+        resource = next(r for r in candidate['resource_changes'] if r['address'] == drift['address'])
+        resource['change']['before'] = deepcopy(drift['change']['after'])
+        resource['change']['after'] = deepcopy(drift['change']['after'])
+    original = deepcopy(candidate)
+    assert len(guard(candidate, ADOPTION, DESIRED, allow_observations=True)) == 23
+    assert candidate == original
+    with pytest.raises(ContractError):
+        guard(candidate, ADOPTION, DESIRED)
+
+
+@pytest.mark.parametrize('mutation', ['config', 'identity', 'count', 'pending', 'private-origin',
+    'multiple-origins', 'multiple-clients', 'duplicate-id', 'unknown-field', 'bad-date',
+    'naive-date', 'bad-uuid', 'current-mismatch'])
+def test_publisher_tunnel_observation_rejects_configuration_and_unproven_connections(mutation):
+    candidate = tunnel_observation_plan()
+    drift = candidate['resource_drift'][-1]
+    after = drift['change']['after']
+    connection = after['connections'][0]
+    if mutation == 'config':
+        drift['change']['before']['name'] = 'unreviewed'
+        after['name'] = 'different'
+    elif mutation == 'identity':
+        drift['change']['before']['id'] = after['id'] = 'unrelated-tunnel'
+    elif mutation == 'count':
+        after['connections'].pop()
+    elif mutation == 'pending':
+        connection['is_pending_reconnect'] = True
+    elif mutation == 'private-origin':
+        connection['origin_ip'] = '10.0.0.1'
+    elif mutation == 'multiple-origins':
+        connection['origin_ip'] = '1.1.1.1'
+    elif mutation == 'multiple-clients':
+        connection['client_id'] = '00000000-0000-4000-8000-000000000098'
+    elif mutation == 'duplicate-id':
+        connection['id'] = after['connections'][1]['id']
+    elif mutation == 'unknown-field':
+        connection['unsafe'] = True
+    elif mutation == 'bad-date':
+        connection['opened_at'] = 'invalid'
+    elif mutation == 'naive-date':
+        after['conns_active_at'] = '2026-09-15T04:01:20'
+    elif mutation == 'bad-uuid':
+        connection['id'] = 'invalid'
+    resource = next(r for r in candidate['resource_changes'] if r['address'] == drift['address'])
+    resource['change']['before'] = deepcopy(after)
+    resource['change']['after'] = deepcopy(after)
+    if mutation == 'current-mismatch':
+        resource['change']['after']['connections'] = []
+    with pytest.raises(ContractError):
+        guard(candidate, ADOPTION, DESIRED, allow_observations=True)
+
+
 def test_storage_issuer_proves_tunnel_secret_access_before_creating_bucket_keys(monkeypatch):
     monkeypatch.setattr(credentials.op, "recipient_checks", lambda: {})
     document = credentials.blueprint("storage")

@@ -82,7 +82,9 @@ def request(hostname: str, path: str = "/", headers=None) -> Response:
         "invalid probe hostname",
     )
     http = urllib.request.Request(
-        "https://" + hostname + path, headers=headers or {}, method="GET"
+        "https://" + hostname + path,
+        headers={"User-Agent": "Dholbeat-production-boundary-verifier/1.0", **(headers or {})},
+        method="GET",
     )
     try:
         result = urllib.request.build_opener(NoRedirect).open(http, timeout=15)
@@ -172,7 +174,7 @@ def run_live(manifest, credentials):
         else:
             outcomes["founder"] = "scoped-session-required"
         if route.get("machine_path"):
-            path = "/api/public/integrations"
+            path = "/api/public/v1/integrations"
             wrong = request(
                 hostname,
                 path,

@@ -126,7 +126,7 @@ def test_registration_may_not_default_open(compose: dict) -> None:
 
 def test_aggregate_memory_ceiling_is_enforced(compose: dict) -> None:
     changed = deepcopy(compose)
-    changed["services"]["postiz"]["mem_limit"] = "2g"
+    changed["services"]["postiz"]["mem_limit"] = "3g"
     assert any("aggregate memory limit" in finding for finding in validate_compose(changed))
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 import sys
@@ -68,6 +69,43 @@ def test_backup_id_cannot_escape_staging_root(tmp_path: Path) -> None:
     for value in ("../escape", "/absolute", "UPPERCASE", "two/slugs"):
         with pytest.raises(StateError, match="backup ID"):
             safe_child(tmp_path, value)
+
+
+def test_dump_is_private_even_with_permissive_operator_umask(tmp_path: Path) -> None:
+    class DumpRunner:
+        def run(self, arguments, *, stdout):
+            assert (os.fstat(stdout.fileno()).st_mode & 0o777) == 0o600
+            stdout.write(b"private fixture database\n")
+
+    path = tmp_path / "dump.sql"
+    previous = os.umask(0o022)
+    try:
+        publisher_state.dump_database(DumpRunner(), "postiz-postgres", "postiz", "postiz", path)
+        with pytest.raises(FileExistsError):
+            publisher_state.dump_database(DumpRunner(), "postiz-postgres", "postiz", "postiz", path)
+    finally:
+        os.umask(previous)
+    assert path.read_bytes() == b"private fixture database\n"
+
+
+def test_visibility_permissions_survive_service_umask(tmp_path: Path, monkeypatch) -> None:
+    from subprocess import CompletedProcess
+
+    class SnapshotRunner:
+        def run(self, arguments, *, capture_output):
+            if "wait_for_completion" in arguments[-1]:
+                result = {"snapshot": {"shards": {"failed": 0}}}
+            else:
+                result = {"acknowledged": True}
+            return CompletedProcess(arguments, 0, json.dumps(result).encode(), b"")
+
+    monkeypatch.setattr(publisher_state.os, "chown", lambda *args: None)
+    previous = os.umask(0o077)
+    try:
+        publisher_state.create_visibility_snapshot(SnapshotRunner(), "fixture", tmp_path)
+    finally:
+        os.umask(previous)
+    assert (tmp_path / "visibility").stat().st_mode & 0o777 == 0o770
 
 
 def test_restore_project_can_never_name_production() -> None:

@@ -21,7 +21,7 @@ services:
     health_probe: {type: http, target: /api/user/self}
     resources:
       cpus: 1.5
-      memory_mb: 1400
+      memory_mb: 2816
       pids: 512
       logs: {driver: json-file, max_size_mb: 10, max_files: 3}
     monitoring_owner: platform-operations
@@ -42,7 +42,7 @@ services:
     health_probe: {type: command, target: pg_isready -U postiz -d postiz}
     resources:
       cpus: 0.75
-      memory_mb: 640
+      memory_mb: 256
       pids: 128
       logs: {driver: json-file, max_size_mb: 10, max_files: 3}
     monitoring_owner: platform-operations
@@ -84,7 +84,7 @@ services:
     health_probe: {type: command, target: pg_isready -U temporal -d temporal}
     resources:
       cpus: 0.5
-      memory_mb: 512
+      memory_mb: 256
       pids: 128
       logs: {driver: json-file, max_size_mb: 10, max_files: 3}
     monitoring_owner: platform-operations
@@ -107,7 +107,7 @@ services:
     health_probe: {type: http, target: /_cluster/health}
     resources:
       cpus: 1.0
-      memory_mb: 1024
+      memory_mb: 640
       pids: 256
       logs: {driver: json-file, max_size_mb: 10, max_files: 3}
     monitoring_owner: platform-operations
@@ -128,7 +128,7 @@ services:
     health_probe: {type: command, target: temporal operator cluster health}
     resources:
       cpus: 1.0
-      memory_mb: 768
+      memory_mb: 384
       pids: 256
       logs: {driver: json-file, max_size_mb: 10, max_files: 3}
     monitoring_owner: platform-operations

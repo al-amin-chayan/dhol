@@ -377,14 +377,20 @@ def plan(inputs, adopt=False):
                 no_change_plan(document, expected)
         except ValueError as error:
             print(json.dumps({"guard_rejection": str(error)}))
-            for change in document.get("resource_changes", []):
+            for change in document.get("resource_changes", []) + document.get("resource_drift", []):
                 delta = change["change"]
                 if delta["actions"] != ["no-op"]:
                     before, after = delta.get("before") or {}, delta.get("after") or {}
+                    if change["address"] == "cloudflare_zero_trust_tunnel_cloudflared.publisher":
+                        connections = after.get("connections")
+                        print(json.dumps({"tunnel_connection_shapes": [
+                            {"keys": sorted(c), "types": {k: type(v).__name__ for k, v in c.items()}}
+                            for c in connections] if isinstance(connections, list) else type(connections).__name__}))
                     print(
                         json.dumps(
                             {
                                 "resource": change["address"],
+                                "kind": "observed-drift" if change in document.get("resource_drift", []) else "planned-change",
                                 "actions": delta["actions"],
                                 "changed_attributes": sorted(
                                     k

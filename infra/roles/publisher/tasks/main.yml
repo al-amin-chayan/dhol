@@ -82,6 +82,15 @@
     mode: "0600"
   tags: [publisher, publisher-files]
 
+- name: Install the pinned publisher runtime resource tuning
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../stack/publisher/postiz/runtime.cjs"
+    dest: "{{ publisher_project_directory }}/runtime.cjs"
+    owner: root
+    group: root
+    mode: "0600"
+  tags: [publisher, publisher-files]
+
 - name: Install the publisher kill-switch and state adapters
   ansible.builtin.copy:
     src: "{{ item.src }}"
