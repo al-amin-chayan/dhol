@@ -53,10 +53,18 @@ the selected publisher's deployment, application fixture, and seven-day canary.
 
 ## Bounds and failure handling
 
-Application dumps use a physically preallocated fixed 2 GiB ext4 loop filesystem at
+Application dumps use a physically preallocated fixed 2 GiB ext4 image mounted through FUSE at
 `/var/lib/dholbeat/restic/application`, shared with the publisher adapter and
 Elasticsearch's `/snapshots` mount. Installation requires at least 10 GiB free
 before provisioning the image (2 GiB reserve plus 8 GiB update headroom).
+The LXC host must expose an accessible `/dev/fuse`; no loop device is required.
+The root-owned `mount.dholbeat-fuse2fs` helper accepts only this image and
+mountpoint and enforces `nosuid,nodev,noexec,default_permissions`. Its
+`allow_other` flag permits Elasticsearch UID 1000 to use the container bind
+mount while the host's parent backup directory remains root-only. This is
+disk-backed scratch, not a RAM-backed filesystem. Scratch is disposable;
+the image is never reformatted on retry, and a failed mount stops deployment
+and backups rather than allowing writes into an unbounded directory.
 Retained config/receipts have a separate 16 MiB quota. Raw database volumes,
 Elasticsearch live data, caches, generated media, and logs are excluded. SQL
 dumps, Redis persistence and the offline Elasticsearch snapshot are produced by

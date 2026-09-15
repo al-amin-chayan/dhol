@@ -5,8 +5,8 @@ Before=docker.service dholbeat-backup.service
 [Mount]
 What=/var/lib/dholbeat/restic/application.img
 Where=/var/lib/dholbeat/restic/application
-Type=ext4
-Options=loop,nosuid,nodev,noexec
+Type=dholbeat-fuse2fs
+Options=nosuid,nodev,noexec
 TimeoutSec=60
 
 [Install]
