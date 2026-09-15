@@ -142,6 +142,7 @@ class Http:
         self.base = base.rstrip("/")
         self.timeout = timeout
         self._no_redirect = urllib.request.build_opener(_NoRedirect)
+        self.container = ""
 
     def request(
         self,
@@ -161,6 +162,40 @@ class Http:
         elif form_body is not None:
             data = urllib.parse.urlencode(form_body).encode()
             request_headers.setdefault("Content-Type", "application/x-www-form-urlencoded")
+        if self.container:
+            # Internal-only Docker networks deliberately have no published
+            # host route. Reach the API through its own network namespace.
+            target = urllib.parse.urlsplit(self.base + path)
+            if target.hostname not in {"127.0.0.1", "localhost"} or target.scheme != "http":
+                raise ValueError("container fixture HTTP requires a loopback URL")
+            node = r'''
+const http = require('node:http');
+let input = '';
+process.stdin.on('data', chunk => { input += chunk; if (input.length > 1048576) process.exit(2); });
+process.stdin.on('end', () => {
+  const p = JSON.parse(input);
+  const req = http.request({hostname:'127.0.0.1',port:5000,path:p.path,
+    method:p.method,headers:p.headers,timeout:30000}, res => {
+    let body = '';
+    res.on('data', chunk => { body += chunk; if (Buffer.byteLength(body) > 2097152) process.exit(2); });
+    res.on('end', () => { const headers = {};
+      for (const [k,v] of Object.entries(res.headers)) headers[k] = Array.isArray(v) ? v : [v];
+      console.log(JSON.stringify([res.statusCode,body,headers])); });
+  });
+  req.on('timeout', () => req.destroy(new Error('fixture HTTP timeout')));
+  req.on('error', () => process.exit(2));
+  if (p.body !== null) req.write(p.body);
+  req.end();
+});
+'''
+            payload = {"method": method, "path": target.path + ("?" + target.query if target.query else ""),
+                       "headers": request_headers, "body": data.decode() if data is not None else None}
+            result = subprocess.run(["docker", "exec", "-i", self.container, "node", "-e", node],
+                                    input=json.dumps(payload), capture_output=True, text=True, timeout=self.timeout + 5)
+            if result.returncode:
+                raise RuntimeError("isolated fixture HTTP failed; output suppressed")
+            status, body, collected = json.loads(result.stdout)
+            return status, body, collected
         request = urllib.request.Request(self.base + path, data=data, method=method)
         for key, value in request_headers.items():
             request.add_header(key, value)
@@ -207,6 +242,7 @@ PROJECTS = [
 
 def probe_postiz(args: argparse.Namespace, recorder: Recorder) -> dict[str, Any]:
     api = Http(args.base_url.rstrip("/") + "/api")
+    api.container = getattr(args, "http_container", "")
     api.wait_until(
         lambda: api.request("GET", "/user/self")[0] == 401,
         attempts=args.ready_attempts,
@@ -802,6 +838,7 @@ def verify_postiz_restore(args: argparse.Namespace) -> dict[str, Any]:
     instance that produced the dump.
     """
     api = Http(args.base_url.rstrip("/") + "/api")
+    api.container = getattr(args, "http_container", "")
     api.wait_until(
         lambda: api.request("GET", "/user/self")[0] == 401,
         attempts=args.ready_attempts,
@@ -987,6 +1024,8 @@ def main() -> int:
     parser.add_argument("--window-start", required=False, default=None)
     parser.add_argument("--window-end", required=False, default=None)
     parser.add_argument("--postgres-container", default="")
+    parser.add_argument("--http-container", default="",
+                        help="owned disposable Postiz container for internal-only HTTP probes")
     parser.add_argument("--postgres-database", default="postiz")
     parser.add_argument("--postgres-user", default="postiz")
     parser.add_argument("--mixpost-container", default="")
@@ -995,6 +1034,14 @@ def main() -> int:
     parser.add_argument("--mixpost-password-a", default="")
     parser.add_argument("--mixpost-password-b", default="")
     args = parser.parse_args()
+    if args.http_container:
+        if not re.fullmatch(r"dholbeat-publisher-(?:fixture|restore)-[a-z0-9-]+-postiz-1", args.http_container):
+            parser.error("container HTTP requires an explicitly named disposable publisher")
+        container = json.loads(subprocess.check_output(["docker", "inspect", args.http_container], text=True))[0]
+        labels = container['Config']['Labels']
+        if (labels.get('com.docker.compose.service') != 'postiz'
+                or labels.get('com.docker.compose.project') != args.http_container[:-len('-postiz-1')]):
+            parser.error("container HTTP ownership does not match the disposable project")
 
     if args.mode == "restore-verify":
         verify = verify_postiz_restore if args.candidate == "postiz" else verify_mixpost_restore

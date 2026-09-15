@@ -91,7 +91,25 @@ def request(hostname: str, path: str = "/", headers=None) -> Response:
     except urllib.error.HTTPError as error:
         result = error
     with result:
-        return Response(result.status, result.headers.get("Location", ""))
+        # R2's unsigned S3 request reports its missing Authorization as 400.
+        # Retain only a bounded error body so callers can distinguish that
+        # exact denial from an unrelated bad request.
+        body = result.read(4097) if result.status == 400 else b""
+        return Response(result.status, result.headers.get("Location", ""), body)
+
+
+def private_s3_denied(response: Response) -> bool:
+    if response.status == 403:
+        return True
+    if response.status != 400 or len(response.body) > 4096 or b"<!DOCTYPE" in response.body.upper():
+        return False
+    import xml.etree.ElementTree as ET
+    try:
+        error = ET.fromstring(response.body)
+        return (error.tag == "Error" and error.findtext("Code") == "InvalidArgument"
+                and error.findtext("Message") == "Authorization")
+    except ET.ParseError:
+        return False
 
 
 def verify_founder_policy(application, policy, hostname: str, founder_email: str):

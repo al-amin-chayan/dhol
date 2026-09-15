@@ -148,6 +148,29 @@ for inspection; remove it explicitly afterward. Save the redacted receipt and
 measured outage-drill time. Local Git tests exercise this path with the old
 clone deleted; production acceptance still requires a real encrypted R2 upload.
 
+Also escrow a `source-recovery-kit.tar.gz` attachment containing
+`scripts/lib/source_recovery_bootstrap.py`, `scripts/lib/source_escrow.py`,
+`scripts/lib/repository_bundle.py`, and these instructions, with the three
+Python files at the archive root. Rebuild it when recovery code changes and
+verify its downloaded bytes alongside the independent root. The kit contains
+public code only; it must never contain the root export, age keys or a bundle.
+On a fresh machine with Python 3.11+, Git and pinned restic 0.19.1, retrieve
+the kit, root export and snapshot receipt from the password manager, extract
+the kit into a private directory outside Git, chmod the root export 0600,
+and run from that directory:
+
+```sh
+python3 source_recovery_bootstrap.py --root-file /PRIVATE/source-escrow-root.env \
+  --snapshot FULL_SNAPSHOT_ID --destination /PRIVATE/new-recovered-checkout
+```
+
+This bootstrap uses installed Git/restic directly, so it requires neither
+the original checkout nor its locally built Docker controller. Only the
+restored bundle is an allowed Git remote. It verifies repository ID, snapshot
+purpose, quotas, bundle digest, annotated release and exact commits before
+returning success; temporary downloads are removed on every exit. Keep the
+verified release's snapshot ID in the same password-manager recovery record.
+
 Rotate exposed bucket credentials through a separately reviewed scoped issuance
 plan, recover with the new credentials, and revoke only the replaced dedicated
 credential. Restic password exposure requires replacing/removing compromised

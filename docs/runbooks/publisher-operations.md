@@ -4,9 +4,13 @@ This runbook owns only the selected Postiz `v2.23.0` adapter. It does not
 authorize a production apply, provider connection, social post, or capacity
 upgrade. The architecture plan and issue #17 remain authoritative.
 
-## Current blocked boundary
+## Normal release admission and provisional live rollout
 
-The desired state is committed inactive. Keep `publisher_enabled: false` while
+The production stack is running under the founder's explicit instruction to
+deploy functional infrastructure before the final source PR. The source admission
+flag remains inactive pending independently verified, cross-reviewed dependency
+receipts; this flag does not describe the live container state. Keep
+`publisher_enabled: false` while
 any of these receipts is absent or unverified on `publish-1`:
 
 | Receipt gate | Owning issue | Required outcome |
@@ -96,7 +100,12 @@ These modes are explicit because service and interactive-shell umasks differ.
    cannot access any private backup/source repository and the bucket has the
    reviewed expiry lifecycle.
 7. Change `publisher_enabled` to `true` and remove only blockers backed by the
-   receipts. Prepare an annotated, cross-reviewed release and inspect:
+   receipts. On a fresh host, leave `restic_timer_enabled` and
+   `publisher_canary_timer_enabled` false until repository initialization,
+   disposable recovery and explicit canary start respectively pass. The current
+   live host already runs all three timers; its canary admission flag remains
+   false in source until final release reconciliation. Prepare an annotated,
+   cross-reviewed release and inspect:
 
    ```sh
    scripts/infra-plan --limit publish-1 --stage converged \
@@ -238,7 +247,9 @@ filesystem snapshot; and hashes every file. Redis uses a retained volume,
 `appendonly yes`, and `noeviction`: DG-01 proved no Postiz state rebuildable, so
 it cannot be discarded until a later exact live behavior drill proves that safe.
 The adapter restores Redis after the copy and restarts the two senders only when
-the global kill switch was not already active. WP-07 must write the verified
+the global kill switch was absent initially and remains absent immediately before
+recovery. A freeze marker created while the backup holds the host lock therefore
+prevents sender recovery. WP-07 must write the verified
 directory directly to encrypted restic, then purge that exact staging child;
 staging has a 2 GiB filesystem bound and one-day maximum age. The encrypted
 runner purges on success/failure and refuses interrupted staging; follow
@@ -344,6 +355,30 @@ Exercise the global kill switch and one scheduler-verified cancellation. Any
 threshold breach stops admission and returns measured prune/scheduling/upgrade
 options to the founder; it does not raise a limit or purchase a larger VPS
 automatically.
+
+The host sampler keeps a single atomic, root-only JSON aggregate capped at
+16 KiB, retaining each container's cgroup memory high-water mark, OOM/restart
+counters, point-in-time PIDs, Redis RSS and conservative cgroup envelope,
+Postiz tmpfs usage, disk peak and minimum free space. Its five-minute systemd
+timer never starts merely because the role is installed. After all fixture,
+restore and rollback checks pass, start it explicitly:
+
+```sh
+sudo dholbeat-publisher-canary start --confirm START-PUBLISHER-CANARY
+sudo systemctl enable --now dholbeat-publisher-canary.timer
+sudo dholbeat-publisher-canary status
+```
+
+A gap over fifteen minutes, container replacement, unrecorded start, OOM,
+restart or capacity breach is a sticky failure. A failed service also emits
+`DHOLBEAT_PUBLISHER_CANARY_FAILED` to the host journal. It does not buy capacity
+or admit a provider. The application backup adapter records bounded maintenance
+before stopping the services and after their recovery, capturing counters before
+they reset. Container replacements remain forbidden during that maintenance.
+Recovery backups continue if the capacity observer itself fails. Completion
+requires seven elapsed days, at least 2,016 observations and an observed Redis
+AOF rewrite; completed evidence is historical and is not overwritten by later
+samples. Archive a failed result before explicitly starting a new measurement.
 
 ## Credential rotation
 

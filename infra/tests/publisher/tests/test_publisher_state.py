@@ -273,6 +273,29 @@ def test_restart_failure_augments_primary_backup_failure(tmp_path: Path) -> None
     )
 
 
+def test_freeze_requested_during_backup_never_recovers_senders(tmp_path: Path) -> None:
+    from subprocess import CompletedProcess
+    marker = tmp_path / 'kill-switch'
+    resumed = []
+
+    class FreezeDuringBackup(FailedBackupRunner):
+        def run(self, arguments, *, capture_output=False):
+            if arguments[0] == 'stop':
+                marker.write_text('incident freeze while host lock is held')
+                raise StateError('primary backup failure')
+            if arguments[0] == 'up':
+                resumed.extend(arguments)
+                return CompletedProcess(arguments, 0, b'', b'')
+            return super().run(arguments, capture_output=capture_output)
+
+    with pytest.raises(StateError, match='primary backup failure'):
+        backup(FreezeDuringBackup(), tmp_path, 'fixture', marker, None)
+    assert marker.exists()
+    assert 'postiz-redis' in resumed
+    assert 'postiz' not in resumed and 'temporal' not in resumed
+    assert not (tmp_path / 'fixture').exists()
+
+
 def test_restore_override_blocks_provider_egress() -> None:
     override = (ROOT / "stack/publisher/postiz/compose.restore.yml").read_text(
         encoding="utf-8"

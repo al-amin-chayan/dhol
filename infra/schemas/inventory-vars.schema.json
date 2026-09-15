@@ -50,6 +50,7 @@
     "restic_enabled": {"type": "boolean"},
     "restic_timer_enabled": {"type": "boolean"},
     "publisher_enabled": {"type": "boolean"},
+    "publisher_canary_timer_enabled": {"type": "boolean"},
     "publisher_activation_blockers": {
       "type": "array",
       "items": {"enum": ["wp05d-publish1", "wp06b-publish1", "wp07-publish1"]},
@@ -75,7 +76,8 @@
           "anyOf": [
             {"required": ["cloudflared_enabled"]},
             {"required": ["restic_enabled"]},
-            {"required": ["restic_timer_enabled"]}
+            {"required": ["restic_timer_enabled"]},
+            {"required": ["publisher_canary_timer_enabled"]}
           ]
         }
       }

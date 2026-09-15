@@ -30,6 +30,7 @@ NAME = re.compile(r"^dholbeat-restore-[a-z0-9][a-z0-9-]{0,31}$")
 MAX_ARCHIVE = 2 * 1024**3
 HEADROOM = 8 * 1024**3
 STATE_TAG = "application-state"
+CANARY_OBSERVER = Path('/usr/local/sbin/dholbeat-publisher-canary')
 
 
 class BackupError(RuntimeError):
@@ -231,6 +232,17 @@ class Restic:
         self.command("check")
 
 
+def canary_maintenance(action):
+    observer = CANARY_OBSERVER
+    if observer.is_file():
+        # A capacity failure must not prevent the recovery backup itself.
+        try:
+            subprocess.run([str(observer), action], stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, timeout=60, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
+
 def backup(document, restic, visibility_control=None):
     if visibility_control is not None and (not document['publisher_enabled']
             or not re.fullmatch('[a-zA-Z0-9_-]{1,80}', visibility_control)):
@@ -243,6 +255,7 @@ def backup(document, restic, visibility_control=None):
         raise BackupError("staging is not empty; inspect interrupted run before retry")
     started = time.monotonic()
     application = None
+    observed_maintenance = False
     try:
         with tempfile.TemporaryDirectory(prefix="backup-", dir=stage) as temporary:
             work = Path(temporary)
@@ -267,6 +280,8 @@ def backup(document, restic, visibility_control=None):
             if document["publisher_enabled"]:
                 adapters = publisher_area(document)
                 application = adapters / backup_id
+                observed_maintenance = True
+                canary_maintenance('maintenance-begin')
                 argv = ["/usr/local/sbin/dholbeat-publisher-state", "--staging-root", str(adapters),
                         "--lock", "/run/lock/dholbeat-publisher-adapter.lock", "backup", "--backup-id", backup_id]
                 if visibility_control:
@@ -290,6 +305,8 @@ def backup(document, restic, visibility_control=None):
     finally:
         if application is not None and application.exists():
             shutil.rmtree(application)
+        if observed_maintenance:
+            canary_maintenance('maintenance-end')
     result = {"schema_version": 1, "host_id": document["host_id"], "snapshot_id": identifier,
               "success_epoch": time.time(), "staging_bytes": size,
               "duration_seconds": round(time.monotonic() - started, 3), "last_attempt_failed": False}

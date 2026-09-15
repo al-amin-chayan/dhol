@@ -65,6 +65,25 @@ def retained_snapshots(snapshots, catalog):
     return keep
 
 
+def restore_file(snapshot, name, quota, env, destination):
+    with destination.open("xb") as output, open(os.devnull, "wb") as errors:
+        process = subprocess.Popen(["restic", "--no-cache", "dump", snapshot, "/" + name],
+            env=env, stdout=subprocess.PIPE, stderr=errors)
+        try:
+            size = 0
+            while chunk := process.stdout.read(1024**2):
+                size += len(chunk)
+                if size > quota:
+                    raise ValueError("restored source exceeds quota")
+                output.write(chunk)
+            if process.wait(timeout=600):
+                raise ValueError("source recovery failed")
+        finally:
+            if process.poll() is None:
+                process.kill()
+            process.wait()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=["init", "upload", "download"])
@@ -128,22 +147,7 @@ def main():
             if not any(v.get("id") == args.snapshot for v in snapshots):
                 raise ValueError("source snapshot absent or wrong purpose")
             for name, quota in (("repository.bundle", MAX_BYTES), ("manifest.json", 1024**2)):
-                with Path("/escrow", name).open("xb") as output, open(os.devnull, "wb") as errors:
-                    process = subprocess.Popen(["restic", "--no-cache", "dump", args.snapshot, "/escrow/" + name],
-                        env=env, stdout=subprocess.PIPE, stderr=errors)
-                    try:
-                        size = 0
-                        while chunk := process.stdout.read(1024**2):
-                            size += len(chunk)
-                            if size > quota:
-                                raise ValueError("restored source exceeds quota")
-                            output.write(chunk)
-                        if process.wait(timeout=600):
-                            raise ValueError("source recovery failed")
-                    finally:
-                        if process.poll() is None:
-                            process.kill()
-                        process.wait()
+                restore_file(args.snapshot, name, quota, env, Path("/escrow", name))
             result = {"snapshot_id": args.snapshot, "downloaded": True}
         print(json.dumps(result, sort_keys=True))
     except (OSError, ValueError, KeyError, StopIteration, subprocess.SubprocessError):

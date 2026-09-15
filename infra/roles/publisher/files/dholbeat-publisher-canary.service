@@ -1,0 +1,17 @@
+[Unit]
+Description=Dholbeat bounded seven-day publisher capacity observation
+After=docker.service
+OnFailure=dholbeat-publisher-canary-alert.service
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+ExecStart=/usr/local/sbin/dholbeat-publisher-canary sample
+TimeoutStartSec=90
+MemoryMax=64M
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/dholbeat/publisher /run/lock

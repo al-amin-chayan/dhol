@@ -154,7 +154,7 @@ def test_production_publish_inventory_enables_only_its_declared_connector() -> N
     settings = inventory["all"]["children"]["publisher"]["vars"]
     assert settings["cloudflared_enabled"] is True
     assert settings["restic_enabled"] is True
-    assert settings["restic_timer_enabled"] is False
+    assert settings["restic_timer_enabled"] is True
     assert settings["publisher_enabled"] is False
     assert "scope" not in settings and "host_ids" not in settings
 

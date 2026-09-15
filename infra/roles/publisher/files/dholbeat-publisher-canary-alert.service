@@ -1,0 +1,6 @@
+[Unit]
+Description=Report a failed Dholbeat publisher capacity canary
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/logger -p daemon.err "DHOLBEAT_PUBLISHER_CANARY_FAILED: admission blocked; inspect /var/lib/dholbeat/publisher/canary.json and the publisher operations runbook"

@@ -522,7 +522,9 @@ def backup(
         raise
     finally:
         restart_services = ["postiz-redis"]
-        if should_restart_senders:
+        # Freeze writes its durable marker before waiting for the host lock.
+        # A freeze requested during this backup must suppress sender recovery.
+        if should_restart_senders and not kill_switch.exists():
             restart_services.extend(["temporal", "postiz"])
         try:
             runner.run(

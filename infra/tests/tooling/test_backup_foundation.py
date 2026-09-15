@@ -238,7 +238,7 @@ def test_failed_dump_does_not_capture_partial_state(document, restic, monkeypatc
     assert json.loads(restic.command('snapshots', '--json')) == []
 
 
-def test_publisher_dump_stream_and_disposable_staging_are_separate(document, restic, monkeypatch):
+def test_publisher_dump_stream_and_disposable_staging_are_separate(document, restic, monkeypatch, tmp_path):
     restic.initialize()
     application = Path(document['publisher_staging'])
     application.mkdir()
@@ -246,6 +246,19 @@ def test_publisher_dump_stream_and_disposable_staging_are_separate(document, res
     monkeypatch.setattr(b, 'publisher_area', lambda doc: application)
     original_run = b.run
     calls = []
+    observer = tmp_path / 'failing-capacity-observer'
+    observer.write_text('fixture')
+    monkeypatch.setattr(b, 'CANARY_OBSERVER', observer)
+    actual_subprocess = subprocess.run
+    maintenance = []
+
+    def failed_observer(argv, **kwargs):
+        if argv[0] == str(observer):
+            maintenance.append(argv[1])
+            return subprocess.CompletedProcess(argv, 1)
+        return actual_subprocess(argv, **kwargs)
+
+    monkeypatch.setattr(b.subprocess, 'run', failed_observer)
 
     def adapter(argv, **kwargs):
         if argv[0] != '/usr/local/sbin/dholbeat-publisher-state':
@@ -268,6 +281,7 @@ def test_publisher_dump_stream_and_disposable_staging_are_separate(document, res
     assert not list(application.iterdir())
     assert b.restore(document, restic, result['snapshot_id'], 'dholbeat-restore-adapter', 5200)['application_restore_verified']
     assert len(calls) == 2
+    assert maintenance == ['maintenance-begin', 'maintenance-end']
     assert not list(Path(document['restore_root']).iterdir())
 
 
@@ -406,3 +420,22 @@ def test_application_restore_permissions_survive_restrictive_service_umask(tmp_p
     assert redis.stat().st_mode & 0o777 == 0o700
     assert sql.stat().st_mode & 0o777 == 0o600
     assert segment.read_bytes() == b'visibility-fixture'
+
+
+def test_real_restic_source_download_uses_snapshot_root_paths(document, restic, tmp_path):
+    restic.initialize()
+    source = tmp_path / 'source-upload'
+    source.mkdir()
+    expected = {'repository.bundle': b'bounded-git-bundle-fixture',
+                'manifest.json': b'{"schema_version":1}'}
+    for name, content in expected.items():
+        (source / name).write_bytes(content)
+    result = subprocess.run([*restic.argv, 'backup', '--json', *expected],
+                            cwd=source, env=restic.env, capture_output=True, check=True)
+    summary = next(json.loads(line) for line in result.stdout.splitlines()
+                   if json.loads(line).get('message_type') == 'summary')
+    snapshot = summary['snapshot_id']
+    for name, content in expected.items():
+        destination = tmp_path / ('restored-' + name)
+        escrow.restore_file(snapshot, name, 1024, restic.env, destination)
+        assert destination.read_bytes() == content

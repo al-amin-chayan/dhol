@@ -140,3 +140,17 @@ def test_live_machine_probe_targets_versioned_postiz_api(monkeypatch):
     assert result["publisher-admin-api"]["service-token"] == "accepted"
     assert any(path == "/api/public/v1/integrations" and headers.get("Authorization")
                for path, headers in calls)
+
+
+@pytest.mark.parametrize('status,body,expected', [
+    (403, b'', True),
+    (400, b'<Error><Code>InvalidArgument</Code><Message>Authorization</Message></Error>', True),
+    (400, b'<Error><Code>InvalidArgument</Code><Message>Bucket</Message></Error>', False),
+    (400, b'<Error><Code>AccessDenied</Code><Message>Authorization</Message></Error>', False),
+    (400, b'bad request', False), (404, b'', False), (200, b'object bytes', False),
+    (400, b'x' * 4097, False),
+    (400, b'<!DOCTYPE Error><Error><Code>InvalidArgument</Code><Message>Authorization</Message></Error>', False),
+])
+def test_private_s3_denial_requires_exact_authentication_error(status, body, expected):
+    from probes import private_s3_denied
+    assert private_s3_denied(Response(status, body=body)) is expected

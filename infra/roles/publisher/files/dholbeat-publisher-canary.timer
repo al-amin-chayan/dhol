@@ -1,0 +1,11 @@
+[Unit]
+Description=Sample the Dholbeat publisher capacity canary every five minutes
+
+[Timer]
+OnBootSec=2m
+OnUnitActiveSec=5m
+AccuracySec=30s
+Unit=dholbeat-publisher-canary.service
+
+[Install]
+WantedBy=timers.target

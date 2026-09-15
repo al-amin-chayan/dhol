@@ -21,7 +21,9 @@ import tempfile
 MAX_BUNDLE = 256 * 1024**2
 TAG = re.compile(r"^infra-prod-[0-9]{8}-[1-9][0-9]*$")
 SNAPSHOT = re.compile(r"^[a-f0-9]{64}$")
-ROOT = Path(__file__).resolve().parents[2]
+# Standalone-kit imports need no repository hierarchy for recovery.
+_PARENTS = Path(__file__).resolve().parents
+ROOT = _PARENTS[2] if len(_PARENTS) > 2 else _PARENTS[0]
 
 
 class BundleError(RuntimeError):

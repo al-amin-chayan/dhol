@@ -1,5 +1,6 @@
 ---
 publisher_enabled: false
+publisher_canary_timer_enabled: false
 publisher_selected_adapter: postiz-v2.23.0
 publisher_registration_disabled: true
 publisher_main_url: https://publish.chayan.me

@@ -105,8 +105,29 @@
       dest: /usr/local/sbin/dholbeat-publisher-control
     - src: publisher_state.py
       dest: /usr/local/sbin/dholbeat-publisher-state
+    - src: publisher_canary.py
+      dest: /usr/local/sbin/dholbeat-publisher-canary
   loop_control:
     label: "{{ item.dest }}"
+  tags: [publisher, publisher-files]
+
+- name: Install the bounded publisher capacity monitoring units
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - dholbeat-publisher-canary.service
+    - dholbeat-publisher-canary.timer
+    - dholbeat-publisher-canary-alert.service
+  tags: [publisher, publisher-files]
+
+- name: Reload installed publisher capacity units without starting a canary
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: not ansible_check_mode
   tags: [publisher, publisher-files]
 
 - name: Render only the publisher-scoped runtime values
@@ -147,3 +168,29 @@
   ansible.builtin.import_tasks: verify.yml
   when: not ansible_check_mode
   tags: [publisher, publisher-verify]
+
+- name: Inspect evidence before managing the capacity canary timer
+  ansible.builtin.stat:
+    path: "{{ publisher_state_directory }}/canary.json"
+  register: publisher_canary_evidence
+  tags: [publisher, publisher-canary]
+
+- name: Require an operator-started measurement before enabling its timer
+  ansible.builtin.assert:
+    that:
+      - publisher_canary_evidence.stat.isreg | default(false)
+      - not publisher_canary_evidence.stat.islnk | default(false)
+    fail_msg: Run the documented fixture acceptance and explicitly start the canary before enabling its timer.
+    quiet: true
+  when:
+    - not ansible_check_mode
+    - publisher_canary_timer_enabled | default(false) | bool
+  tags: [publisher, publisher-canary]
+
+- name: Manage only the explicitly configured capacity canary timer
+  ansible.builtin.systemd_service:
+    name: dholbeat-publisher-canary.timer
+    enabled: "{{ publisher_canary_timer_enabled | default(false) | bool }}"
+    state: "{{ 'started' if publisher_canary_timer_enabled | default(false) | bool else 'stopped' }}"
+  when: not ansible_check_mode
+  tags: [publisher, publisher-canary]

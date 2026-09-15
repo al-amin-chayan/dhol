@@ -13,7 +13,7 @@ import yaml
 import operations as op
 from backend import NoRedirect
 from control_plane import require
-from probes import access_denied, request, run_live
+from probes import access_denied, private_s3_denied, request, run_live
 from receipt import normalize
 
 
@@ -46,7 +46,7 @@ def probes(manifest, inputs):
         outcomes[kind] = 'denied'
     for bucket in (b['name'] for b in manifest['buckets'] if not b['public']):
         response = request(op.ACCOUNT + '.r2.cloudflarestorage.com', '/' + bucket + '/__disposable-private-object')
-        require(response.status == 403, 'backup bucket anonymous read denial was not proven')
+        require(private_s3_denied(response), 'backup bucket anonymous read denial was not proven')
         outcomes[bucket + '-anonymous'] = 'denied'
     return outcomes
 
@@ -57,7 +57,8 @@ def media_probe(inputs):
         return 'reviewed-media-fixture-required'
     require(re.fullmatch('/wp06b-fixture/[a-z0-9-]{1,64}', path)
             and re.fullmatch('[a-f0-9]{64}', expected), 'invalid media fixture coordinates')
-    http = urllib.request.Request('https://media.chayan.me' + path, method='GET')
+    http = urllib.request.Request('https://media.chayan.me' + path,
+        headers={'User-Agent': 'Dholbeat-production-boundary-verifier/1.0'}, method='GET')
     try:
         response = urllib.request.build_opener(NoRedirect).open(http, timeout=15)
     except urllib.error.HTTPError:

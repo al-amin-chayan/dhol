@@ -3,20 +3,20 @@ scope: publisher
 host_ids: [publish-1]
 public_endpoint_ids: [publisher-admin-api]
 
-# Install the reviewed WP-06B/WP-07 boundary before admitting the publisher.
-# Timers remain stopped until real encrypted backup/source restore receipts exist.
+# Functional rollout is live under the founder's explicit deployment override.
+# Normal applies still require independently verified, cross-reviewed receipts.
 cloudflared_enabled: true
 restic_enabled: true
-restic_timer_enabled: false
+restic_timer_enabled: true
 
-# WP-13 desired state is present but cannot activate until these live gates
-# produce reviewed receipts on publish-1: #45/WP-05D, #14/WP-06B and #15/WP-07.
+# Preserve every dependency gate; do not replace missing receipts with flags.
 publisher_enabled: false
+publisher_canary_timer_enabled: false
 publisher_activation_blockers: [wp05d-publish1, wp06b-publish1, wp07-publish1]
 publisher_selected_adapter: postiz-v2.23.0
 publisher_registration_disabled: true
 publisher_main_url: https://publish.chayan.me
 publisher_loopback_port: 5000
-publisher_media_account_id: ""
-publisher_media_bucket: ""
-publisher_media_public_url: ""
+publisher_media_account_id: "7512591000a1e57593bc784dad59bfc0"
+publisher_media_bucket: dholbeat-publisher-media
+publisher_media_public_url: https://media.chayan.me
