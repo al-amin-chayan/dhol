@@ -12,6 +12,24 @@ services:
   postiz:
     <<: *runtime
     image: ghcr.io/gitroomhq/postiz-app:v2.23.0@sha256:785f97312f66a347fb96cdccc4ded5a33ced69a672c89a9adc8054e7d6a21dc5
+    # Run the pinned migration and all three vendor application start scripts.
+    # PM2 runtime forwards logs to Docker and avoids nested pnpm supervisors.
+    command:
+      - sh
+      - -ec
+      - >-
+        sed -i 's/worker_processes[[:space:]]*auto;/worker_processes 2;/' /etc/nginx/nginx.conf;
+        ln -sf /proc/1/fd/1 /var/log/nginx/access.log;
+        ln -sf /proc/1/fd/2 /var/log/nginx/error.log;
+        nginx -t;
+        nginx;
+        node /app/node_modules/prisma/build/index.js db push --accept-data-loss
+        --schema ./libraries/nestjs-libraries/src/database/prisma/schema.prisma;
+        mkdir -p /tmp/pm2;
+        ln -sf /proc/1/fd/1 /tmp/pm2/pm2.log;
+        node -e 'require("fs").writeFileSync("/tmp/dholbeat-pm2.json", JSON.stringify({apps:["frontend","backend","orchestrator"].map(name =>
+        ({name,cwd:"/app/apps/"+name,script:"pnpm",args:"start",interpreter:"none",kill_timeout:10000,out_file:"/dev/null",error_file:"/dev/null"}))}));';
+        exec pm2-runtime start /tmp/dholbeat-pm2.json --raw
     environment:
       MAIN_URL: "${PUBLISHER_MAIN_URL:?PUBLISHER_MAIN_URL is required}"
       FRONTEND_URL: "${PUBLISHER_MAIN_URL:?PUBLISHER_MAIN_URL is required}"
@@ -26,6 +44,8 @@ services:
       DISABLE_REGISTRATION: "${POSTIZ_DISABLE_REGISTRATION:?POSTIZ_DISABLE_REGISTRATION is required}"
       API_LIMIT: "3000"
       NX_ADD_PLUGINS: "false"
+      NODE_OPTIONS: --max-old-space-size=384 --require=/run/dholbeat-postiz/runtime.cjs
+      PM2_HOME: /tmp/pm2
       STORAGE_PROVIDER: cloudflare
       UPLOAD_DIRECTORY: ""
       NEXT_PUBLIC_UPLOAD_DIRECTORY: ""
@@ -37,6 +57,11 @@ services:
       CLOUDFLARE_REGION: auto
     ports:
       - "127.0.0.1:${PUBLISHER_LOOPBACK_PORT:?PUBLISHER_LOOPBACK_PORT is required}:5000"
+    volumes:
+      - type: bind
+        source: ./runtime.cjs
+        target: /run/dholbeat-postiz/runtime.cjs
+        read_only: true
     networks: [publisher-edge, publisher-state]
     tmpfs:
       - /tmp:size=268435456,mode=1777
@@ -50,15 +75,21 @@ services:
         - node
         - -e
         - >-
-          fetch('http://127.0.0.1:5000/api/user/self')
-          .then((response) => process.exit(response.ok || response.status === 401 ? 0 : 1))
+          Promise.all([
+          fetch('http://127.0.0.1:5000/api/user/self', {signal:AbortSignal.timeout(4000)})
+          .then(response => response.ok || response.status === 401),
+          fetch('http://127.0.0.1:4200/', {signal:AbortSignal.timeout(4000)})
+          .then(response => response.ok),
+          fetch('http://127.0.0.1:3002/health/status', {signal:AbortSignal.timeout(4000)})
+          .then(response => response.ok)])
+          .then(results => process.exit(results.every(Boolean) ? 0 : 1))
           .catch(() => process.exit(1))
       interval: 10s
       timeout: 5s
       retries: 60
       start_period: 5m
     cpus: 1.50
-    mem_limit: 1400m
+    mem_limit: 2816m
     pids_limit: 512
     stop_grace_period: 2m
 
@@ -79,7 +110,7 @@ services:
       timeout: 3s
       retries: 60
     cpus: 0.75
-    mem_limit: 640m
+    mem_limit: 256m
     pids_limit: 128
     stop_grace_period: 1m
 
@@ -130,7 +161,7 @@ services:
       timeout: 3s
       retries: 60
     cpus: 0.50
-    mem_limit: 512m
+    mem_limit: 256m
     pids_limit: 128
     stop_grace_period: 1m
 
@@ -144,7 +175,7 @@ services:
       cluster.routing.allocation.disk.watermark.low: 1gb
       cluster.routing.allocation.disk.watermark.high: 768mb
       cluster.routing.allocation.disk.watermark.flood_stage: 512mb
-      ES_JAVA_OPTS: -Xms512m -Xmx512m
+      ES_JAVA_OPTS: -Xms256m -Xmx256m
       xpack.security.enabled: "false"
       path.repo: /snapshots
     volumes:
@@ -162,7 +193,7 @@ services:
     ulimits:
       nofile: {soft: 65536, hard: 65536}
     cpus: 1.00
-    mem_limit: 1024m
+    mem_limit: 640m
     pids_limit: 256
     stop_grace_period: 2m
 
@@ -191,7 +222,7 @@ services:
       retries: 60
       start_period: 2m
     cpus: 1.00
-    mem_limit: 768m
+    mem_limit: 384m
     pids_limit: 256
     stop_grace_period: 2m
 

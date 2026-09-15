@@ -339,6 +339,28 @@ class ArchiveWriter:
         return self.output.write(data)
 
 
+def application_restore_permissions(publisher):
+    # tar's data filter intentionally ignores directory modes. Under the
+    # service's 0077 umask, Elasticsearch could not traverse restored snapshots.
+    os.chown(publisher, 1000, 0)
+    publisher.chmod(0o770)
+    for application in publisher.iterdir():
+        if not application.is_dir() or application.is_symlink():
+            raise BackupError("invalid restored application directory")
+        application.chmod(0o750)
+        visibility = application / "visibility"
+        if visibility.is_dir():
+            for path in [visibility, *visibility.rglob("*")]:
+                if path.is_symlink() or not (path.is_file() or path.is_dir()):
+                    raise BackupError("invalid restored Visibility path")
+                os.chown(path, 0, 0)
+                path.chmod(0o750 if path.is_dir() else 0o640)
+        redis = application / "redis"
+        if redis.is_dir():
+            os.chown(redis, 0, 0)
+            redis.chmod(0o700)
+
+
 def restore(document, restic, identifier, name, port):
     if not ID.fullmatch(identifier) or not NAME.fullmatch(name) or not 5200 <= port <= 5299:
         raise BackupError("restore requires a full snapshot ID, named disposable target, and reserved loopback port")
@@ -384,8 +406,7 @@ def restore(document, restic, identifier, name, port):
             raise BackupError("restored retained bytes differ from the backup receipt")
         if receipt["publisher"]:
             project = name.replace("dholbeat-restore-", "dholbeat-publisher-restore-", 1)
-            os.chown(target / 'publisher', 1000, 0)
-            os.chmod(target / 'publisher', 0o770)
+            application_restore_permissions(target / 'publisher')
             run(["/usr/local/sbin/dholbeat-publisher-state", "--staging-root", str(target / "publisher"),
                  "--lock", "/run/lock/dholbeat-publisher-adapter.lock", "restore-disposable",
                  "--backup-id", receipt["backup_id"], "--project-name", project, "--loopback-port", str(port)],

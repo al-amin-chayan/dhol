@@ -113,3 +113,30 @@ def test_missing_or_bypass_access_policy_fails():
         verify_founder_policy(
             app, {**policy, "decision": "bypass"}, "team.chayan.me", "mail@chayan.me"
         )
+
+
+def test_live_machine_probe_targets_versioned_postiz_api(monkeypatch):
+    import probes
+
+    calls = []
+
+    def request(hostname, path="/", headers=None):
+        calls.append((path, headers or {}))
+        if (headers or {}).get("Authorization") == "fixture-application-key":
+            # The pinned Postiz route is versioned; an old unversioned URL
+            # cannot accidentally satisfy the positive admission probe.
+            return Response(200 if path == "/api/public/v1/integrations" else 404)
+        return Response(403)
+
+    monkeypatch.setattr(probes, "request", request)
+    manifest = {"routes": [{"id": "publisher-admin-api", "status": "adopted",
+                            "hostname": "publish.chayan.me", "host_id": "publish-1",
+                            "origin": "http://127.0.0.1:5000", "machine_path": "/api/public/*"}]}
+    result = probes.run_live(manifest, {
+        "N8N_ACCESS_CLIENT_ID": "fixture-service-id",
+        "N8N_ACCESS_CLIENT_SECRET": "fixture-service-secret",
+        "PUBLISHER_API_KEY": "fixture-application-key",
+    })
+    assert result["publisher-admin-api"]["service-token"] == "accepted"
+    assert any(path == "/api/public/v1/integrations" and headers.get("Authorization")
+               for path, headers in calls)

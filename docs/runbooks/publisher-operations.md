@@ -18,6 +18,60 @@ any of these receipts is absent or unverified on `publish-1`:
 Safe repository checks may run before those gates. No command in this runbook
 may synthesize a receipt or use an empty placeholder to bypass one.
 
+## Bounded container startup
+
+The six-container memory ceilings total 4,608 MiB: Postiz 2,816, both
+PostgreSQL services 256 each, Redis 256, Temporal 384, and Elasticsearch 640.
+Elasticsearch uses a 256 MiB fixed heap. These are resource ceilings on the
+existing host; the seven-day canary must still measure actual peak memory,
+OOM events, disk usage, and update headroom before accepting this sizing.
+
+Postiz starts nginx with two workers. The LXC guest can expose the provider's
+CPU count, so nginx's automatic worker count does not represent the container's
+CPU quota. nginx logs and PM2 application logs go to the bounded Docker log
+stream. PM2 metadata lives in the existing 256 MiB `/tmp` tmpfs. Startup retains
+the pinned Prisma migration and the frontend, backend, and orchestrator vendor
+start scripts, using `pm2-runtime` to supervise them and forward shutdown.
+The Prisma CLI is the image's bundled `6.5.0` executable. Do not use the vendor's
+`pnpm dlx` wrapper: it downloads packages during startup and cannot run in the
+restore network, where outbound access is deliberately blocked.
+The container health check requires all three applications, including the
+orchestrator's Temporal-backed `/health/status`, rather than accepting a live
+API while its scheduler repeatedly dies.
+
+`runtime.cjs` is mounted read-only and loaded through `NODE_OPTIONS`. It tunes
+only the orchestrator, preserving every provider queue and activity mapping.
+The pinned SDK's original workflow bundler is reused once for identical
+workflow paths, converters, interceptors, and ignored-module lists; explicit
+bundles, executable webpack hooks, and plugins retain the original behavior.
+The original bundler includes the SDK's default interceptors and converters,
+so this avoids reconstructing their behavior in a separate compiler. The
+cache permits eight configurations and fails closed beyond that bound.
+Per-worker workflow/activity slots and polling are capped at two, workflow
+caches at ten, and workflow thread pools at one. Stricter provider slot limits
+remain intact. Every Node process has a 384 MiB old-space ceiling; native,
+buffer, and worker-thread memory remain subject to the container's hard limit.
+
+Because bundle reuse wraps a private SDK method, both SDK version `1.15.0` and
+its exact implementation SHA-256 must match before tuning is installed. An
+image/SDK update requires reviewing and revalidating this guard, the scheduling
+fixture matrix, and the restore/rollback drill. Never simply update the digest
+to suppress a startup failure. The runtime tests exercise the real SDK guard
+and separate compiler mocks under the pinned Postiz image's Node runtime:
+
+```sh
+RUNTIME_MODULE=/run/dholbeat-postiz/runtime.cjs node --test runtime.test.cjs
+```
+
+Use a disposable copy of `infra/tests/publisher/tests/runtime.test.cjs` in that
+image; remove it after verification. Tests do not call a social provider.
+
+The backup service keeps `UMask=0077`. Application staging explicitly permits
+group traversal for Elasticsearch's UID 1000/GID 0, and its snapshot directory
+is explicitly writable by that identity. SQL exports are created exclusively
+with mode 0600; copied Redis state is enclosed in a root-owned 0700 directory.
+These modes are explicit because service and interactive-shell umasks differ.
+
 ## Prepare activation
 
 1. Confirm `docs/decisions/publisher-selection.md` still records Postiz

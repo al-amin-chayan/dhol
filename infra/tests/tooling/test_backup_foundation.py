@@ -380,3 +380,29 @@ def test_installation_is_opt_in_and_core_backup_untouched():
     assert "dholbeat_host_id == 'publish-1'" in role
     assert "wp07-publish1.yml" in role
     assert "core-1" not in role
+
+
+def test_application_restore_permissions_survive_restrictive_service_umask(tmp_path, monkeypatch):
+    publisher = tmp_path / 'publisher'
+    application = publisher / 'backup-fixture'
+    previous = os.umask(0o077)
+    try:
+        visibility = application / 'visibility' / 'indices'
+        visibility.mkdir(parents=True)
+        segment = visibility / 'segment'
+        segment.write_bytes(b'visibility-fixture')
+        redis = application / 'redis'
+        redis.mkdir()
+        sql = application / 'postiz.sql'
+        sql.write_text('private-fixture')
+    finally:
+        os.umask(previous)
+    monkeypatch.setattr(b.os, 'chown', lambda *args: None)
+    b.application_restore_permissions(publisher)
+    assert publisher.stat().st_mode & 0o777 == 0o770
+    assert application.stat().st_mode & 0o777 == 0o750
+    assert visibility.stat().st_mode & 0o777 == 0o750
+    assert segment.stat().st_mode & 0o777 == 0o640
+    assert redis.stat().st_mode & 0o777 == 0o700
+    assert sql.stat().st_mode & 0o777 == 0o600
+    assert segment.read_bytes() == b'visibility-fixture'
