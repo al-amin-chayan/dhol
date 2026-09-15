@@ -1,4 +1,30 @@
 ---
+- name: Install the userspace ext4 driver for LXC-compatible bounded scratch
+  ansible.builtin.apt:
+    name: fuse2fs
+    state: present
+    install_recommends: false
+
+- name: Require an accessible FUSE device before reserving scratch space
+  ansible.builtin.command:
+    argv:
+      - /usr/bin/python3
+      - -c
+      - >-
+        import os;
+        fd=os.open('/dev/fuse', os.O_RDWR);
+        os.close(fd)
+  changed_when: false
+  check_mode: false
+
+- name: Install the restricted scratch mount helper
+  ansible.builtin.copy:
+    src: mount.dholbeat-fuse2fs
+    dest: /sbin/mount.dholbeat-fuse2fs
+    owner: root
+    group: root
+    mode: "0750"
+
 - name: Inspect the bounded publisher dump image
   ansible.builtin.stat:
     path: /var/lib/dholbeat/restic/application.img

@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import os
+import runpy
 from pathlib import Path
 import shutil
 import sqlite3
@@ -29,6 +30,29 @@ def module(name, relative):
 b = module("backup_foundation", "infra/roles/restic/files/backup.py")
 escrow = module("source_escrow_foundation", "scripts/lib/source_escrow.py")
 operator = module("backup_operator_foundation", "scripts/lib/backup_operator.py")
+
+
+@pytest.mark.parametrize("args", [
+    [],
+    ["/tmp/other.img", "/var/lib/dholbeat/restic/application", "-o", "nosuid,nodev,noexec"],
+    ["/var/lib/dholbeat/restic/application.img", "/tmp/other", "-o", "nosuid,nodev,noexec"],
+    ["/var/lib/dholbeat/restic/application.img", "/var/lib/dholbeat/restic/application", "-o", "ro"],
+    ["/var/lib/dholbeat/restic/application.img", "/var/lib/dholbeat/restic/application", "-o", "suid,exec"],
+])
+def test_scratch_mount_helper_rejects_other_paths_and_unsafe_options(args, monkeypatch):
+    helper = runpy.run_path(str(ROOT / "infra/roles/restic/files/mount.dholbeat-fuse2fs"))
+    monkeypatch.setattr(os, "execv", lambda *args: pytest.fail("rejected mount executed"))
+    with pytest.raises(SystemExit, match="Refusing"):
+        helper["main"](args)
+
+
+def test_scratch_mount_helper_enforces_container_permissions_and_disk_backing(monkeypatch):
+    helper = runpy.run_path(str(ROOT / "infra/roles/restic/files/mount.dholbeat-fuse2fs"))
+    executed = []
+    monkeypatch.setattr(os, "execv", lambda path, args: executed.append((path, args)))
+    helper["main"]([helper["IMAGE"], helper["TARGET"], "-o", "rw,nosuid,nodev,noexec"])
+    assert executed == [("/usr/bin/fuse2fs", ["fuse2fs", "-o",
+        "rw,allow_other,default_permissions,nosuid,nodev,noexec", helper["IMAGE"], helper["TARGET"]])]
 
 
 def test_readonly_first_install_plan_needs_no_download_directory_or_timer_units(tmp_path):

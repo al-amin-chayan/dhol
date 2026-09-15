@@ -1,0 +1,27 @@
+#!/usr/bin/python3
+"""mount(8) helper for one bounded, disposable publisher scratch image.
+
+The host is LXC and does not expose loop devices. fuse2fs keeps the ext4
+image's filesystem capacity limit without allocating a RAM-backed filesystem.
+This helper deliberately cannot mount arbitrary images or relax mount flags.
+"""
+import os
+import sys
+
+IMAGE = "/var/lib/dholbeat/restic/application.img"
+TARGET = "/var/lib/dholbeat/restic/application"
+ALLOWED = {"rw", "nosuid", "nodev", "noexec"}
+
+
+def main(args):
+    if (len(args) != 4 or args[:3] != [IMAGE, TARGET, "-o"]
+            or not set(args[3].split(",")) <= ALLOWED):
+        raise SystemExit("Refusing unsupported scratch mount arguments")
+    os.execv("/usr/bin/fuse2fs", [
+        "fuse2fs", "-o",
+        "rw,allow_other,default_permissions,nosuid,nodev,noexec", IMAGE, TARGET,
+    ])
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
